@@ -1,0 +1,45 @@
+site_name: Duragraph Documentation
+site_description: "Documentation for the Duragraph OSS project"
+site_author: "Duragraph Contributors"
+
+repo_url: "https://github.com/duragraph/duragraph"
+repo_name: "duragraph/duragraph"
+edit_uri: "edit/main/docs/"
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - toc.integrate
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - footnotes
+  - meta
+  - toc:
+      permalink: "#"
+
+plugins:
+  - search
+  - awesome-pages
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - API: api.md
+  - Architecture:
+      - Overview: architecture/overview.md
+  - Operations:
+      - Observability: ops/observability.md
+      - Runbooks: ops/runbooks.md
+      - SLOs: ops/slos.md
+      - Security: ops/security.md
+  - Project:
+      - ADRs: project/adrs.md
+      - RFCs: project/rfcs.md
+      - Contributing: project/contributing.md
