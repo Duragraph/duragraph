@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/ir.schema.json",
+  "title": "Intermediate Representation (IR)",
+  "description": "Schema for describing IR graphs used in DuraGraph.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Version string of the IR schema."
+    },
+    "graph": {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "type": {
+                "type": "string",
+                "enum": ["entry", "llm_call", "tool", "decision", "end"]
+              },
+              "config": { "type": "object" }
+            },
+            "required": ["id", "type"]
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" },
+              "condition": { "type": "string" }
+            },
+            "required": ["from", "to"]
+          }
+        }
+      },
+      "required": ["nodes", "edges"]
+    },
+    "io": {
+      "type": "object",
+      "properties": {
+        "inputs": { "type": "object" },
+        "outputs": { "type": "object" }
+      },
+      "required": ["inputs", "outputs"]
+    },
+    "policies": {
+      "type": "object",
+      "properties": {
+        "timeouts": { "type": "string" },
+        "retries": { "type": "integer", "minimum": 0 },
+        "budget_tokens": { "type": "integer", "minimum": 0 },
+        "redactions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Arbitrary metadata attached to the IR."
+    }
+  },
+  "required": ["version", "graph", "io"]
+}

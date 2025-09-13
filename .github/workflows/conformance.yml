@@ -1,0 +1,23 @@
+name: Conformance Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Start services with Docker Compose
+        run: docker compose -f deploy/compose/docker-compose.yml up -d --build
+
+      - name: Run Conformance Tests
+        run: pytest -q tests/conformance
+
+      - name: Shutdown Docker Compose
+        if: always()
+        run: docker compose -f deploy/compose/docker-compose.yml down -v

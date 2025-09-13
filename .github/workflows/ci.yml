@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  unit_go:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.22"
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Go Unit Tests
+        run: go test ./... -cover
+
+  unit_py:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        working-directory: workers/python-adapter
+        run: poetry install
+
+      - name: Lint with Ruff
+        working-directory: workers/python-adapter
+        run: poetry run ruff check .
+
+      - name: Run Pytest
+        working-directory: workers/python-adapter
+        run: poetry run pytest -q
+
+  lint_misc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install linters
+        run: |
+          pip install yamllint markdownlint-cli
+
+      - name: Lint Workflows
+        run: yamllint .github/workflows
+
+      - name: Lint Docs
+        run: markdownlint docs

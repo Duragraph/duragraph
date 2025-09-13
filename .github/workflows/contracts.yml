@@ -1,0 +1,43 @@
+name: Contracts
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  openapi_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install spectral
+        run: npm install -g @stoplight/spectral-cli
+      - name: Lint OpenAPI spec
+        run: spectral lint schemas/openapi/duragraph.yaml
+
+  openapi_diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install openapi-diff
+        run: |
+          curl -sSL https://github.com/OpenAPITools/openapi-diff/releases/latest/download/openapi-diff-cli.jar -o openapi-diff.jar
+      - name: Compare OpenAPI specs
+        run: |
+          java -jar openapi-diff.jar \
+            --fail-on-incompatible \
+            tests/reference/langgraph-openapi.json \
+            schemas/openapi/duragraph.yaml
+
+  ir_validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - name: Install jsonschema
+        run: pip install jsonschema
+      - name: Validate IR examples
+        run: python scripts/dev/validate_ir.py

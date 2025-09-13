@@ -1,0 +1,247 @@
+openapi: 3.1.0
+info:
+  title: DuraGraph API
+  version: 0.1.0
+  description: |
+    Placeholder OpenAPI specification for DuraGraph, compatible with LangGraph Cloud.
+    All endpoints and schemas here should be extended in future iterations.
+servers:
+  - url: https://api.duragraph.local
+paths:
+  /assistants:
+    post:
+      summary: Create assistant
+      operationId: createAssistant
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Assistant'
+      responses:
+        '201':
+          description: Assistant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assistant'
+
+  /assistants/{id}:
+    get:
+      summary: Get assistant by ID
+      operationId: getAssistant
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Assistant found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assistant'
+
+  /threads:
+    post:
+      summary: Create thread
+      operationId: createThread
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Thread'
+      responses:
+        '201':
+          description: Thread created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+
+  /threads/{id}:
+    get:
+      summary: Get thread
+      operationId: getThread
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Thread found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+
+  /messages:
+    post:
+      summary: Post message to thread
+      operationId: postMessage
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Message'
+      responses:
+        '201':
+          description: Message posted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+
+  /runs:
+    post:
+      summary: Create run
+      operationId: createRun
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Run'
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+
+    get:
+      summary: Query runs by thread_id
+      operationId: queryRuns
+      parameters:
+        - name: thread_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Runs found
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Run'
+
+  /runs/{id}:
+    get:
+      summary: Get run by ID
+      operationId: getRun
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Run found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+
+  /stream:
+    get:
+      summary: Stream run events (SSE)
+      operationId: streamEvents
+      responses:
+        '200':
+          description: Server-Sent Event stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/Event'
+
+  /webhooks:
+    post:
+      summary: Create webhook
+      operationId: createWebhook
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  format: uri
+      responses:
+        '201':
+          description: Webhook created
+
+  /webhooks/test:
+    post:
+      summary: Test webhook delivery
+      operationId: testWebhook
+      responses:
+        '200':
+          description: Webhook test successful
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Assistant:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+    Thread:
+      type: object
+      properties:
+        id: { type: string }
+        created_at: { type: string, format: date-time }
+    Message:
+      type: object
+      properties:
+        id: { type: string }
+        thread_id: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+    Run:
+      type: object
+      properties:
+        id: { type: string }
+        thread_id: { type: string }
+        status: { type: string, enum: [pending, running, completed, failed] }
+    Step:
+      type: object
+      properties:
+        id: { type: string }
+        run_id: { type: string }
+        type: { type: string }
+        status: { type: string }
+    Event:
+      type: object
+      properties:
+        type: { type: string }
+        run_id: { type: string }
+        step: { $ref: '#/components/schemas/Step' }
+
+  responses:
+    Error:
+      description: Standard error payload
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              detail: { type: string }

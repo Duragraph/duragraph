@@ -1,0 +1,28 @@
+# Architecture Decision Records (ADRs)
+
+This file indexes all ADRs (Architecture Decision Records) for the Duragraph project.  
+ADRs record significant technical and architectural decisions, their context, and consequences.
+
+---
+
+## ADR Index
+
+- [0001: Use Temporal Search Attributes for Run Indexing](../adr/0001-use-temporal-search-attributes.md)
+- [0001-template](../adr/0001-template.md) (template for new ADRs)
+
+---
+
+## Process
+
+1. When making an architecture decision, add a new ADR in `docs/adr/`.
+2. Copy from [0001-template](../adr/0001-template.md).
+3. Update this index to link the new ADR.
+
+---
+
+## References
+
+- [RFC Process](rfcs.md)  
+- [Contributing Guide](contributing.md)  
+
+---

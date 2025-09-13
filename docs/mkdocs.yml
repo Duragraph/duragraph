@@ -1,45 +1,169 @@
 site_name: Duragraph Documentation
 site_description: "Documentation for the Duragraph OSS project"
 site_author: "Duragraph Contributors"
+site_url: "https://duragraph.ai/docs"
 
-repo_url: "https://github.com/duragraph/duragraph"
-repo_name: "duragraph/duragraph"
+repo_url: "https://github.com/adwiteeymauriya/duragraph"
+repo_name: "adwiteeymauriya/duragraph"
 edit_uri: "edit/main/docs/"
 
 theme:
   name: material
+  logo: "https://duragraph.ai/logo.png"
   features:
+    - toc.integrate
+    - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
     - navigation.expand
-    - toc.integrate
-    - content.code.copy
+    - navigation.path
+    - navigation.top
     - search.suggest
     - search.highlight
+    - search.share
+    - content.code.copy
+    - content.action.edit
+    - content.action.view
+    - content.tabs.link
+    - navigation.footer
+  palette:
+    - scheme: default
+      primary: "#2C2E7F"
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: "#2C2E7F"
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
 
 markdown_extensions:
-  - admonition
   - codehilite
-  - footnotes
   - meta
   - toc:
-      permalink: "#"
+      permalink: true
+      title: On this page
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.critic
+  - pymdownx.caret
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - footnotes
+  - def_list
+  - abbr
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 plugins:
+  - mike:
+      # These fields are all optional; the defaults are as below...
+      alias_type: symlink
+      redirect_template: null
+      deploy_prefix: ''
+      canonical_version: null
+      version_selector: true
+      css_dir: css
+      javascript_dir: js
   - search
-  - awesome-pages
-
+  - git-revision-date-localized:
+      fallback_to_build_date: true
+      custom_format: "%d. %B %Y"
+  - panzoom:
+      always_show_hint: true
+      hint_location: "top"
+      full_screen: true
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      effect: zoom
+      slide_effect: slide
+      width: 100%
+      height: auto
+      zoomable: true
+      draggable: true
+      skip_classes:
+        - custom-skip-class-name
+      # auto_themed: false
+      auto_caption: false
+      caption_position: bottom
+      background: white
+      shadow: true
+      manual: false
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/adwiteeymauriya/duragraph.git
+  version:
+    provider: mike
+  generator: false
 nav:
   - Home: index.md
-  - Getting Started: getting-started.md
-  - API: api.md
+  - Roadmap: roadmap.md
+  - User Guide:
+      - Quickstart: user-guide/quickstart.md
+      - Installation:
+          - Self-Hosted: user-guide/installation/self-hosted.md
+          - Duragraph Cloud: user-guide/installation/cloud.md
+          - Requirements: user-guide/installation/requirements.md
+      - Tutorials:
+          - First Workflow: user-guide/tutorials/first-workflow.md
+          - LangGraph Migration: user-guide/tutorials/langgraph-migration.md
+          - Multi-Agent Workflows: user-guide/tutorials/multi-agent.md
+          - Production Deployment: user-guide/tutorials/production-deploy.md
+      - Concepts:
+          - Workflows: user-guide/concepts/workflows.md
+          - Agents: user-guide/concepts/agents.md
+          - IR Format: user-guide/concepts/ir-format.md
+          - Observability: user-guide/concepts/observability.md
+      - SDKs:
+          - Python SDK: user-guide/sdks/python.md
+          - Go SDK: user-guide/sdks/go.md
+          - TypeScript SDK: user-guide/sdks/typescript.md
+  - API Reference:
+      - Overview: api-reference/overview.md
+      - REST API: api-reference/rest-api.md
+      - SSE Streaming: api-reference/sse-streaming.md
+      - Webhooks: api-reference/webhooks.md
+      - Examples: api-reference/examples.md
   - Architecture:
       - Overview: architecture/overview.md
+      - Components: architecture/components.md
+      - Data Flow: architecture/data-flow.md
+      - Security Model: architecture/security-model.md
   - Operations:
+      - Deployment: ops/deployment.md
       - Observability: ops/observability.md
+      - Security: ops/security.md
+      - Troubleshooting: ops/troubleshooting.md
       - Runbooks: ops/runbooks.md
       - SLOs: ops/slos.md
-      - Security: ops/security.md
-  - Project:
-      - ADRs: project/adrs.md
-      - RFCs: project/rfcs.md
+  - Development:
+      - Getting Started: development/getting-started.md
+      - Building from Source: development/building.md
+      - Testing: development/testing.md
       - Contributing: project/contributing.md
+      - RFCs: project/rfcs.md
+      - ADRs: project/adrs.md

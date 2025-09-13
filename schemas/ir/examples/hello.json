@@ -1,0 +1,37 @@
+{
+  "version": "0.1.0",
+  "graph": {
+    "nodes": [
+      { "id": "start", "type": "entry" },
+      { "id": "llm1", "type": "llm_call", "config": { "prompt": "Hello, world!" } },
+      { "id": "end", "type": "end" }
+    ],
+    "edges": [
+      { "from": "start", "to": "llm1" },
+      { "from": "llm1", "to": "end" }
+    ]
+  },
+  "io": {
+    "inputs": {
+      "text": {
+        "type": "string",
+        "description": "A greeting input"
+      }
+    },
+    "outputs": {
+      "response": {
+        "type": "string",
+        "description": "LLM output"
+      }
+    }
+  },
+  "policies": {
+    "timeouts": "30s",
+    "retries": 3,
+    "budget_tokens": 1000,
+    "redactions": []
+  },
+  "metadata": {
+    "example": "Hello World sample IR"
+  }
+}
