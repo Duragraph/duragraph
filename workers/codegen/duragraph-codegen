@@ -1,0 +1,73 @@
+#!/bin/bash
+# DuraGraph Codegen CLI
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." &> /dev/null && pwd)"
+
+function usage() {
+    echo "DuraGraph Codegen - Convert workflows to Temporal"
+    echo ""
+    echo "Usage: $0 <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  eino        Convert Eino workflow to Temporal Go worker"
+    echo "  langgraph   Convert LangGraph workflow to Temporal Python worker"
+    echo "  list        List available example workflows"
+    echo "  help        Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 eino --input examples/chatbot.json --output ./generated/chatbot"
+    echo "  $0 langgraph --input examples/data-processor.json --output ./generated/processor"
+}
+
+function cmd_eino() {
+    echo "🔄 Converting Eino workflow to Temporal Go worker..."
+    cd "$PROJECT_ROOT/workers/codegen/eino-to-temporal"
+    go run main.go "$@"
+}
+
+function cmd_langgraph() {
+    echo "🔄 Converting LangGraph workflow to Temporal Python worker..."
+    cd "$PROJECT_ROOT/workers/codegen/langgraph-to-temporal"
+    python main.py "$@"
+}
+
+function cmd_list() {
+    echo "📋 Available example workflows:"
+    echo ""
+    find "$PROJECT_ROOT/workers/templates" -name "*.json" | while read -r file; do
+        basename "$file" .json | sed 's/example-//'
+        echo "  Path: $file"
+        echo ""
+    done
+}
+
+function cmd_help() {
+    usage
+}
+
+# Main command dispatch
+case "${1:-help}" in
+    eino)
+        shift
+        cmd_eino "$@"
+        ;;
+    langgraph)
+        shift
+        cmd_langgraph "$@"
+        ;;
+    list)
+        cmd_list
+        ;;
+    help|--help|-h)
+        cmd_help
+        ;;
+    *)
+        echo "❌ Unknown command: $1"
+        echo ""
+        usage
+        exit 1
+        ;;
+esac

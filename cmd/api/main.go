@@ -1,16 +1,18 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 
-	"runtime/bridge"
+	"duragraph/runtime/bridge"
 )
 
 type Run struct {
@@ -25,16 +27,18 @@ type Run struct {
 
 var runStore = map[string]*Run{}
 
-func postRunHandler(w http.ResponseWriter, r *http.Request) {
+// Global bridge instance - now using the real runtime/bridge
+var globalBridge *bridge.Bridge
+
+func postRunHandler(c echo.Context) error {
 	var body struct {
 		ThreadID    string `json:"thread_id"`
 		AssistantID string `json:"assistant_id"`
 		Input       string `json:"input"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
-		return
+	if err := c.Bind(&body); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid json"})
 	}
 
 	id := uuid.New().String()
@@ -47,38 +51,73 @@ func postRunHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	runStore[id] = run
 
-	// Call into bridge to start the run (stub for now)
-	go bridge.StartRun(id, body.Input)
+	// Execute workflow via bridge
+	if globalBridge != nil {
+		ctx := context.Background()
+		req := bridge.WorkflowRequest{
+			RunID:       id,
+			ThreadID:    body.ThreadID,
+			AssistantID: body.AssistantID,
+			Input:       body.Input,
+			Config:      make(map[string]interface{}),
+		}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{"run_id": id})
+		result, err := globalBridge.ExecuteWorkflow(ctx, req)
+		if err != nil {
+			log.Printf("Failed to start workflow: %v", err)
+			run.Status = "failed"
+			run.LastError = err.Error()
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to start workflow"})
+		}
+
+		// Update run status from bridge result
+		run.Status = result.Status
+		log.Printf("Workflow started successfully: %s", result.RunID)
+	}
+
+	return c.JSON(http.StatusAccepted, map[string]string{"run_id": id})
 }
 
-func getRunHandler(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+func getRunHandler(c echo.Context) error {
+	id := c.Param("id")
 	run, ok := runStore[id]
 	if !ok {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
 	}
-	json.NewEncoder(w).Encode(run)
+
+	// If bridge is available, query real workflow status
+	if globalBridge != nil {
+		ctx := context.Background()
+		result, err := globalBridge.QueryWorkflow(ctx, id)
+		if err == nil {
+			// Update run status from Temporal
+			run.Status = result.Status
+			if result.Error != "" {
+				run.LastError = result.Error
+			}
+			if result.EndTime != nil {
+				run.Completed = (result.Status == "completed" || result.Status == "failed")
+			}
+		}
+	}
+
+	return c.JSON(http.StatusOK, run)
 }
 
-func streamHandler(w http.ResponseWriter, r *http.Request) {
-	runID := r.URL.Query().Get("run_id")
+func streamHandler(c echo.Context) error {
+	runID := c.QueryParam("run_id")
 	if runID == "" {
-		http.Error(w, "missing run_id", http.StatusBadRequest)
-		return
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing run_id"})
 	}
 
+	w := c.Response()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	flusher, ok := w.(http.Flusher)
+
+	flusher, ok := w.Writer.(http.Flusher)
 	if !ok {
-		http.Error(w, "stream unsupported", http.StatusInternalServerError)
-		return
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "stream unsupported"})
 	}
 
 	// Simulate three events
@@ -98,15 +137,66 @@ func streamHandler(w http.ResponseWriter, r *http.Request) {
 		run.Status = "completed"
 		run.Completed = true
 	}
+
+	return nil
+}
+
+func healthHandler(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{
+		"status":  "healthy",
+		"version": "0.1.0",
+	})
 }
 
 func main() {
-	r := mux.NewRouter()
-	r.HandleFunc("/runs", postRunHandler).Methods("POST")
-	r.HandleFunc("/runs/{id}", getRunHandler).Methods("GET")
-	r.HandleFunc("/stream", streamHandler).Methods("GET")
+	// Initialize bridge with Temporal connection
+	temporalHost := os.Getenv("TEMPORAL_HOSTPORT")
+	if temporalHost == "" {
+		temporalHost = "localhost:7233"
+	}
 
-	addr := ":8080"
-	log.Printf("API listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, r))
+	namespace := os.Getenv("TEMPORAL_NAMESPACE")
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	var err error
+	globalBridge, err = bridge.NewBridge(temporalHost, namespace)
+	if err != nil {
+		log.Printf("⚠️  Failed to initialize Temporal bridge: %v", err)
+		log.Printf("🔄 Continuing without Temporal integration")
+		globalBridge = nil
+	} else {
+		log.Printf("✅ Bridge connected to Temporal at %s", temporalHost)
+	}
+
+	e := echo.New()
+
+	// Middleware
+	e.Use(middleware.Logger())
+	e.Use(middleware.Recover())
+	e.Use(middleware.CORS())
+
+	// Routes
+	e.GET("/health", healthHandler)
+	e.POST("/runs", postRunHandler)
+	e.GET("/runs/:id", getRunHandler)
+	e.GET("/stream", streamHandler)
+
+	// Graceful shutdown
+	defer func() {
+		if globalBridge != nil {
+			globalBridge.Close()
+			log.Printf("🔌 Bridge connection closed")
+		}
+	}()
+
+	// Start server
+	log.Printf("🚀 DuraGraph API Server starting on :8080")
+	if globalBridge != nil {
+		log.Printf("📊 Bridge initialized and ready for workflow execution")
+	} else {
+		log.Printf("📊 Running in standalone mode (no Temporal connection)")
+	}
+	e.Logger.Fatal(e.Start(":8080"))
 }

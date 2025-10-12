@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  # Test database with isolated data
+  test-db:
+    image: postgres:15
+    container_name: duragraph-test-db
+    environment:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: testdb
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./deploy/sql:/docker-entrypoint-initdb.d
+    tmpfs:
+      - /var/lib/postgresql/data  # Use tmpfs for faster test runs
+
+  # Temporal server for testing  
+  temporal:
+    image: temporalio/auto-setup:1.20.0
+    container_name: duragraph-test-temporal
+    ports:
+      - "7234:7233"
+    environment:
+      - DB=postgres
+      - DB_PORT=5432
+      - POSTGRES_USER=testuser
+      - POSTGRES_PWD=testpass
+      - POSTGRES_SEEDS=test-db
+    depends_on:
+      - test-db
+
+  # API server for testing
+  test-api:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.api
+    container_name: duragraph-test-api
+    ports:
+      - "8081:8080"
+    environment:
+      - TEMPORAL_HOSTPORT=temporal:7233
+      - DATABASE_URL=postgres://testuser:testpass@test-db:5432/testdb
+    depends_on:
+      - test-db
+      - temporal
+
+  # Workers for testing
+  test-go-worker:
+    build:
+      context: workers/runtime/go-adapter
+      dockerfile: ../../../deploy/docker/Dockerfile.go-worker
+    container_name: duragraph-test-go-worker
+    environment:
+      - TEMPORAL_HOSTPORT=temporal:7233
+    depends_on:
+      - temporal
+
+  test-python-worker:
+    build:
+      context: workers/runtime/python-adapter
+      dockerfile: ../../../deploy/docker/Dockerfile.python-worker  
+    container_name: duragraph-test-python-worker
+    environment:
+      - TEMPORAL_HOSTPORT=temporal:7233
+    depends_on:
+      - temporal

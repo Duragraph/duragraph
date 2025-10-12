@@ -1,0 +1,64 @@
+{
+  "name": "DataProcessor",
+  "version": "1.0.0", 
+  "description": "Data processing workflow with validation and transformation",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "config": {}
+    },
+    {
+      "id": "validate_data",
+      "type": "tool",
+      "config": {
+        "tool_name": "validator",
+        "schema": "data_schema.json"
+      }
+    },
+    {
+      "id": "process_llm",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4",
+        "system_prompt": "You are a data processing assistant",
+        "temperature": 0.1
+      }
+    },
+    {
+      "id": "save_results",
+      "type": "tool", 
+      "config": {
+        "tool_name": "database_save",
+        "table": "processed_data"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "target": "validate_data"
+    },
+    {
+      "source": "validate_data",
+      "target": "process_llm"
+    },
+    {
+      "source": "process_llm", 
+      "target": "save_results"
+    },
+    {
+      "source": "save_results",
+      "target": "end"
+    }
+  ],
+  "config": {
+    "timeout": "30m",
+    "checkpoint_interval": "5m"
+  }
+}

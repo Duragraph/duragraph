@@ -1,9 +1,10 @@
 version: "3.9"
 
 services:
+  # PostgreSQL Database
   db:
     image: postgres:15
-    container_name: app-postgres
+    container_name: duragraph-postgres
     environment:
       POSTGRES_USER: appuser
       POSTGRES_PASSWORD: apppass
@@ -13,6 +14,79 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Temporal Server
+  temporal:
+    image: temporalio/auto-setup:1.20.0
+    container_name: duragraph-temporal
+    ports:
+      - "7233:7233"
+      - "8233:8233"  # UI
+    environment:
+      - DB=postgres
+      - DB_PORT=5432
+      - POSTGRES_USER=appuser
+      - POSTGRES_PWD=apppass
+      - POSTGRES_SEEDS=db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.api
+    container_name: duragraph-api
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_HOSTPORT=temporal:7233
+      - DATABASE_URL=postgres://appuser:apppass@db:5432/appdb
+      - PORT=8080
+    depends_on:
+      - db
+      - temporal
+    restart: unless-stopped
+
+  # Go Worker
+  go-worker:
+    build:
+      context: workers/runtime/go-adapter
+      dockerfile: ../../../deploy/docker/Dockerfile.go-worker
+    container_name: duragraph-go-worker
+    environment:
+      - TEMPORAL_HOSTPORT=temporal:7233
+    depends_on:
+      - temporal
+    restart: unless-stopped
+
+  # Python Worker  
+  python-worker:
+    build:
+      context: workers/runtime/python-adapter
+      dockerfile: ../../../deploy/docker/Dockerfile.python-worker
+    container_name: duragraph-python-worker
+    environment:
+      - TEMPORAL_HOSTPORT=temporal:7233
+    depends_on:
+      - temporal
+    restart: unless-stopped
+
+  # Dashboard (development)
+  dashboard:
+    build:
+      context: dashboard
+      dockerfile: ../deploy/docker/Dockerfile.dashboard
+    container_name: duragraph-dashboard
+    ports:
+      - "5173:80"
+    restart: unless-stopped
 
 volumes:
   pgdata:

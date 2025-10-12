@@ -1,0 +1,431 @@
+version: "3"
+
+vars:
+  API_PORT: 8080
+  DASHBOARD_PORT: 5173
+  WEBSITE_PORT: 3000
+  TEMPORAL_HOST: localhost:7233
+  
+tasks:
+  # === Installation & Setup ===
+  install:
+    desc: Install all project dependencies
+    deps: [install:go, install:dashboard, install:website, install:python]
+
+  install:go:
+    desc: Install Go dependencies
+    cmds:
+      - cd cmd/api && go mod download
+      - cd runtime && go mod download 
+      - cd workers/runtime/go-adapter && go mod download
+      - cd workers/codegen/eino-to-temporal && go mod download
+
+  install:dashboard:
+    desc: Install dashboard dependencies  
+    dir: dashboard
+    cmds:
+      - pnpm install
+
+  install:website:
+    desc: Install website dependencies
+    dir: website
+    cmds:
+      - pnpm install
+
+  install:python:
+    desc: Install Python dependencies
+    cmds:
+      - cd workers/runtime/python-adapter && poetry install
+
+  # === Development Servers ===
+  dev:
+    desc: Start all development services
+    deps: [api:dev, dashboard:dev, workers:dev]
+
+  api:dev:
+    desc: Start API server in development mode
+    dir: cmd/api
+    cmds:
+      - echo "Starting API server on :{{.API_PORT}}"
+      - go run main.go
+    env:
+      PORT: "{{.API_PORT}}"
+      TEMPORAL_HOSTPORT: "{{.TEMPORAL_HOST}}"
+
+  dashboard:dev:
+    desc: Start Svelte dashboard development server
+    dir: dashboard
+    cmds:
+      - echo "Starting dashboard on :{{.DASHBOARD_PORT}}"
+      - pnpm dev --port {{.DASHBOARD_PORT}}
+
+  website:dev:
+    desc: Start Next.js website development server  
+    dir: website
+    cmds:
+      - echo "Starting website on :{{.WEBSITE_PORT}}"
+      - pnpm dev --port {{.WEBSITE_PORT}}
+
+  workers:dev:
+    desc: Start all workers in development mode
+    deps: [workers:go, workers:python]
+
+  # === Code Generation ===
+  codegen:list:
+    desc: List available workflow examples
+    cmds:
+      - workers/codegen/duragraph-codegen list
+
+  codegen:eino:
+    desc: Generate Temporal Go worker from Eino spec
+    cmds:
+      - workers/codegen/duragraph-codegen eino --input {{.INPUT}} --output {{.OUTPUT}}
+    vars:
+      INPUT: '{{.INPUT | default "workers/templates/example-eino-spec.json"}}'
+      OUTPUT: '{{.OUTPUT | default "./generated/eino"}}'
+
+  codegen:langgraph:
+    desc: Generate Temporal Python worker from LangGraph spec
+    cmds:
+      - workers/codegen/duragraph-codegen langgraph --input {{.INPUT}} --output {{.OUTPUT}}
+    vars:
+      INPUT: '{{.INPUT | default "workers/templates/example-langgraph-spec.json"}}'
+      OUTPUT: '{{.OUTPUT | default "./generated/langgraph"}}'
+
+  codegen:example:
+    desc: Generate example workflows
+    deps: [codegen:eino, codegen:langgraph]
+
+  workers:go:
+    desc: Start Go Temporal worker
+    dir: workers/runtime/go-adapter
+    cmds:
+      - echo "Starting Go worker..."
+      - go run main.go
+    env:
+      TEMPORAL_HOSTPORT: "{{.TEMPORAL_HOST}}"
+
+  workers:python:
+    desc: Start Python Temporal worker
+    dir: workers/runtime/python-adapter
+    cmds:
+      - echo "Starting Python worker..."
+      - poetry run python -m duragraph_pyworker
+    env:
+      TEMPORAL_HOSTPORT: "{{.TEMPORAL_HOST}}"
+
+  # === Building ===
+  build:
+    desc: Build all components
+    deps: [build:api, build:dashboard, build:website, build:workers]
+
+  build:api:
+    desc: Build API server binary
+    dir: cmd/api
+    cmds:
+      - go build -o ../../bin/api main.go
+    generates:
+      - bin/api
+
+  build:dashboard:
+    desc: Build dashboard for production
+    dir: dashboard
+    cmds:
+      - pnpm build
+    generates:
+      - dashboard/build/**
+
+  build:website:
+    desc: Build website for production
+    dir: website
+    cmds:
+      - pnpm build
+    generates:
+      - website/out/**
+
+  build:workers:
+    desc: Build worker binaries
+    deps: [build:workers:go]
+
+  build:workers:go:
+    desc: Build Go worker binary
+    dir: workers/go-adapter
+    cmds:
+      - go build -o ../../bin/go-worker main.go
+    generates:
+      - bin/go-worker
+
+  # === Testing ===
+  test:
+    desc: Run all tests
+    deps: [test:api, test:workers, test:dashboard]
+
+  test:api:
+    desc: Run Go API and runtime tests
+    cmds:
+      - cd cmd/api && go vet ./...
+      - cd cmd/api && go test ./... -cover -v
+
+  test:workers:
+    desc: Run worker tests
+    cmds:
+      - cd workers/runtime/go-adapter && go test ./... -cover -v
+      - cd workers/runtime/python-adapter && poetry run pytest -v
+
+  test:codegen:
+    desc: Test code generation tools
+    cmds:
+      - cd workers/codegen/eino-to-temporal && go test ./... -v
+      - echo "Testing codegen with example specs..."
+      - task codegen:example
+      - echo "✅ Codegen tests completed"
+
+  test:runtime:
+    desc: Test runtime components
+    cmds:
+      - cd runtime && go test ./... -cover -v
+
+  test:dashboard:
+    desc: Run dashboard tests
+    dir: dashboard
+    cmds:
+      - pnpm test
+
+  test:conformance:
+    desc: Run LangGraph Cloud API conformance tests
+    cmds:
+      - task up:test
+      - pytest -v tests/conformance/
+      - task down
+
+  test:e2e:
+    desc: Run end-to-end tests
+    cmds:
+      - task up:test
+      - pytest -v tests/e2e/ 
+      - task down
+
+  test:soak:
+    desc: Run load/soak tests
+    dir: tests/soak
+    cmds:
+      - python test_soak.py
+
+  # === Code Quality ===
+  lint:
+    desc: Lint all code
+    deps: [lint:go, lint:python, lint:dashboard, lint:website]
+
+  lint:go:
+    desc: Lint Go code
+    cmds:
+      - cd cmd/api && go vet ./... && go fmt ./...
+      - cd runtime && go vet ./... && go fmt ./...
+      - cd workers/runtime/go-adapter && go vet ./... && go fmt ./...
+      - cd workers/codegen/eino-to-temporal && go vet ./... && go fmt ./...
+
+  lint:python:
+    desc: Lint Python code
+    cmds:
+      - cd workers/runtime/python-adapter && poetry run ruff check . && poetry run mypy .
+
+  lint:dashboard:
+    desc: Lint dashboard code
+    dir: dashboard
+    cmds:
+      - pnpm lint
+
+  lint:website:
+    desc: Lint website code
+    dir: website
+    cmds:
+      - pnpm lint
+
+  format:
+    desc: Format all code
+    deps: [format:go, format:python, format:dashboard, format:website]
+
+  format:go:
+    desc: Format Go code
+    cmds:
+      - cd cmd/api && go fmt ./...
+      - cd runtime && go fmt ./...
+      - cd workers/runtime/go-adapter && go fmt ./...
+      - cd workers/codegen/eino-to-temporal && go fmt ./...
+
+  format:python:
+    desc: Format Python code
+    cmds:
+      - cd workers/runtime/python-adapter && poetry run ruff format .
+
+  format:dashboard:
+    desc: Format dashboard code
+    dir: dashboard
+    cmds:
+      - pnpm format
+
+  format:website:
+    desc: Format website code
+    dir: website
+    cmds:
+      - pnpm format
+
+  # === Docker Operations ===
+  docker:build:
+    desc: Build all Docker images
+    deps: [docker:build:api, docker:build:workers, docker:build:dashboard]
+
+  docker:build:api:
+    desc: Build API Docker image
+    cmds:
+      - docker build -f deploy/docker/Dockerfile.api -t duragraph/api:latest .
+
+  docker:build:workers:
+    desc: Build workers Docker images
+    cmds:
+      - docker build -f deploy/docker/Dockerfile.go-worker -t duragraph/go-worker:latest workers/runtime/go-adapter/
+      - docker build -f deploy/docker/Dockerfile.python-worker -t duragraph/python-worker:latest workers/runtime/python-adapter/
+
+  docker:build:dashboard:
+    desc: Build dashboard Docker image
+    cmds:
+      - docker build -f deploy/docker/Dockerfile.dashboard -t duragraph/dashboard:latest dashboard/
+
+  docker:run:api:
+    desc: Run API in Docker
+    deps: [docker:build:api]
+    cmds:
+      - docker run -p {{.API_PORT}}:8080 -e TEMPORAL_HOSTPORT={{.TEMPORAL_HOST}} duragraph/api:latest
+
+  docker:run:workers:
+    desc: Run workers in Docker
+    deps: [docker:build:workers]
+    cmds:
+      - docker run -e TEMPORAL_HOSTPORT={{.TEMPORAL_HOST}} duragraph/go-worker:latest &
+      - docker run -e TEMPORAL_HOSTPORT={{.TEMPORAL_HOST}} duragraph/python-worker:latest &
+
+  # === Docker Compose ===
+  up:
+    desc: Start all services with Docker Compose
+    cmds:
+      - docker-compose up -d
+      - echo "Services starting..."
+      - "echo \"API: http://localhost:{{.API_PORT}}\""
+      - "echo \"Dashboard: http://localhost:{{.DASHBOARD_PORT}}\""
+      - "echo \"Website: http://localhost:{{.WEBSITE_PORT}}\""
+
+  up:test:
+    desc: Start services for testing
+    cmds:
+      - docker-compose -f deploy/compose/docker-compose.test.yml up -d
+      - echo "Test environment ready"
+
+  down:
+    desc: Stop all services
+    cmds:
+      - docker-compose down
+      - docker-compose -f deploy/compose/docker-compose.test.yml down 2>/dev/null || true
+
+  logs:
+    desc: View logs from all services
+    cmds:
+      - docker-compose logs -f
+
+  logs:api:
+    desc: View API logs
+    cmds:
+      - docker-compose logs -f api
+
+  logs:workers:
+    desc: View worker logs
+    cmds:
+      - docker-compose logs -f go-worker python-worker
+
+  # === Database Operations ===
+  db:start:
+    desc: Start PostgreSQL database
+    cmds:
+      - docker-compose up -d db
+
+  db:stop:
+    desc: Stop PostgreSQL database
+    cmds:
+      - docker-compose stop db
+
+  db:migrate:
+    desc: Run database migrations
+    cmds:
+      - docker-compose exec db psql -U appuser -d appdb -f /docker-entrypoint-initdb.d/0001_init.sql
+
+  db:reset:
+    desc: Reset database (drops and recreates)
+    cmds:
+      - docker-compose down -v
+      - docker-compose up -d db
+      - task db:migrate
+
+  # === Documentation ===
+  docs:serve:
+    desc: Start documentation server
+    dir: docs
+    cmds:
+      - poetry run mkdocs serve
+
+  docs:build:
+    desc: Build documentation
+    dir: docs
+    cmds:
+      - poetry run mkdocs build
+
+  # === Cleanup ===
+  clean:
+    desc: Clean build artifacts and dependencies
+    cmds:
+      - rm -rf bin/
+      - rm -rf dashboard/build/
+      - rm -rf website/out/
+      - rm -rf website/.next/
+      - go clean -cache
+      - docker system prune -f
+
+  clean:deps:
+    desc: Clean all dependencies (requires reinstall)
+    cmds:
+      - rm -rf node_modules/
+      - rm -rf dashboard/node_modules/
+      - rm -rf website/node_modules/
+      - rm -rf workers/python-adapter/.venv/
+      - go clean -modcache
+
+  # === Utilities ===
+  health:
+    desc: Check health of all services
+    cmds:
+      - echo "Checking API health..."
+      - curl -f http://localhost:{{.API_PORT}}/health || echo "API not responding"
+      - echo "Checking dashboard..."
+      - curl -f http://localhost:{{.DASHBOARD_PORT}} || echo "Dashboard not responding"
+
+  ps:
+    desc: Show running containers
+    cmds:
+      - docker-compose ps
+
+  restart:
+    desc: Restart all services
+    cmds:
+      - task down
+      - task up
+
+  # === Quick Development Commands ===
+  api:
+    desc: Quick start API development (with dependencies)
+    deps: [db:start]
+    cmds:
+      - task api:dev
+
+  full:
+    desc: Start full development environment
+    cmds:
+      - task up
+      - task dev
