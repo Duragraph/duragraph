@@ -1,0 +1,53 @@
+services:
+  duragraph-devcontainer:
+    image: duragraph-devcontainer:latest
+    container_name: duragraph-devcontainer
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspace:cached
+      # - devcontainer-go:/go
+      # - devcontainer-pnpm:/home/vscode/.local/share/pnpm
+      # - devcontainer-cache:/home/vscode/.cache
+    command: sleep infinity
+    network_mode: host
+    privileged: true
+
+  # Development services
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppass
+      POSTGRES_DB: appdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../deploy/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  devcontainer-go:
+  devcontainer-pnpm:
+  devcontainer-cache:
