@@ -20,17 +20,17 @@ Advantages:
 
 ## Structure
 
-- **openapi/**  
-  Contains OpenAPI 3.1 specifications for HTTP APIs.  
+- **openapi/**
+  Contains OpenAPI 3.1 specifications for HTTP APIs.
   - `duragraph.yaml`: Defines endpoints for assistants, threads, messages, runs, events, and webhooks.
 
-- **ir/**  
-  Contains schema definitions for IR (Intermediate Representation) workflows.  
-  - `ir.schema.json`: Draft 2020-12 JSON Schema for representing execution graphs.  
+- **ir/**
+  Contains schema definitions for IR (Intermediate Representation) workflows.
+  - `ir.schema.json`: Draft 2020-12 JSON Schema for representing execution graphs.
   - `examples/hello.json`: Minimal example IR showing input → llm_call → end.
 
 ## Usage
 
-- Validate IR files with `ajv` or other JSON Schema validators.  
-- Generate server stubs and SDK clients from OpenAPI specs.  
+- Validate IR files with `ajv` or other JSON Schema validators.
+- Generate server stubs and SDK clients from OpenAPI specs.
 - Keep all schema modifications backward-compatible unless performing a major release.

@@ -16,7 +16,7 @@ services:
     tmpfs:
       - /var/lib/postgresql/data  # Use tmpfs for faster test runs
 
-  # Temporal server for testing  
+  # Temporal server for testing
   temporal:
     image: temporalio/auto-setup:1.20.0
     container_name: duragraph-test-temporal
@@ -60,7 +60,7 @@ services:
   test-python-worker:
     build:
       context: workers/runtime/python-adapter
-      dockerfile: ../../../deploy/docker/Dockerfile.python-worker  
+      dockerfile: ../../../deploy/docker/Dockerfile.python-worker
     container_name: duragraph-test-python-worker
     environment:
       - TEMPORAL_HOSTPORT=temporal:7233
