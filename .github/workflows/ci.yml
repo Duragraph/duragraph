@@ -2,65 +2,84 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ] 
+    branches: [main, develop]
   pull_request:
 
 jobs:
+  pre-commit:
+    name: Pre-commit Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.1
+
   unit_go:
+    name: Go Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: '1.23'
 
       - name: Go Vet
         run: go vet ./...
 
       - name: Go Unit Tests
-        run: go test ./... -cover
+        run: go test ./... -cover -short
 
-  unit_py:
+  build_docs:
+    name: Build Docs
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
+          node-version: '20'
 
-      - name: Install Poetry
-        run: pip install poetry
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
-      - name: Install dependencies
-        working-directory: workers/python-adapter
-        run: poetry install
+      - name: Install website dependencies
+        working-directory: website
+        run: pnpm install
 
-      - name: Lint with Ruff
-        working-directory: workers/python-adapter
-        run: poetry run ruff check .
+      - name: Install docs dependencies
+        working-directory: docs
+        run: pnpm install
 
-      - name: Run Pytest
-        working-directory: workers/python-adapter
-        run: poetry run pytest -q
+      - name: Build website
+        working-directory: website
+        run: pnpm build
 
-  lint_misc:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Build docs
+        working-directory: docs
+        run: pnpm build
 
-      - name: Install linters
-        run: |
-          pip install yamllint markdownlint-cli
+      - name: Copy website to docs
+        run: cp -r website/dist/* docs/out/
 
-      - name: Lint Workflows
-        run: yamllint .github/workflows
-
-      - name: Lint Docs
-        run: markdownlint docs
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs/out/
