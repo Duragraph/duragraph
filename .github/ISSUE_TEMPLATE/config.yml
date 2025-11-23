@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Discussion Forum
+    url: https://github.com/duragraph/duragraph/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: 📚 Documentation
+    url: https://duragraph.dev/docs
+    about: Read the documentation for guides and API reference
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/duragraph/duragraph/security/advisories/new
+    about: Report a security vulnerability privately
