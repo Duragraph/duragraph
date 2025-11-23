@@ -64,6 +64,10 @@ README.act.md
 .actrc
 bin/act
 
+# Devcontainer environment (contains secrets)
+.devcontainer/.env
+~/.devcontainer.env
+
 # Compiled binaries
 bin/server
 bin/duragraph

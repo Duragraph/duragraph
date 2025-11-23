@@ -47,6 +47,52 @@ git config --global init.defaultBranch main
 git config --global pull.rebase true
 git config --global fetch.prune true
 
+# Configure git user from environment variables
+if [ -n "$GIT_USER_NAME" ]; then
+    echo "📝 Configuring git user: $GIT_USER_NAME"
+    git config --global user.name "$GIT_USER_NAME"
+fi
+
+if [ -n "$GIT_USER_EMAIL" ]; then
+    echo "📧 Configuring git email: $GIT_USER_EMAIL"
+    git config --global user.email "$GIT_USER_EMAIL"
+fi
+
+# Import GPG key and configure git signing
+if [ -n "$GPG_PRIVATE_KEY" ]; then
+    echo "🔐 Importing GPG private key..."
+
+    # Create GPG directory if it doesn't exist
+    mkdir -p ~/.gnupg
+    chmod 700 ~/.gnupg
+
+    # Import the private key (expects base64 encoded key)
+    echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+
+    # Trust the key ultimately (non-interactive)
+    if [ -n "$GPG_KEY_ID" ]; then
+        echo "🔑 Configuring GPG key ID: $GPG_KEY_ID"
+
+        # Set ultimate trust for the key
+        echo -e "5\ny\n" | gpg --command-fd 0 --expert --edit-key "$GPG_KEY_ID" trust
+
+        # Configure git to use this key for signing
+        git config --global user.signingkey "$GPG_KEY_ID"
+        git config --global commit.gpgsign true
+        git config --global tag.gpgsign true
+
+        # Configure GPG to use TTY (needed for devcontainer)
+        echo "export GPG_TTY=\$(tty)" >> ~/.bashrc
+        echo "export GPG_TTY=\$(tty)" >> ~/.zshrc
+
+        echo "✅ GPG key imported and git signing enabled"
+    else
+        echo "⚠️  GPG_KEY_ID not set, skipping git signing configuration"
+    fi
+else
+    echo "ℹ️  GPG_PRIVATE_KEY not set, skipping GPG import"
+fi
+
 # Setup Act configuration
 echo "🎬 Setting up Act (GitHub Actions local runner)..."
 # task act:setup 2>/dev/null || echo "⚠️  Run 'task act:setup' manually to configure Act"

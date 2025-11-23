@@ -106,6 +106,10 @@
   "remoteUser": "vscode",
   "containerEnv": {
     "DOCKER_BUILDKIT": "1",
-    "COMPOSE_DOCKER_CLI_BUILD": "1"
+    "COMPOSE_DOCKER_CLI_BUILD": "1",
+    "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",
+    "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}",
+    "GPG_PRIVATE_KEY": "${localEnv:GPG_PRIVATE_KEY}",
+    "GPG_KEY_ID": "${localEnv:GPG_KEY_ID}"
   }
 }
