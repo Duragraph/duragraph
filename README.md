@@ -1,10 +1,10 @@
 # DuraGraph
 
-![DuraGraph Logo](docs/assets/duragraph_logo.png)
+![DuraGraph Logo](docs/public/duragraph_logo.png)
 
 **An open, extensible orchestration layer for AI and workflow automation**
 
-DuraGraph provides a **LangGraph Cloud-compatible API** built on top of **Temporal** for reliable, observable, and maintainable AI pipelines that can be self-hosted in enterprise environments.
+DuraGraph provides a **LangGraph Cloud-compatible API** built with **Event Sourcing** and **CQRS** patterns for reliable, observable, and maintainable AI pipelines that can be self-hosted in enterprise environments.
 
 ## 🎯 Mission
 
@@ -12,170 +12,85 @@ Enable reliable, observable, and maintainable AI pipelines that feel natural for
 
 - **API Compatibility**: Drop-in replacement for LangGraph Cloud APIs
 - **Enterprise Ready**: Self-hosted, compliant, secure
-- **Fault Tolerant**: Built on Temporal for deterministic execution
+- **Fault Tolerant**: Event sourcing with reliable event delivery via outbox pattern
 - **Observable**: Rich monitoring and workflow introspection
-
-## 🏗️ Architecture
-
-```mermaid
-flowchart LR
-  client["Client SDKs / LangGraph Cloud clients"]
-  api[API Server]
-  bridge[Bridge/Translator]
-  temporal[Temporal Control Plane]
-  workers[Worker Adapters]
-  storage[(Storage)]
-  observability[(Observability)]
-
-  client --> api --> bridge --> temporal --> workers
-  workers --> storage
-  workers --> observability
-```
-
-### Components
-
-- **API Server** (`cmd/api/`): LangGraph Cloud-compatible REST API
-- **Runtime Bridge** (`runtime/bridge/`): Orchestrates workflow execution  
-- **Translator** (`runtime/translator/`): Converts inputs to Temporal workflows
-- **Go Worker** (`workers/go-adapter/`): Temporal worker for Go-based activities
-- **Python Worker** (`workers/python-adapter/`): Temporal worker for Python-based activities
-- **Dashboard** (`dashboard/`): Svelte-based workflow visualization
-- **Website** (`website/`): Next.js landing page
 
 ## 🚀 Quick Start
 
-### Prerequisites
+Get started with DuraGraph in minutes:
 
-- [Go 1.22+](https://golang.org/dl/)
-- [Node.js 18+](https://nodejs.org/)
-- [Python 3.11+](https://python.org/)
-- [Docker & Docker Compose](https://docker.com/)
-- [Task](https://taskfile.dev/) (recommended for development)
+**📖 [View Documentation](https://duragraph.dev/docs)** | **🎓 [Quick Start Guide](https://duragraph.dev/docs/getting-started)**
 
-### Installation
+### One-Click Deploy
+
+Deploy DuraGraph to your preferred cloud platform:
+
+[![Deploy on Fly.io](https://fly.io/static/images/fly-logo.svg)](https://fly.io/docs)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template)
+[![Deploy on DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new)
+[![Deploy on Scaleway](https://www.scaleway.com/en/docs/_astro/logo-scaleway.svg)](https://www.scaleway.com/en/docs/)
+
+### Local Development
 
 ```bash
 # Clone the repository
 git clone https://github.com/Duragraph/duragraph.git
 cd duragraph
 
-# Install Task (if not already installed)
-# macOS
-brew install go-task/tap/go-task
-# or visit https://taskfile.dev/installation/
-
-# Start all services
-task up
-
-# Or manually with Docker Compose
+# Start all services with Docker Compose
 docker-compose up -d
+
+# Or use Task
+brew install go-task/tap/go-task
+task up
 ```
 
-### Development Setup
+Visit **http://localhost:8080** for the API and **http://localhost:5173** for the dashboard.
 
-```bash
-# Install all dependencies
-task install
+**👉 [Full Setup Guide](https://duragraph.dev/docs/getting-started)**
 
-# Run individual components
-task api:dev        # Start API server in development mode
-task dashboard:dev  # Start Svelte dashboard
-task website:dev    # Start Next.js website
-task workers:go     # Start Go worker
-task workers:python # Start Python worker
+## 🏗️ Architecture
 
-# Code generation
-task codegen:list      # List available workflow examples
-task codegen:eino      # Generate Go worker from Eino spec
-task codegen:langgraph # Generate Python worker from LangGraph spec
-task codegen:example   # Generate example workflows
+```mermaid
+flowchart LR
+  client["Client SDKs / LangGraph Cloud clients"]
+  api[API Server - Go/Echo]
+  eventstore[(Event Store - PostgreSQL)]
+  nats[NATS JetStream]
+  engine[Graph Execution Engine]
+  dashboard[Svelte Dashboard]
 
-# Run tests
-task test          # Run all tests
-task test:api      # Test Go API
-task test:workers  # Test workers
-task test:codegen  # Test code generation
-task test:runtime  # Test runtime components
-task lint          # Lint all code
+  client --> api
+  api --> eventstore
+  api --> engine
+  eventstore --> nats
+  nats --> dashboard
+  engine --> eventstore
 ```
 
-## 📋 Development Tasks
+**🔧 [Architecture Details](https://duragraph.dev/docs/architecture)**
 
-We use [Task](https://taskfile.dev/) for development workflows. Run `task --list` to see all available tasks:
+## ⚡ Key Features
 
-### Core Services
-- `task up` - Start all services with Docker Compose
-- `task down` - Stop all services
-- `task api:dev` - Run API server in development mode
-- `task dashboard:dev` - Run dashboard development server
-- `task website:dev` - Run website development server
+- 🔄 **LangGraph Cloud API Compatible** - Drop-in replacement for existing LangGraph Cloud integrations
+- 🏢 **Self-Hosted** - Full control over your data and infrastructure
+- ⚡ **Event Sourcing & CQRS** - Reliable, auditable workflow execution with event-driven architecture
+- 🔍 **Observable** - Rich monitoring, tracing, and debugging tools with Prometheus metrics
+- 🧩 **Extensible** - Custom graph execution engine with support for LLM nodes and tool execution
+- 📊 **Visual Dashboard** - Real-time workflow visualization with Server-Sent Events
+- 🐳 **Docker Ready** - Easy deployment with Docker Compose or Kubernetes
 
-### Workers
-- `task workers:go` - Start Go Temporal worker
-- `task workers:python` - Start Python Temporal worker
-- `task workers:dev` - Start all workers in development mode
+## 📚 Documentation
 
-### Testing & Quality
-- `task test` - Run all tests
-- `task test:api` - Test Go API and runtime components
-- `task test:workers` - Test worker components
-- `task lint` - Lint all codebases
-- `task format` - Format all code
+- **[Getting Started](https://duragraph.dev/docs/getting-started)** - Installation and basic usage
+- **[API Reference](https://duragraph.dev/docs/api)** - Complete API documentation
+- **[Architecture](https://duragraph.dev/docs/architecture)** - System design and components
+- **[Development Guide](https://duragraph.dev/docs/development)** - Contributing and development
+- **[Deployment](https://duragraph.dev/docs/deployment)** - Production deployment guides
+- **[Operations](https://duragraph.dev/docs/ops)** - Monitoring and maintenance
 
-### Docker Operations
-- `task docker:build` - Build all Docker images
-- `task docker:api` - Build and run API Docker image
-- `task docker:workers` - Build and run workers Docker images
-
-## � **Code Generation Workflow**
-
-DuraGraph converts user-defined workflows into Temporal-compatible code:
-
-### **1. Define Your Workflow**
-Write workflows in familiar frameworks:
-- **Eino** (Go-based workflow definitions)
-- **LangGraph** (Python-based workflow definitions)
-
-### **2. Generate Temporal Workers**
-```bash
-# Generate from Eino specification
-task codegen:eino INPUT=my-workflow.json OUTPUT=./generated/my-workflow
-
-# Generate from LangGraph specification  
-task codegen:langgraph INPUT=my-workflow.json OUTPUT=./generated/my-workflow
-```
-
-### **3. Deploy and Execute**
-The API server bridges between LangGraph Cloud API and your generated Temporal workers:
-
-```
-User Request → API Server → Bridge → Temporal → Generated Workers → Results
-```
-
-## �🔧 API Usage
-
-DuraGraph implements the LangGraph Cloud API. Here's a basic example:
-
-### Create and Run a Workflow
-
-```bash
-# Create a run
-curl -X POST http://localhost:8080/runs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "thread_id": "thread-123",
-    "assistant_id": "assistant-456", 
-    "input": "Hello, world!"
-  }'
-
-# Get run status
-curl http://localhost:8080/runs/{run_id}
-
-# Stream events (SSE)
-curl http://localhost:8080/stream?run_id={run_id}
-```
-
-### Using with LangGraph SDK
+## 🔧 Basic Usage
 
 ```python
 from langgraph_sdk import get_client
@@ -186,124 +101,73 @@ client = get_client(url="http://localhost:8080")
 # Use exactly like LangGraph Cloud
 assistant = await client.assistants.create(...)
 thread = await client.threads.create()
-run = await client.runs.create(thread_id=thread["id"], assistant_id=assistant["id"])
+run = await client.runs.create(
+    thread_id=thread["id"],
+    assistant_id=assistant["id"]
+)
 ```
+
+**📖 [Full API Documentation](https://duragraph.dev/docs/api)**
 
 ## 🗂️ Project Structure
 
 ```
 duragraph/
-├── cmd/api/                 # API server (Go)
-├── runtime/
-│   ├── bridge/              # Workflow orchestration bridge  
-│   └── translator/          # IR to Temporal translation
-├── workers/
-│   ├── codegen/             # Code generation tools
-│   │   ├── eino-to-temporal/      # Go: Eino → Temporal worker
-│   │   ├── langgraph-to-temporal/ # Python: LangGraph → Temporal worker
-│   │   └── duragraph-codegen      # CLI tool for code generation
-│   ├── runtime/             # Generated worker runtime
-│   │   ├── go-adapter/      # Temporal Go workers
-│   │   └── python-adapter/  # Temporal Python workers
-│   └── templates/           # Example workflow specifications
-├── dashboard/               # Svelte visualization dashboard
-├── website/                 # Next.js landing page
-├── schemas/
-│   ├── openapi/             # API specifications
-│   └── ir/                  # Intermediate representation schemas
-├── deploy/
-│   ├── sql/                 # Database migrations
-│   ├── compose/             # Docker Compose configs
-│   └── helm/                # Kubernetes Helm charts
-├── docs/                    # Documentation (MkDocs)
-├── tests/                   # Test suites
-└── Taskfile.yml             # Development task runner
+├── cmd/server/          # API server (Go)
+├── internal/
+│   ├── domain/          # Domain models (aggregates, entities, events)
+│   ├── application/     # Use cases (commands, queries, services)
+│   ├── infrastructure/  # External concerns (HTTP, persistence, messaging)
+│   └── pkg/             # Shared utilities (errors, eventbus, uuid)
+├── dashboard/           # Svelte visualization dashboard
+├── website/             # Landing page (Vite/React)
+├── docs/                # Documentation (Fumadocs/Next.js)
+├── deploy/              # Docker, SQL migrations
+└── Taskfile.yml         # Development task runner
 ```
-
-## 🧪 Testing
-
-### Unit Tests
-```bash
-task test:api      # Go API and runtime tests
-task test:workers  # Worker component tests
-task test:dashboard # Frontend tests
-```
-
-### Integration Tests  
-```bash
-task test:conformance  # LangGraph Cloud API conformance
-task test:e2e         # End-to-end workflow tests
-```
-
-### Load Testing
-```bash
-task test:soak        # Long-running stability tests
-```
-
-## 🚢 Deployment
-
-### Docker Compose (Development)
-```bash
-task up
-```
-
-### Kubernetes (Production)
-```bash
-# Coming soon - Helm charts in development
-helm install duragraph ./deploy/helm/duragraph
-```
-
-### Configuration
-
-Key environment variables:
-- `TEMPORAL_HOSTPORT`: Temporal server address (default: `localhost:7233`)
-- `NAMESPACE`: Temporal namespace (default: `default`)
-- `DATABASE_URL`: PostgreSQL connection string
-- `LOG_LEVEL`: Logging verbosity (default: `info`)
-
-## 📚 Documentation
-
-- **[Getting Started](docs/docs/getting-started.md)** - Setup and basic usage
-- **[API Reference](docs/docs/api-reference/)** - Complete API documentation  
-- **[Architecture](docs/docs/architecture/)** - System design and components
-- **[Development Guide](docs/docs/development/)** - Contributing and development
-- **[Operations](docs/docs/ops/)** - Deployment and monitoring
 
 ## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/amazing-feature`
 3. Make your changes and add tests
 4. Run tests: `task test`
-5. Lint code: `task lint`
-6. Commit changes: `git commit -m 'Add amazing feature'`
-7. Push to branch: `git push origin feature/amazing-feature`
-8. Open a Pull Request
+5. Open a Pull Request
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+**🛠️ [Development Guide](https://duragraph.dev/docs/development)**
 
 ## 📄 License
 
 Licensed under the [Apache License 2.0](LICENSE).
 
-## 🙋‍♀️ Support
+## 🙋 Support
 
-- **Documentation**: [docs/](docs/)
+- **Documentation**: [duragraph.dev/docs](https://duragraph.dev/docs)
 - **Issues**: [GitHub Issues](https://github.com/Duragraph/duragraph/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/Duragraph/duragraph/discussions)
 
 ## 🗺️ Roadmap
 
-- [x] Basic API server and worker stubs
-- [x] Svelte dashboard for graph visualization  
-- [ ] Complete Temporal workflow integration
-- [ ] LangGraph SDK code generation
+- [x] LangGraph Cloud-compatible API
+- [x] Event sourcing with CQRS pattern
+- [x] Custom graph execution engine
+- [x] Outbox pattern for reliable event delivery
+- [x] PostgreSQL event store with NATS JetStream messaging
+- [x] Fumadocs documentation site
+- [x] Svelte dashboard for visualization
+- [x] Server-Sent Events streaming
+- [ ] Enhanced LLM provider support (additional models)
+- [ ] Advanced workflow patterns (parallel execution, subgraphs)
 - [ ] Production Helm charts
-- [ ] Advanced observability and metrics
 - [ ] Multi-tenant support
+- [ ] Workflow versioning and migration tools
 
-See [TODO.md](TODO.md) and [docs/roadmap.md](docs/roadmap.md) for detailed development status.
+**📋 [Full Roadmap](https://duragraph.dev/docs/roadmap)**
 
 ---
 
 **DuraGraph** - Bringing enterprise-grade AI workflow orchestration to everyone.
+
+**[Get Started](https://duragraph.dev/docs/getting-started)** · **[Documentation](https://duragraph.dev/docs)** · **[Community](https://github.com/Duragraph/duragraph/discussions)**
