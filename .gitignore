@@ -33,6 +33,7 @@ gh_token.txt
 # GitHub Pages build output
 _site/
 _site
+
 CLAUDE.md
 commit-changes.sh
 COMMIT_STRATEGY.md
@@ -54,3 +55,29 @@ WORKFLOWS_COMPLETE.md
 WORKFLOWS_SUMMARY.md
 .init_structure.sh
 commit-strategy-full.sh
+README.act.md
+
+# VS Code settings (personal)
+.vscode/
+
+# Act (GitHub Actions local testing)
+.actrc
+bin/act
+
+# Compiled binaries
+bin/server
+bin/duragraph
+
+# pnpm cache
+.pnpm-store/
+
+# Design files (large binary files)
+*.afdesign
+*.afdesign~lock~
+
+# Deployment configs (may contain secrets)
+
+# npm lockfile (we use pnpm)
+package-lock.json
+website/package-lock.json
+dashboard/package-lock.json

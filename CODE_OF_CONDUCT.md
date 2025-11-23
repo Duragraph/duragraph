@@ -20,7 +20,7 @@ Examples of unacceptable behavior include:
 - Trolling, insulting or derogatory comments, and personal or political attacks
 - Public or private harassment
 - Publishing others' private information without explicit permission
-- Other conduct which could reasonably be considered inappropriate  
+- Other conduct which could reasonably be considered inappropriate
 
 ## Enforcement Responsibilities
 Community leaders are responsible for clarifying and enforcing our standards of acceptable
@@ -29,7 +29,7 @@ they deem inappropriate, threatening, offensive, or harmful.
 
 ## Enforcement
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to
-the community leaders responsible for enforcement at [INSERT CONTACT METHOD].  
+the community leaders responsible for enforcement at [INSERT CONTACT METHOD].
 All complaints will be reviewed and investigated promptly and fairly.
 
 ## Enforcement Guidelines
