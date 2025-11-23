@@ -108,3 +108,4 @@ CREATE TABLE audit_logs (
 CREATE INDEX audit_logs_project_idx ON audit_logs(project_id);
 CREATE INDEX audit_logs_payload_gin ON audit_logs USING gin(payload);
 CREATE INDEX audit_logs_ts_idx ON audit_logs(ts);
+
