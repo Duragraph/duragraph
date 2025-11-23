@@ -1,0 +1,110 @@
+-- Initial schema for core application database
+
+CREATE TABLE projects (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    org_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE assistants (
+    id UUID PRIMARY KEY,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    spec_json JSONB NOT NULL,
+    sdk_lang TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX assistants_project_idx ON assistants(project_id);
+CREATE INDEX assistants_spec_json_gin ON assistants USING gin(spec_json);
+
+CREATE TABLE threads (
+    id UUID PRIMARY KEY,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id TEXT,
+    metadata_json JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX threads_project_idx ON threads(project_id);
+CREATE INDEX threads_metadata_gin ON threads USING gin(metadata_json);
+
+CREATE TABLE messages (
+    id UUID PRIMARY KEY,
+    thread_id UUID NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    content_json JSONB NOT NULL,
+    tokens_used INT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX messages_thread_idx ON messages(thread_id);
+CREATE INDEX messages_content_gin ON messages USING gin(content_json);
+
+CREATE TABLE runs (
+    id UUID PRIMARY KEY,
+    thread_id UUID NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    assistant_id UUID REFERENCES assistants(id) ON DELETE SET NULL,
+    workflow_build_id TEXT,
+    status TEXT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at TIMESTAMPTZ,
+    error_json JSONB
+);
+
+CREATE INDEX runs_thread_idx ON runs(thread_id);
+CREATE INDEX runs_assistant_idx ON runs(assistant_id);
+CREATE INDEX runs_error_gin ON runs USING gin(error_json);
+
+CREATE TABLE steps (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    node_id TEXT,
+    kind TEXT,
+    status TEXT,
+    timing_json JSONB,
+    cost_json JSONB,
+    logs_ptr TEXT,
+    checkpoint_ptr TEXT
+);
+
+CREATE INDEX steps_run_idx ON steps(run_id);
+CREATE INDEX steps_timing_gin ON steps USING gin(timing_json);
+CREATE INDEX steps_cost_gin ON steps USING gin(cost_json);
+
+CREATE TABLE artifacts (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    uri TEXT NOT NULL,
+    metadata_json JSONB
+);
+
+CREATE INDEX artifacts_run_idx ON artifacts(run_id);
+CREATE INDEX artifacts_metadata_gin ON artifacts USING gin(metadata_json);
+
+CREATE TABLE webhooks (
+    id UUID PRIMARY KEY,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    events JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX webhooks_project_idx ON webhooks(project_id);
+CREATE INDEX webhooks_events_gin ON webhooks USING gin(events);
+
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    actor TEXT,
+    action TEXT,
+    target TEXT,
+    payload JSONB,
+    ts TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX audit_logs_project_idx ON audit_logs(project_id);
+CREATE INDEX audit_logs_payload_gin ON audit_logs USING gin(payload);
+CREATE INDEX audit_logs_ts_idx ON audit_logs(ts);
