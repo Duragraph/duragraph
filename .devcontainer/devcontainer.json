@@ -110,6 +110,7 @@
     "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",
     "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}",
     "GPG_PRIVATE_KEY": "${localEnv:GPG_PRIVATE_KEY}",
-    "GPG_KEY_ID": "${localEnv:GPG_KEY_ID}"
+    "GPG_KEY_ID": "${localEnv:GPG_KEY_ID}",
+    "ENABLE_GPG_SIGNING": "${localEnv:ENABLE_GPG_SIGNING}"
   }
 }

@@ -5,16 +5,19 @@ Complete development environment for DuraGraph with all tools pre-installed.
 ## 🚀 What's Included
 
 ### Languages & Runtimes
+
 - **Go 1.25.4** - API server development
 - **Node.js 22.12** (via fnm) - Frontend development
 - **Python 3.12** (via uv) - Testing & tooling
 
 ### Package Managers
+
 - **pnpm 9** - Fast, efficient Node.js package manager
 - **uv** - Ultra-fast Python package installer
 - **go modules** - Go dependency management
 
 ### Development Tools
+
 - **Task** - Task runner (replacement for Make)
 - **Act** - Run GitHub Actions locally
 - **GitHub CLI (gh)** - GitHub from the command line
@@ -23,18 +26,21 @@ Complete development environment for DuraGraph with all tools pre-installed.
 - **Git** - Version control
 
 ### Go Tools
+
 - **gopls** - Go language server
 - **delve (dlv)** - Go debugger
 - **golangci-lint** - Go linter
 - **goimports** - Import formatter
 
 ### Python Tools
+
 - **pre-commit** - Git hooks framework
 - **ruff** - Fast Python linter
 - **black** - Python formatter
 - **pytest** - Testing framework
 
 ### Shell
+
 - **zsh** - Default shell with better experience
 - **bash** - Available as alternative
 
@@ -47,33 +53,37 @@ The devcontainer includes these services via Docker Compose:
 
 ## 🔌 Port Forwarding
 
-| Port | Service | Auto-forward |
-|------|---------|--------------|
-| 8080 | API Server | Notify |
-| 8081 | API Server (alt) | Notify |
-| 5173 | Dashboard (Svelte) | Notify |
-| 3000 | Docs/Website | Notify |
-| 5432 | PostgreSQL | Silent |
-| 4222 | NATS | Silent |
-| 8222 | NATS Monitor | Silent |
+| Port | Service            | Auto-forward |
+| ---- | ------------------ | ------------ |
+| 8080 | API Server         | Notify       |
+| 8081 | API Server (alt)   | Notify       |
+| 5173 | Dashboard (Svelte) | Notify       |
+| 3000 | Docs/Website       | Notify       |
+| 5432 | PostgreSQL         | Silent       |
+| 4222 | NATS               | Silent       |
+| 8222 | NATS Monitor       | Silent       |
 
 ## 🎨 VS Code Extensions
 
 ### Go Development
+
 - `golang.go` - Go language support
 - `ms-azuretools.vscode-docker` - Docker support
 
 ### Python Development
+
 - `ms-python.python` - Python support
 - `ms-python.vscode-pylance` - Python language server
 
 ### Frontend Development
+
 - `svelte.svelte-vscode` - Svelte support
 - `dbaeumer.vscode-eslint` - ESLint
 - `esbenp.prettier-vscode` - Prettier formatter
 - `bradlc.vscode-tailwindcss` - Tailwind CSS
 
 ### Productivity
+
 - `task.vscode-task` - Task runner integration
 - `anthropic.claude-code` - Claude Code AI assistant
 - `github.copilot` - GitHub Copilot
@@ -81,10 +91,12 @@ The devcontainer includes these services via Docker Compose:
 - `eamodio.gitlens` - Git supercharged
 
 ### CI/CD & Testing
+
 - `nektos.act` - Run GitHub Actions locally
 - `github.vscode-github-actions` - GitHub Actions editor
 
 ### Code Quality
+
 - `usernamehw.errorlens` - Inline error display
 - `gruntfuggly.todo-tree` - TODO comments tree
 - `streetsidesoftware.code-spell-checker` - Spell checker
@@ -94,6 +106,7 @@ The devcontainer includes these services via Docker Compose:
 ### First Time Setup
 
 The devcontainer runs `post-create.sh` automatically, which:
+
 1. Installs Go dependencies
 2. Installs Node.js dependencies (dashboard, website, docs)
 3. Sets up pre-commit hooks
@@ -177,16 +190,30 @@ See [README.act.md](../README.act.md) for full Act guide.
 ### Environment Variables
 
 The devcontainer sets these automatically:
+
 - `DOCKER_BUILDKIT=1` - Use BuildKit for Docker builds
 - `COMPOSE_DOCKER_CLI_BUILD=1` - Use BuildKit with Compose
 - `PATH` - Includes Go, Node, Python, and tool binaries
 
-### Git Configuration
+### Git Configuration (All Optional)
 
-Post-create script sets:
+**For most users**: No setup needed! The devcontainer uses your existing git configuration.
+
+**Optional customization** :
+
+- `GIT_USER_NAME` - Custom git name (optional - defaults to your host git config)
+- `GIT_USER_EMAIL` - Custom git email (optional - defaults to your host git config)
+- `GPG_KEY_ID` - GPG key for commit signing (optional - maintainers only)
+- `GPG_PRIVATE_KEY` - Base64-encoded GPG private key (optional - maintainers only)
+- `ENABLE_GPG_SIGNING` - Auto-sign all commits (optional - requires GPG configured)
+
+**Default settings** (applied to all users):
+
 - Default branch: `main`
 - Pull strategy: `rebase`
 - Auto-prune on fetch
+
+**Fork-friendly design**: GPG signing is NOT required for contributing. All environment variables are optional and only affect YOUR devcontainer, not repository requirements.
 
 ### Shell Configuration
 
@@ -216,23 +243,27 @@ docker compose -f .devcontainer/docker-compose.yml up -d --build
 ## 🐛 Troubleshooting
 
 ### Go modules not working
+
 ```bash
 go mod download
 go mod tidy
 ```
 
 ### Node/pnpm not found
+
 ```bash
 eval "$(fnm env)"
 fnm install 22.12
 ```
 
 ### Python not found
+
 ```bash
 uv python install 3.12
 ```
 
 ### Act not working
+
 ```bash
 # Verify installation
 act --version
@@ -242,6 +273,7 @@ task act:install
 ```
 
 ### Docker socket issues
+
 ```bash
 # Docker-in-Docker is enabled, socket should be available at:
 ls -la /var/run/docker.sock
@@ -250,6 +282,7 @@ ls -la /var/run/docker.sock
 ```
 
 ### Port already in use
+
 ```bash
 # Check what's using the port
 sudo lsof -i :8080

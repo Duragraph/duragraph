@@ -66,6 +66,8 @@ bin/act
 
 # Devcontainer environment (contains secrets)
 .devcontainer/.env
+.devcontainer/devcontainer.env
+.devcontainer/ENV_SETUP.md
 ~/.devcontainer.env
 
 # Compiled binaries
@@ -84,5 +86,3 @@ package-lock.json
 website/package-lock.json
 dashboard/package-lock.json
 commit-remaining.sh
-
-.devcontainer/ENV_SETUP.md

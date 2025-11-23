@@ -47,19 +47,26 @@ git config --global init.defaultBranch main
 git config --global pull.rebase true
 git config --global fetch.prune true
 
-# Configure git user from environment variables
+# Configure git user from environment variables (optional)
+# Only set if provided - allows contributors to use their own git config
 if [ -n "$GIT_USER_NAME" ]; then
     echo "📝 Configuring git user: $GIT_USER_NAME"
     git config --global user.name "$GIT_USER_NAME"
+else
+    echo "ℹ️  GIT_USER_NAME not set, using your existing git config"
 fi
 
 if [ -n "$GIT_USER_EMAIL" ]; then
     echo "📧 Configuring git email: $GIT_USER_EMAIL"
     git config --global user.email "$GIT_USER_EMAIL"
+else
+    echo "ℹ️  GIT_USER_EMAIL not set, using your existing git config"
 fi
 
-# Import GPG key and configure git signing
-if [ -n "$GPG_PRIVATE_KEY" ]; then
+# Import GPG key and configure git signing (OPTIONAL - only for maintainers)
+# Contributors working on forks do NOT need GPG signing enabled
+# This only affects your devcontainer, not the repository requirements
+if [ -n "$GPG_PRIVATE_KEY" ] && [ -n "$GPG_KEY_ID" ]; then
     echo "🔐 Importing GPG private key..."
 
     # Create GPG directory if it doesn't exist
@@ -67,30 +74,42 @@ if [ -n "$GPG_PRIVATE_KEY" ]; then
     chmod 700 ~/.gnupg
 
     # Import the private key (expects base64 encoded key)
-    echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
-
-    # Trust the key ultimately (non-interactive)
-    if [ -n "$GPG_KEY_ID" ]; then
+    # Use error handling to prevent script failure
+    if echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import 2>/dev/null; then
         echo "🔑 Configuring GPG key ID: $GPG_KEY_ID"
 
-        # Set ultimate trust for the key
-        echo -e "5\ny\n" | gpg --command-fd 0 --expert --edit-key "$GPG_KEY_ID" trust
+        # Set ultimate trust for the key (non-interactive)
+        # Suppress errors if key is already trusted
+        echo -e "5\ny\n" | gpg --command-fd 0 --expert --edit-key "$GPG_KEY_ID" trust 2>/dev/null || true
 
-        # Configure git to use this key for signing
+        # Configure git to use this key for signing LOCALLY (in devcontainer only)
         git config --global user.signingkey "$GPG_KEY_ID"
-        git config --global commit.gpgsign true
-        git config --global tag.gpgsign true
+
+        # Only enable automatic signing if explicitly requested
+        # This allows you to sign commits when pushing to main repo
+        # but doesn't force signing for all commits (e.g., when testing)
+        if [ "$ENABLE_GPG_SIGNING" = "true" ]; then
+            git config --global commit.gpgsign true
+            git config --global tag.gpgsign true
+            echo "✅ GPG key imported and automatic commit signing enabled"
+        else
+            echo "✅ GPG key imported (use 'git commit -S' to sign commits manually)"
+            echo "ℹ️  Set ENABLE_GPG_SIGNING=true to enable automatic signing"
+        fi
 
         # Configure GPG to use TTY (needed for devcontainer)
-        echo "export GPG_TTY=\$(tty)" >> ~/.bashrc
-        echo "export GPG_TTY=\$(tty)" >> ~/.zshrc
-
-        echo "✅ GPG key imported and git signing enabled"
+        # Only add if not already present to maintain idempotency
+        grep -q "export GPG_TTY" ~/.bashrc 2>/dev/null || echo "export GPG_TTY=\$(tty)" >> ~/.bashrc
+        grep -q "export GPG_TTY" ~/.zshrc 2>/dev/null || echo "export GPG_TTY=\$(tty)" >> ~/.zshrc
     else
-        echo "⚠️  GPG_KEY_ID not set, skipping git signing configuration"
+        echo "⚠️  Failed to import GPG key - check that GPG_PRIVATE_KEY is base64 encoded correctly"
+        echo "ℹ️  Continuing without GPG signing (not required for development)"
     fi
+elif [ -n "$GPG_PRIVATE_KEY" ] || [ -n "$GPG_KEY_ID" ]; then
+    echo "⚠️  Both GPG_PRIVATE_KEY and GPG_KEY_ID must be set for GPG signing"
+    echo "ℹ️  Continuing without GPG signing (not required for development)"
 else
-    echo "ℹ️  GPG_PRIVATE_KEY not set, skipping GPG import"
+    echo "ℹ️  GPG not configured (optional - only needed for maintainers pushing to main repo)"
 fi
 
 # Setup Act configuration
