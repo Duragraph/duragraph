@@ -1,0 +1,79 @@
+services:
+  # API Server
+  - type: web
+    name: duragraph-api
+    runtime: docker
+    dockerfilePath: ./deploy/docker/Dockerfile.server
+    dockerContext: .
+    plan: starter
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: HOST
+        value: 0.0.0.0
+      - key: DB_HOST
+        fromDatabase:
+          name: duragraph-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: duragraph-db
+          property: port
+      - key: DB_USER
+        fromDatabase:
+          name: duragraph-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: duragraph-db
+          property: password
+      - key: DB_NAME
+        fromDatabase:
+          name: duragraph-db
+          property: database
+      - key: DB_SSLMODE
+        value: require
+      - key: NATS_URL
+        value: nats://duragraph-nats:4222
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AUTH_ENABLED
+        value: false
+
+  # NATS JetStream
+  - type: private-service
+    name: duragraph-nats
+    runtime: image
+    image:
+      url: nats:2.10-alpine
+    plan: starter
+    region: oregon
+    envVars:
+      - key: NATS_ARGS
+        value: "-js -sd /data -m 8222"
+    disk:
+      name: nats-data
+      mountPath: /data
+      sizeGB: 1
+
+  # Dashboard
+  - type: web
+    name: duragraph-dashboard
+    runtime: docker
+    dockerfilePath: ./deploy/docker/Dockerfile.dashboard
+    dockerContext: ./dashboard
+    plan: starter
+    region: oregon
+
+databases:
+  - name: duragraph-db
+    databaseName: duragraph
+    plan: starter
+    region: oregon
+    postgresMajorVersion: 15

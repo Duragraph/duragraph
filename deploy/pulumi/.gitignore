@@ -1,0 +1,6 @@
+/bin/
+/node_modules/
+*.js
+*.js.map
+Pulumi.*.yaml
+.pulumi/

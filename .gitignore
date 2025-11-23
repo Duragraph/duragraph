@@ -75,9 +75,8 @@ bin/duragraph
 *.afdesign
 *.afdesign~lock~
 
-# Deployment configs (may contain secrets)
-
 # npm lockfile (we use pnpm)
 package-lock.json
 website/package-lock.json
 dashboard/package-lock.json
+commit-remaining.sh

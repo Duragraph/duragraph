@@ -1,0 +1,109 @@
+version: "1.0"
+name: duragraph
+
+services:
+  api:
+    type: container
+    name: duragraph-api
+    port: 8080
+    protocol: http
+    privacy: public
+    min_scale: 1
+    max_scale: 5
+    cpu_limit: 1000
+    memory_limit: 1024
+    image:
+      name: duragraph-api
+      build:
+        context: .
+        dockerfile: deploy/docker/Dockerfile.server
+    health_check:
+      path: /health
+      port: 8080
+      interval: 30s
+      timeout: 5s
+      unhealthy_threshold: 3
+      healthy_threshold: 2
+    environment:
+      - name: PORT
+        value: "8080"
+      - name: HOST
+        value: "0.0.0.0"
+      - name: DB_HOST
+        from_database: postgres
+        attribute: host
+      - name: DB_PORT
+        from_database: postgres
+        attribute: port
+      - name: DB_USER
+        from_database: postgres
+        attribute: user
+      - name: DB_PASSWORD
+        from_database: postgres
+        attribute: password
+      - name: DB_NAME
+        from_database: postgres
+        attribute: database
+      - name: DB_SSLMODE
+        value: "require"
+      - name: NATS_URL
+        value: "nats://nats:4222"
+    secrets:
+      - OPENAI_API_KEY
+      - ANTHROPIC_API_KEY
+      - JWT_SECRET
+
+  nats:
+    type: container
+    name: duragraph-nats
+    port: 4222
+    privacy: private
+    min_scale: 1
+    max_scale: 1
+    cpu_limit: 500
+    memory_limit: 512
+    image:
+      registry: docker.io
+      name: nats
+      tag: 2.10-alpine
+    command:
+      - "-js"
+      - "-sd"
+      - "/data"
+      - "-m"
+      - "8222"
+    volumes:
+      - type: local_ssd
+        name: nats-data
+        mount_path: /data
+        size: 5
+
+  dashboard:
+    type: container
+    name: duragraph-dashboard
+    port: 80
+    protocol: http
+    privacy: public
+    min_scale: 1
+    max_scale: 3
+    cpu_limit: 500
+    memory_limit: 512
+    image:
+      name: duragraph-dashboard
+      build:
+        context: dashboard
+        dockerfile: ../deploy/docker/Dockerfile.dashboard
+    environment:
+      - name: API_URL
+        from_service: api
+        attribute: url
+
+databases:
+  postgres:
+    type: postgresql
+    version: "15"
+    node_type: db-dev-s
+    volume_size: 10
+    backup:
+      enabled: true
+      schedule: "0 2 * * *"
