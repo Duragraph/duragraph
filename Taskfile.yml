@@ -5,23 +5,23 @@ vars:
   DASHBOARD_PORT: 5173
   WEBSITE_PORT: 3000
   TEMPORAL_HOST: localhost:7233
-  
+
 tasks:
   # === Installation & Setup ===
   install:
     desc: Install all project dependencies
-    deps: [install:go, install:dashboard, install:website, install:python]
+    deps: ["install:go", "install:dashboard", "install:website", "install:python"]
 
   install:go:
     desc: Install Go dependencies
     cmds:
       - cd cmd/api && go mod download
-      - cd runtime && go mod download 
+      - cd runtime && go mod download
       - cd workers/runtime/go-adapter && go mod download
       - cd workers/codegen/eino-to-temporal && go mod download
 
   install:dashboard:
-    desc: Install dashboard dependencies  
+    desc: Install dashboard dependencies
     dir: dashboard
     cmds:
       - pnpm install
@@ -40,7 +40,7 @@ tasks:
   # === Development Servers ===
   dev:
     desc: Start all development services
-    deps: [api:dev, dashboard:dev, workers:dev]
+    deps: ["api:dev", "dashboard:dev", "workers:dev"]
 
   api:dev:
     desc: Start API server in development mode
@@ -60,7 +60,7 @@ tasks:
       - pnpm dev --port {{.DASHBOARD_PORT}}
 
   website:dev:
-    desc: Start Next.js website development server  
+    desc: Start Next.js website development server
     dir: website
     cmds:
       - echo "Starting website on :{{.WEBSITE_PORT}}"
@@ -68,7 +68,7 @@ tasks:
 
   workers:dev:
     desc: Start all workers in development mode
-    deps: [workers:go, workers:python]
+    deps: ["workers:go", "workers:python"]
 
   # === Code Generation ===
   codegen:list:
@@ -94,7 +94,7 @@ tasks:
 
   codegen:example:
     desc: Generate example workflows
-    deps: [codegen:eino, codegen:langgraph]
+    deps: ["codegen:eino", "codegen:langgraph"]
 
   workers:go:
     desc: Start Go Temporal worker
@@ -117,7 +117,7 @@ tasks:
   # === Building ===
   build:
     desc: Build all components
-    deps: [build:api, build:dashboard, build:website, build:workers]
+    deps: ["build:api", "build:dashboard", "build:website", "build:workers"]
 
   build:api:
     desc: Build API server binary
@@ -145,7 +145,7 @@ tasks:
 
   build:workers:
     desc: Build worker binaries
-    deps: [build:workers:go]
+    deps: ["build:workers:go"]
 
   build:workers:go:
     desc: Build Go worker binary
@@ -158,7 +158,7 @@ tasks:
   # === Testing ===
   test:
     desc: Run all tests
-    deps: [test:api, test:workers, test:dashboard]
+    deps: ["test:api", "test:workers", "test:dashboard"]
 
   test:api:
     desc: Run Go API and runtime tests
@@ -202,7 +202,7 @@ tasks:
     desc: Run end-to-end tests
     cmds:
       - task up:test
-      - pytest -v tests/e2e/ 
+      - pytest -v tests/e2e/
       - task down
 
   test:soak:
@@ -214,7 +214,7 @@ tasks:
   # === Code Quality ===
   lint:
     desc: Lint all code
-    deps: [lint:go, lint:python, lint:dashboard, lint:website]
+    deps: ["lint:go", "lint:python", "lint:dashboard", "lint:website"]
 
   lint:go:
     desc: Lint Go code
@@ -243,7 +243,7 @@ tasks:
 
   format:
     desc: Format all code
-    deps: [format:go, format:python, format:dashboard, format:website]
+    deps: ["format:go", "format:python", "format:dashboard", "format:website"]
 
   format:go:
     desc: Format Go code
@@ -273,7 +273,7 @@ tasks:
   # === Docker Operations ===
   docker:build:
     desc: Build all Docker images
-    deps: [docker:build:api, docker:build:workers, docker:build:dashboard]
+    deps: ["docker:build:api", "docker:build:workers", "docker:build:dashboard"]
 
   docker:build:api:
     desc: Build API Docker image
@@ -293,13 +293,13 @@ tasks:
 
   docker:run:api:
     desc: Run API in Docker
-    deps: [docker:build:api]
+    deps: ["docker:build:api"]
     cmds:
       - docker run -p {{.API_PORT}}:8080 -e TEMPORAL_HOSTPORT={{.TEMPORAL_HOST}} duragraph/api:latest
 
   docker:run:workers:
     desc: Run workers in Docker
-    deps: [docker:build:workers]
+    deps: ["docker:build:workers"]
     cmds:
       - docker run -e TEMPORAL_HOSTPORT={{.TEMPORAL_HOST}} duragraph/go-worker:latest &
       - docker run -e TEMPORAL_HOSTPORT={{.TEMPORAL_HOST}} duragraph/python-worker:latest &
@@ -420,7 +420,7 @@ tasks:
   # === Quick Development Commands ===
   api:
     desc: Quick start API development (with dependencies)
-    deps: [db:start]
+    deps: ["db:start"]
     cmds:
       - task api:dev
 
