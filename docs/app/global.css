@@ -1,0 +1,14 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* Custom DuraGraph theme colors matching Material theme */
+:root {
+  --primary: 250 44% 33%; /* #2C2E7F - Dark purple from Material theme */
+  --primary-foreground: 0 0% 100%;
+}
+
+.dark {
+  --primary: 250 44% 33%;
+  --primary-foreground: 0 0% 100%;
+}

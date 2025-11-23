@@ -1,0 +1,87 @@
+---
+title: Observability
+description: Observability
+---
+
+# Observability
+
+This document describes how we configure OpenTelemetry (OTel) instrumentation, what we export, and how to investigate system behavior using metrics, traces, and logs.
+
+---
+
+## OTel Setup
+
+The system uses OpenTelemetry SDKs in Go (API, bridge, workers) and Python (adapters). Configuration is driven by environment variables:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` – OTLP collector endpoint.
+- `OTEL_EXPORTER_OTLP_HEADERS` – additional headers for exports.
+- `OTEL_SERVICE_NAME` – service identifier ("duragraph-api", "duragraph-bridge", "duragraph-pyworker", etc.).
+- `OTEL_LOG_LEVEL` – log verbosity for OTel instrumentation.
+- `OTEL_RESOURCE_ATTRIBUTES` – additional dimensions (deployment, project, region).
+
+---
+
+## Telemetry Data
+
+### Traces
+- **Run lifecycle** (`/runs` endpoints → Translator → Bridge → Temporal client).
+- **Activities** (e.g. `llm_call`, `tool`).
+- **SSE streaming** events correlation.
+- Search attributes (e.g. `run_id`, `thread_id`, `assistant_id`) are added as trace attributes.
+
+### Metrics
+- Run start latency histogram.
+- Workflow activity duration.
+- Active runs count.
+- SSE stream lag and dropped events.
+- Error rates.
+
+### Logs
+- Structured logs with run_id / thread_id context.
+- Logs emitted from API requests, workflow execution, and activity handlers.
+
+---
+
+## Grafana Dashboards & Queries
+
+Typical Grafana panels:
+
+- **Run Start Latency (p95)**:
+  ```
+  histogram_quantile(0.95, sum(rate(run_start_seconds_bucket[5m])) by (le))
+  ```
+
+- **Run Success Rate**:
+  ```
+  sum(rate(run_completed_total{status="success"}[5m]))
+  /
+  sum(rate(run_completed_total[5m]))
+  ```
+
+- **SSE Stream Gaps**:
+  ```
+  sum(rate(sse_gap_total[5m])) by (endpoint)
+  ```
+
+- **Worker Activity Duration (avg)**:
+  ```
+  rate(activity_duration_seconds_sum[5m])
+  /
+  rate(activity_duration_seconds_count[5m])
+  ```
+
+---
+
+## Correlating Run IDs to Traces
+
+Every `run_id` is attached as:
+- A **trace attribute** (`run_id`).
+- A **log field**.
+- A **metric label**.
+
+This allows navigation between:
+- **API request logs** filtered by run_id.
+- **Grafana panels** filtering by `run_id`.
+- **Trace explorer views** (Jaeger/Tempo) that show span trees for individual runs.
+
+---

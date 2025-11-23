@@ -1,0 +1,90 @@
+---
+title: API Reference
+description: API Reference
+---
+
+# API Reference
+
+This page documents the REST and SSE API endpoints exposed by the system.
+
+The API specification is defined in [`schemas/openapi/duragraph.yaml`](../schemas/openapi/duragraph.yaml).
+It is rendered automatically below using the MkDocs OpenAPI plugin:
+
+```yaml
+::: openapi schemas/openapi/duragraph.yaml
+```
+
+---
+
+## Common Examples
+
+### 1. Create Assistant
+
+```bash
+curl -X POST http://localhost:8000/assistants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Assistant",
+    "description": "Helps with workflow orchestration"
+  }'
+```
+
+---
+
+### 2. Create Thread
+
+```bash
+curl -X POST http://localhost:8000/threads \
+  -H "Content-Type: application/json" \
+  -d '{
+    "assistant_id": "asst_123",
+    "title": "My first thread"
+  }'
+```
+
+---
+
+### 3. Create Message
+
+```bash
+curl -X POST http://localhost:8000/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "thread_id": "thread_123",
+    "content": "Hello world!"
+  }'
+```
+
+---
+
+### 4. Create Run & Consume Stream
+
+```bash
+curl -N -X POST http://localhost:8000/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "thread_id": "thread_123"
+  }' \
+  --output - | while read line; do
+    echo "$line"
+  done
+```
+
+This uses `-N` to disable buffering and consumes SSE events as they stream from `/stream`.
+
+---
+
+### 5. List Runs Filtered by Thread
+
+```bash
+curl "http://localhost:8000/runs?thread_id=thread_123"
+```
+
+---
+
+## Notes
+
+- All endpoints follow REST conventions.
+- Streaming responses use **Server-Sent Events (SSE)**.
+- For detailed schemas, error models, and idempotency guarantees, see:
+  - [API Shim Architecture](architecture/api-shim.md)
