@@ -46,10 +46,30 @@ Complete development environment for DuraGraph with all tools pre-installed.
 
 ## 📦 Services
 
-The devcontainer includes these services via Docker Compose:
+The devcontainer includes these services via Docker Compose on a shared network (`duragraph-network`):
 
-- **PostgreSQL 15** - Database (port 5432)
-- **NATS JetStream** - Message broker (port 4222, monitor: 8222)
+- **PostgreSQL 15** - Database (accessible at `db:5432` from devcontainer, `localhost:5432` from host)
+- **NATS JetStream** - Message broker (accessible at `nats:4222` from devcontainer, `localhost:4222` from host)
+
+### Connecting to Services
+
+From within the devcontainer:
+```bash
+# PostgreSQL connection string
+postgresql://appuser:apppass@db:5432/appdb
+
+# NATS connection URL
+nats://nats:4222
+```
+
+From your host machine:
+```bash
+# PostgreSQL connection string
+postgresql://appuser:apppass@localhost:5432/appdb
+
+# NATS connection URL
+nats://localhost:4222
+```
 
 ## 🔌 Port Forwarding
 

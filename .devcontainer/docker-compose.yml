@@ -11,12 +11,14 @@ services:
       # - devcontainer-pnpm:/home/vscode/.local/share/pnpm
       # - devcontainer-cache:/home/vscode/.cache
     command: sleep infinity
-    network_mode: host
     privileged: true
+    networks:
+      - duragraph-network
 
   # Development services
   db:
     image: postgres:15-alpine
+    container_name: duragraph-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: appuser
@@ -32,9 +34,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - duragraph-network
 
   nats:
     image: nats:2.10-alpine
+    container_name: duragraph-nats
     restart: unless-stopped
     command: ["-js", "-m", "8222"]
     ports:
@@ -45,6 +50,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - duragraph-network
+
+networks:
+  duragraph-network:
+    external: true
+    name: duragraph-network
 
 volumes:
   postgres-data:

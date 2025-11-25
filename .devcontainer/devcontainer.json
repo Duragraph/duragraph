@@ -102,6 +102,7 @@
       "onAutoForward": "silent"
     }
   },
+  "initializeCommand": "docker network inspect duragraph-network >/dev/null 2>&1 || docker network create duragraph-network",
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "vscode",
   "containerEnv": {
