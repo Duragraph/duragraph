@@ -7,19 +7,31 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-json
+        exclude: 'tsconfig.*\.json$'  # tsconfig files use JSONC (JSON with Comments)
       - id: check-added-large-files
         args: ['--maxkb=1000']
       - id: check-merge-conflict
       - id: detect-private-key
 
-  # Go
+  # Go (only runs on .go files)
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.5.1
     hooks:
       - id: go-fmt
-      - id: go-vet
+        types: [go]
       - id: go-imports
+        types: [go]
       - id: go-mod-tidy
+
+  # Go vet as local hook (dnephin's version doesn't handle modules well)
+  - repo: local
+    hooks:
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
 
   # Secrets detection
   - repo: https://github.com/gitleaks/gitleaks

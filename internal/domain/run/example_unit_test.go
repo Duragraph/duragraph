@@ -23,9 +23,9 @@ func TestRun_Creation(t *testing.T) {
 
 	t.Run("creates run with valid parameters", func(t *testing.T) {
 		// Arrange
-		threadID := "thread-123"
-		assistantID := "assistant-456"
-		input := map[string]interface{}{"message": "test"}
+		_ = "thread-123"                              // threadID
+		_ = "assistant-456"                           // assistantID
+		_ = map[string]interface{}{"message": "test"} // input
 
 		// Act
 		// run, err := run.NewRun(threadID, assistantID, input)
@@ -41,9 +41,9 @@ func TestRun_Creation(t *testing.T) {
 
 	t.Run("rejects run with empty thread ID", func(t *testing.T) {
 		// Arrange
-		threadID := ""
-		assistantID := "assistant-456"
-		input := map[string]interface{}{"message": "test"}
+		_ = ""                                        // threadID (empty)
+		_ = "assistant-456"                           // assistantID
+		_ = map[string]interface{}{"message": "test"} // input
 
 		// Act
 		// _, err := run.NewRun(threadID, assistantID, input)
