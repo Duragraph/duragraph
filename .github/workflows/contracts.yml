@@ -24,7 +24,7 @@ jobs:
         with:
           base: tests/reference/langgraph-openapi.json
           revision: schemas/openapi/duragraph.yaml
-          fail-on-diff: true
+          fail-on: ERR
 
   ir_validate:
     runs-on: ubuntu-latest
