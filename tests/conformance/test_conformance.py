@@ -3,7 +3,7 @@ import requests
 import sseclient
 import os
 
-BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8080")
+BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8080/api/v1")
 
 class APIClient:
     def __init__(self, base_url=BASE_URL):
@@ -24,17 +24,21 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
-    def create_message(self, thread_id, content="hello"):
+    def create_message(self, thread_id, content="hello", role="user"):
         r = requests.post(f"{self.base_url}/threads/{thread_id}/messages",
-                          json={"content": content})
+                          json={"role": role, "content": content})
         if r.status_code == 501:
             pytest.skip("Messages API not implemented yet (501)")
         r.raise_for_status()
         return r.json()
 
-    def start_run(self, assistant_id, thread_id, ir=None):
-        data = {"assistant_id": assistant_id, "ir": ir or {"kind": "hello"}}
-        r = requests.post(f"{self.base_url}/threads/{thread_id}/runs", json=data)
+    def start_run(self, assistant_id, thread_id, input_data=None):
+        data = {
+            "assistant_id": assistant_id,
+            "thread_id": thread_id,
+            "input": input_data or {"message": "hello"}
+        }
+        r = requests.post(f"{self.base_url}/runs", json=data)
         if r.status_code == 501:
             pytest.skip("Runs API not implemented yet (501)")
         r.raise_for_status()
@@ -48,7 +52,7 @@ class APIClient:
         return r.json()
 
     def subscribe_stream(self, run_id):
-        url = f"{self.base_url}/runs/{run_id}/stream"
+        url = f"{self.base_url}/stream?run_id={run_id}"
         r = requests.get(url, stream=True)
         if r.status_code == 501:
             pytest.skip("Stream API not implemented yet (501)")
@@ -62,19 +66,22 @@ def test_run_lifecycle():
 
     # Create assistant
     assistant = client.create_assistant()
-    assert "id" in assistant
+    assert "assistant_id" in assistant
 
     # Create thread and message
     thread = client.create_thread()
-    client.create_message(thread["id"], "hello world")
+    assert "thread_id" in thread
+    client.create_message(thread["thread_id"], "hello world")
 
     # Start run
-    run = client.start_run(assistant["id"], thread["id"], {"kind": "hello"})
-    run_id = run["id"]
+    run = client.start_run(assistant["assistant_id"], thread["thread_id"], {"message": "hello world"})
+    assert "run_id" in run
+    run_id = run["run_id"]
 
     # Subscribe to stream and assert event order
     events = []
-    for event in client.subscribe_stream(run_id):
+    sse_client = client.subscribe_stream(run_id)
+    for event in sse_client.events():
         events.append(event.event)
         if event.event == "run_completed":
             break

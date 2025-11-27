@@ -63,7 +63,7 @@ services:
     volumes:
       - ../..:/workspace:ro
     environment:
-      - API_BASE_URL=http://test-api:8080
+      - API_BASE_URL=http://test-api:8080/api/v1
     depends_on:
       test-api:
         condition: service_healthy
