@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # Test database with isolated data
   test-db:
@@ -12,7 +10,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - ./deploy/sql:/docker-entrypoint-initdb.d
+      - ../../deploy/sql:/docker-entrypoint-initdb.d
     tmpfs:
       - /var/lib/postgresql/data  # Use tmpfs for faster test runs
 
@@ -34,7 +32,7 @@ services:
   # API server for testing
   test-api:
     build:
-      context: .
+      context: ../..
       dockerfile: deploy/docker/Dockerfile.api
     container_name: duragraph-test-api
     ports:
@@ -49,8 +47,8 @@ services:
   # Workers for testing
   test-go-worker:
     build:
-      context: workers/runtime/go-adapter
-      dockerfile: ../../../deploy/docker/Dockerfile.go-worker
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.go-worker
     container_name: duragraph-test-go-worker
     environment:
       - TEMPORAL_HOSTPORT=temporal:7233
@@ -59,8 +57,8 @@ services:
 
   test-python-worker:
     build:
-      context: workers/runtime/python-adapter
-      dockerfile: ../../../deploy/docker/Dockerfile.python-worker
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.python-worker
     container_name: duragraph-test-python-worker
     environment:
       - TEMPORAL_HOSTPORT=temporal:7233
