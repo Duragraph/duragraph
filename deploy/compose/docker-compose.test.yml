@@ -13,21 +13,19 @@ services:
       - ../../deploy/sql:/docker-entrypoint-initdb.d
     tmpfs:
       - /var/lib/postgresql/data  # Use tmpfs for faster test runs
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  # Temporal server for testing
-  temporal:
-    image: temporalio/auto-setup:1.20.0
-    container_name: duragraph-test-temporal
+  # NATS for messaging
+  nats:
+    image: nats:2.10-alpine
+    container_name: duragraph-test-nats
     ports:
-      - "7234:7233"
-    environment:
-      - DB=postgres
-      - DB_PORT=5432
-      - POSTGRES_USER=testuser
-      - POSTGRES_PWD=testpass
-      - POSTGRES_SEEDS=test-db
-    depends_on:
-      - test-db
+      - "4222:4222"
+    command: ["-js"]
 
   # API server for testing
   test-api:
@@ -38,32 +36,24 @@ services:
     ports:
       - "8081:8080"
     environment:
-      - TEMPORAL_HOSTPORT=temporal:7233
-      - DATABASE_URL=postgres://testuser:testpass@test-db:5432/testdb
+      - PORT=8080
+      - DB_HOST=test-db
+      - DB_PORT=5432
+      - DB_USER=testuser
+      - DB_PASSWORD=testpass
+      - DB_NAME=testdb
+      - DB_SSLMODE=disable
+      - NATS_URL=nats://nats:4222
     depends_on:
-      - test-db
-      - temporal
-
-  # Workers for testing
-  test-go-worker:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile.go-worker
-    container_name: duragraph-test-go-worker
-    environment:
-      - TEMPORAL_HOSTPORT=temporal:7233
-    depends_on:
-      - temporal
-
-  test-python-worker:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile.python-worker
-    container_name: duragraph-test-python-worker
-    environment:
-      - TEMPORAL_HOSTPORT=temporal:7233
-    depends_on:
-      - temporal
+      test-db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # Test runner for conformance tests
   test-runner:
@@ -75,7 +65,8 @@ services:
     environment:
       - API_BASE_URL=http://test-api:8080
     depends_on:
-      - test-api
+      test-api:
+        condition: service_healthy
     command: >
       sh -c "pip install -q pytest requests sseclient-py &&
              pytest -q tests/conformance --tb=short"
