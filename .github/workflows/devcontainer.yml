@@ -1,5 +1,8 @@
 name: Devcontainer Image
 
+# NOTE: This workflow requires Docker-in-Docker and cannot be tested locally
+# with Act. It will run correctly on GitHub Actions.
+
 on:
   push:
     branches:
@@ -55,6 +58,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push devcontainer image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .devcontainer
