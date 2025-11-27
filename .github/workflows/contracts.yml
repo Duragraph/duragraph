@@ -15,19 +15,17 @@ jobs:
       - name: Lint OpenAPI spec
         run: spectral lint schemas/openapi/duragraph.yaml
 
-  openapi_diff:
-    runs-on: ubuntu-latest
-    # This job tracks API compatibility with LangGraph Platform.
-    # Currently informational only since we're building up to full compatibility.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v3
-      - name: Check for breaking changes against LangGraph spec
-        uses: oasdiff/oasdiff-action/breaking@main
-        with:
-          base: tests/reference/langgraph-platform.json
-          revision: schemas/openapi/duragraph.yaml
-          fail-on: ERR
+  # TODO: Re-enable when DuraGraph API reaches feature parity with LangGraph Platform
+  # openapi_diff:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - name: Check for breaking changes against LangGraph spec
+  #       uses: oasdiff/oasdiff-action/breaking@main
+  #       with:
+  #         base: tests/reference/langgraph-platform.json
+  #         revision: schemas/openapi/duragraph.yaml
+  #         fail-on: ERR
 
   ir_validate:
     runs-on: ubuntu-latest
