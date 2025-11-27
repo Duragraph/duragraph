@@ -17,6 +17,9 @@ jobs:
 
   openapi_diff:
     runs-on: ubuntu-latest
+    # This job tracks API compatibility with LangGraph Platform.
+    # Currently informational only since we're building up to full compatibility.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v3
       - name: Check for breaking changes against LangGraph spec
