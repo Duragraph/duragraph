@@ -22,7 +22,7 @@ jobs:
       - name: Check for breaking changes against LangGraph spec
         uses: oasdiff/oasdiff-action/breaking@main
         with:
-          base: tests/reference/langgraph-openapi.json
+          base: tests/reference/langgraph-platform.json
           revision: schemas/openapi/duragraph.yaml
           fail-on: ERR
 
