@@ -1,0 +1,12 @@
+extends:
+  - spectral:oas
+
+rules:
+  # Relax some rules for now - can be tightened later
+  oas3-api-servers: warn
+  info-contact: off
+  info-description: warn
+  operation-description: warn
+  operation-operationId: error
+  operation-tags: warn
+  oas3-valid-media-example: warn

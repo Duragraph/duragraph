@@ -19,15 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install openapi-diff
-        run: |
-          curl -sSL https://github.com/OpenAPITools/openapi-diff/releases/latest/download/openapi-diff-cli.jar -o openapi-diff.jar
-      - name: Compare OpenAPI specs
-        run: |
-          java -jar openapi-diff.jar \
-            --fail-on-incompatible \
-            tests/reference/langgraph-openapi.json \
-            schemas/openapi/duragraph.yaml
+      - name: Check for breaking changes against LangGraph spec
+        uses: oasdiff/oasdiff-action/breaking@main
+        with:
+          base: tests/reference/langgraph-openapi.json
+          revision: schemas/openapi/duragraph.yaml
+          fail-on-diff: true
 
   ir_validate:
     runs-on: ubuntu-latest
