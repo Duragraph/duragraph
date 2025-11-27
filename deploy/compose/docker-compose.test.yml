@@ -64,3 +64,18 @@ services:
       - TEMPORAL_HOSTPORT=temporal:7233
     depends_on:
       - temporal
+
+  # Test runner for conformance tests
+  test-runner:
+    image: python:3.11-slim
+    container_name: duragraph-test-runner
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace:ro
+    environment:
+      - API_BASE_URL=http://test-api:8080
+    depends_on:
+      - test-api
+    command: >
+      sh -c "pip install -q pytest requests sseclient-py &&
+             pytest -q tests/conformance --tb=short"
