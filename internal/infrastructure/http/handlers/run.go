@@ -36,10 +36,8 @@ func NewRunHandler(
 	}
 }
 
-// CreateRun handles POST /threads/:thread_id/runs
+// CreateRun handles POST /runs
 func (h *RunHandler) CreateRun(c echo.Context) error {
-	threadID := c.Param("thread_id")
-
 	var req dto.CreateRunRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
@@ -48,14 +46,18 @@ func (h *RunHandler) CreateRun(c echo.Context) error {
 		})
 	}
 
-	// Override thread ID from path
-	req.ThreadID = threadID
-
 	// Validate required fields
 	if req.AssistantID == "" {
 		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
 			Error:   "invalid_request",
 			Message: "assistant_id is required",
+		})
+	}
+
+	if req.ThreadID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "thread_id is required",
 		})
 	}
 
