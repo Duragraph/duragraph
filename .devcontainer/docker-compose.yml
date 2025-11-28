@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - devcontainer.env
     volumes:
       - ..:/workspace:cached
       # - devcontainer-go:/go

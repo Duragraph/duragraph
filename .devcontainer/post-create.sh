@@ -112,6 +112,15 @@ else
     echo "ℹ️  GPG not configured (optional - only needed for maintainers pushing to main repo)"
 fi
 
+# Authenticate GitHub CLI (optional - for maintainers)
+if [ -n "$GH_PAT" ]; then
+    echo "🔑 Authenticating GitHub CLI..."
+    echo "$GH_PAT" | gh auth login --with-token
+    echo "✅ GitHub CLI authenticated"
+else
+    echo "ℹ️  GH_PAT not set, skipping GitHub CLI authentication"
+fi
+
 # Setup Act configuration
 echo "🎬 Setting up Act (GitHub Actions local runner)..."
 # task act:setup 2>/dev/null || echo "⚠️  Run 'task act:setup' manually to configure Act"
