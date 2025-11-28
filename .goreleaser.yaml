@@ -60,6 +60,45 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# Software Bill of Materials (SBOM) for supply chain security
+# Uses Syft to generate SBOM for each archive
+# https://goreleaser.com/customization/sbom/
+sboms:
+  - artifacts: archive
+    documents:
+      - "${artifact}.sbom.json"
+
+# Sign binaries and checksums with Cosign (keyless via OIDC)
+# https://goreleaser.com/customization/binary_sign/
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    output: true
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--oidc-issuer=https://token.actions.githubusercontent.com"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
+
+# Sign Docker images with Cosign (keyless via OIDC)
+# https://goreleaser.com/customization/docker_sign/
+docker_signs:
+  - cmd: cosign
+    artifacts: all
+    output: true
+    args:
+      - "sign"
+      - "--yes"
+      - "--oidc-issuer=https://token.actions.githubusercontent.com"
+      - "${artifact}"
+
+# Report artifact sizes in build output
+report_sizes: true
+
 snapshot:
   version_template: "{{ .Tag }}-next"
 
@@ -106,11 +145,8 @@ release:
     Download the binary for your platform from the assets below, or use Docker:
 
     ```bash
-    # Docker Hub
-    docker pull duragraph/api:{{ .Tag }}
-
     # GitHub Container Registry
-    docker pull ghcr.io/duragraph/duragraph/api:{{ .Tag }}
+    docker pull ghcr.io/duragraph/duragraph:{{ .Tag }}
     ```
 
     ### Binary Installation
@@ -130,77 +166,49 @@ release:
     **Full Changelog**: https://github.com/duragraph/duragraph/compare/{{ .PreviousTag }}...{{ .Tag }}
 
     ### Resources
-    - 📚 [Documentation](https://duragraph.dev/docs)
-    - 🐳 [Docker Hub](https://hub.docker.com/r/duragraph/api)
-    - 💬 [Discussions](https://github.com/duragraph/duragraph/discussions)
-    - 🐛 [Report Issues](https://github.com/duragraph/duragraph/issues)
+    - [Documentation](https://duragraph.dev/docs)
+    - [Container Images](https://github.com/duragraph/duragraph/pkgs/container/duragraph)
+    - [Discussions](https://github.com/duragraph/duragraph/discussions)
+    - [Report Issues](https://github.com/duragraph/duragraph/issues)
 
-# Docker images (built and pushed by GoReleaser)
-dockers:
-  - id: api-amd64
-    use: buildx
-    goos: linux
-    goarch: amd64
-    dockerfile: deploy/docker/Dockerfile.server
-    image_templates:
-      - "duragraph/api:{{ .Tag }}-amd64"
-      - "duragraph/api:latest-amd64"
-      - "ghcr.io/duragraph/duragraph/api:{{ .Tag }}-amd64"
-      - "ghcr.io/duragraph/duragraph/api:latest-amd64"
-    build_flag_templates:
-      - "--pull"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-      - "--platform=linux/amd64"
+# Docker images built with ko (no Dockerfile needed)
+# ko builds Go binaries directly into container images
+# https://ko.build/ | https://goreleaser.com/customization/ko/
+kos:
+  - id: duragraph-server
+    build: duragraph-server
+    # Push to both GHCR and Docker Hub
+    repository: ghcr.io/duragraph/duragraph
+    # Tags for the image
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    # Multi-arch support
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    # Base image (distroless for minimal attack surface)
+    base_image: cgr.dev/chainguard/static:latest
+    # Generate SBOM automatically
+    sbom: spdx
+    # Preserve import paths for debugging
+    bare: true
+    # Labels for OCI compliance
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.description: "Self-hosted LangGraph Cloud-compatible API"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.source: "{{ .GitURL }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: "Apache-2.0"
 
-  - id: api-arm64
-    use: buildx
-    goos: linux
-    goarch: arm64
-    dockerfile: deploy/docker/Dockerfile.server
-    image_templates:
-      - "duragraph/api:{{ .Tag }}-arm64"
-      - "duragraph/api:latest-arm64"
-      - "ghcr.io/duragraph/duragraph/api:{{ .Tag }}-arm64"
-      - "ghcr.io/duragraph/duragraph/api:latest-arm64"
-    build_flag_templates:
-      - "--pull"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-      - "--platform=linux/arm64"
-
-docker_manifests:
-  - name_template: duragraph/api:{{ .Tag }}
-    image_templates:
-      - duragraph/api:{{ .Tag }}-amd64
-      - duragraph/api:{{ .Tag }}-arm64
-
-  - name_template: duragraph/api:latest
-    image_templates:
-      - duragraph/api:latest-amd64
-      - duragraph/api:latest-arm64
-
-  - name_template: ghcr.io/duragraph/duragraph/api:{{ .Tag }}
-    image_templates:
-      - ghcr.io/duragraph/duragraph/api:{{ .Tag }}-amd64
-      - ghcr.io/duragraph/duragraph/api:{{ .Tag }}-arm64
-
-  - name_template: ghcr.io/duragraph/duragraph/api:latest
-    image_templates:
-      - ghcr.io/duragraph/duragraph/api:latest-amd64
-      - ghcr.io/duragraph/duragraph/api:latest-arm64
-
-# Homebrew tap (optional - for easy installation on macOS)
+# Homebrew tap (in main repo - no separate repo needed)
+# Users install with: brew install duragraph/duragraph/duragraph
 brews:
   - repository:
       owner: duragraph
-      name: homebrew-tap
+      name: duragraph
     directory: Formula
     homepage: https://duragraph.dev
     description: Self-hosted LangGraph Cloud-compatible API

@@ -1,15 +1,15 @@
-name: Deploy Docs
+name: Deploy Website
 
 on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
+      - 'website/**'
+      - '.github/workflows/website.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'docs/**'
+      - 'website/**'
 
 permissions:
   contents: read
@@ -32,7 +32,7 @@ jobs:
           version: 9
 
       - name: Install and build
-        working-directory: docs
+        working-directory: website
         run: |
           pnpm install --frozen-lockfile
           pnpm build
@@ -43,8 +43,8 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy out --project-name=duragraph-docs
-          workingDirectory: docs
+          command: pages deploy dist --project-name=duragraph-website
+          workingDirectory: website
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Comment PR with preview URL
@@ -56,5 +56,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## Docs Preview\n\nPreview: ${{ steps.deploy.outputs.deployment-url }}`
+              body: `## Website Preview\n\nPreview: ${{ steps.deploy.outputs.deployment-url }}`
             });
