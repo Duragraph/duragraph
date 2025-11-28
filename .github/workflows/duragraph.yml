@@ -1,16 +1,10 @@
-name: DuraGraph Docker Images
+name: DuraGraph Release
 
+# Only build and release when a version tag is pushed
 on:
   push:
-    branches:
-      - main
-      - develop
     tags:
       - 'v*.*.*'
-  pull_request:
-    branches:
-      - main
-      - develop
 
 env:
   REGISTRY: ghcr.io
@@ -67,12 +61,13 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -83,7 +78,6 @@ jobs:
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
 
       - name: Generate artifact attestation
-        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
@@ -93,7 +87,6 @@ jobs:
   security-scan:
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       security-events: write
