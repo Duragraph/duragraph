@@ -22,7 +22,7 @@ type OutboxMessage struct {
 	Published     bool
 	PublishedAt   *time.Time
 	Attempts      int
-	LastError     string
+	LastError     *string
 	NextRetryAt   *time.Time
 }
 

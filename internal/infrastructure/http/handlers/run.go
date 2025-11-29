@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/duragraph/duragraph/internal/application/command"
@@ -75,9 +76,10 @@ func (h *RunHandler) CreateRun(c echo.Context) error {
 		})
 	}
 
-	// Start execution asynchronously
+	// Start execution asynchronously with background context
+	// (request context gets cancelled after response is sent)
 	go func() {
-		h.runService.ExecuteRun(c.Request().Context(), runID)
+		h.runService.ExecuteRun(context.Background(), runID)
 	}()
 
 	// Return immediate response
@@ -187,9 +189,9 @@ func (h *RunHandler) SubmitToolOutputs(c echo.Context) error {
 		})
 	}
 
-	// Resume execution asynchronously
+	// Resume execution asynchronously with background context
 	go func() {
-		h.runService.ResumeRun(c.Request().Context(), runID)
+		h.runService.ResumeRun(context.Background(), runID)
 	}()
 
 	return c.JSON(http.StatusOK, map[string]string{
