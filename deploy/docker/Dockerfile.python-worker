@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install poetry
+RUN pip install poetry
+
+# Copy poetry files
+COPY pyproject.toml poetry.lock ./
+
+# Configure poetry: no virtual env since we're in container
+RUN poetry config virtualenvs.create false
+
+# Install dependencies
+RUN poetry install --no-dev
+
+# Copy application code
+COPY duragraph_pyworker/ ./duragraph_pyworker/
+
+# Run the worker
+CMD ["python", "-m", "duragraph_pyworker"]

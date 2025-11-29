@@ -1,0 +1,81 @@
+---
+title: Security
+description: Security
+---
+
+# Security
+
+This document outlines the security model, mitigations, and known risks in the Duragraph system.
+
+---
+
+## Authentication & Authorization
+
+- **JWT-based authentication**:
+  - API endpoints require `Authorization: Bearer <token>`.
+  - Tokens are validated using a configured public key (`DURAGRAPH_JWT_PUBLIC_KEY`).
+
+- **RBAC (Role-Based Access Control)**:
+  - Roles are scoped per **organization** and **project**.
+  - Roles: `admin`, `editor`, `viewer`.
+  - Authorization checks enforced across API endpoints.
+
+---
+
+## Isolation
+
+- **Namespaces**: Temporal namespaces used for environment isolation (e.g. `duragraph-dev`, `duragraph-prod`).
+- **Task Queues**: Separate queues for Go/Python workers prevent cross-language interference.
+
+---
+
+## Webhook & Input Security
+
+- **Webhook signing**: Outgoing webhooks are signed (HMAC with shared secret) to ensure authenticity.
+- **Prompt-injection mitigations**:
+  - Context sanitization before forwarding user input to LLM.
+  - Strict schema validation for IR prevents arbitrary execution.
+- **SSRF prevention**: Workers disallow arbitrary network access except whitelisted hosts for tool calls.
+
+---
+
+## Data Retention & Privacy
+
+- Workflow checkpoints and run history stored in Postgres and S3:
+  - Retention policy: 30 days default, configurable.
+- **Redaction**: Sensitive fields (API keys, secrets, PII) are redacted from logs, traces, and checkpoints.
+
+---
+
+## Secrets Handling
+
+- Secrets (DB passwords, S3 credentials, API keys) are loaded via environment variables.
+- Rotation supported through container restarts.
+- Never logged or stored in plaintext in checkpoints.
+
+---
+
+## STRIDE-lite Threat Model
+
+| Threat      | Vector / Example                              | Mitigation |
+|-------------|-----------------------------------------------|------------|
+| **Spoofing** | Forged API requests                          | JWT authentication + webhook signing |
+| **Tampering** | Modified checkpoints or logs                 | Integrity checks via S3 ETag, strict DB constraints |
+| **Repudiation** | Users denying actions performed             | Audit logs with signed JWT claims |
+| **Information Disclosure** | Secrets in logs or traces        | Redaction policy, sensitive field filters |
+| **Denial of Service** | Run flooding, SSE stream spamming    | Rate limiting, backpressure (`429`), worker autoscaling |
+| **Elevation of Privilege** | Bypassing project RBAC            | Namespace scoping, strict role checks |
+
+---
+
+## Summary
+
+Security is enforced via:
+- Strong authentication and RBAC.
+- Namespace and queue-level workload isolation.
+- Webhook signing & validation.
+- Prompt-injection and SSRF mitigations.
+- Data retention and redaction policies.
+- Threat modeling using a STRIDE-lite framework.
+
+---

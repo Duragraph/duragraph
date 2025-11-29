@@ -1,0 +1,233 @@
+# GoReleaser configuration for DuraGraph
+# https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    # Run tests before building
+    - go test ./... -short
+    - go mod tidy
+
+builds:
+  - id: duragraph-server
+    binary: duragraph
+    main: ./cmd/server
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: arm
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+    flags:
+      - -trimpath
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Software Bill of Materials (SBOM) for supply chain security
+# Uses Syft to generate SBOM for each archive
+# https://goreleaser.com/customization/sbom/
+sboms:
+  - artifacts: archive
+    documents:
+      - "${artifact}.sbom.json"
+
+# Sign binaries and checksums with Cosign (keyless via OIDC)
+# https://goreleaser.com/customization/binary_sign/
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    output: true
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--oidc-issuer=https://token.actions.githubusercontent.com"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    certificate: "${artifact}.pem"
+    signature: "${artifact}.sig"
+
+# Sign Docker images with Cosign (keyless via OIDC)
+# https://goreleaser.com/customization/docker_sign/
+docker_signs:
+  - cmd: cosign
+    artifacts: all
+    output: true
+    args:
+      - "sign"
+      - "--yes"
+      - "--oidc-issuer=https://token.actions.githubusercontent.com"
+      - "${artifact}"
+
+# Report artifact sizes in build output
+report_sizes: true
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug Fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: "Performance Improvements"
+      regexp: "^.*perf[(\\w)]*:+.*$"
+      order: 2
+    - title: "Documentation"
+      regexp: "^.*docs[(\\w)]*:+.*$"
+      order: 3
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^chore"
+      - "^test"
+      - "^ci"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: duragraph
+    name: duragraph
+  draft: false
+  prerelease: auto
+  mode: append
+  header: |
+    ## DuraGraph {{ .Tag }}
+
+    **Release Date**: {{ .Date }}
+
+    ### Installation
+
+    Download the binary for your platform from the assets below, or use Docker:
+
+    ```bash
+    # GitHub Container Registry
+    docker pull ghcr.io/duragraph/duragraph:{{ .Tag }}
+    ```
+
+    ### Binary Installation
+
+    ```bash
+    # Linux/macOS
+    curl -sL https://github.com/duragraph/duragraph/releases/download/{{ .Tag }}/duragraph_Linux_x86_64.tar.gz | tar xz
+    sudo mv duragraph /usr/local/bin/
+
+    # Or with script
+    curl -sL https://raw.githubusercontent.com/duragraph/duragraph/main/install.sh | bash
+    ```
+
+  footer: |
+    ---
+
+    **Full Changelog**: https://github.com/duragraph/duragraph/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ### Resources
+    - [Documentation](https://duragraph.dev/docs)
+    - [Container Images](https://github.com/duragraph/duragraph/pkgs/container/duragraph)
+    - [Discussions](https://github.com/duragraph/duragraph/discussions)
+    - [Report Issues](https://github.com/duragraph/duragraph/issues)
+
+# Docker images built with ko (no Dockerfile needed)
+# ko builds Go binaries directly into container images
+# https://ko.build/ | https://goreleaser.com/customization/ko/
+kos:
+  - id: duragraph-server
+    build: duragraph-server
+    # Push to both GHCR and Docker Hub
+    repository: ghcr.io/duragraph/duragraph
+    # Tags for the image
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    # Multi-arch support
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    # Base image (distroless for minimal attack surface)
+    base_image: cgr.dev/chainguard/static:latest
+    # Generate SBOM automatically
+    sbom: spdx
+    # Preserve import paths for debugging
+    bare: true
+    # Labels for OCI compliance
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.description: "Self-hosted LangGraph Cloud-compatible API"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.source: "{{ .GitURL }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: "Apache-2.0"
+
+# Homebrew tap (in main repo - no separate repo needed)
+# Users install with: brew install duragraph/duragraph/duragraph
+brews:
+  - repository:
+      owner: duragraph
+      name: duragraph
+    directory: Formula
+    homepage: https://duragraph.dev
+    description: Self-hosted LangGraph Cloud-compatible API
+    license: Apache-2.0
+    install: |
+      bin.install "duragraph"
+    test: |
+      system "#{bin}/duragraph", "version"
+
+# Snapcraft (optional - for easy installation on Linux)
+# snapcrafts:
+#   - name: duragraph
+#     summary: Self-hosted LangGraph Cloud-compatible API
+#     description: |
+#       DuraGraph provides a LangGraph Cloud-compatible API built with
+#       Event Sourcing and CQRS patterns for reliable AI workflow orchestration.
+#     grade: stable
+#     confinement: strict
+#     publish: true
+
+announce:
+  skip: false

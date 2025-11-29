@@ -1,9 +1,8 @@
-version: "3.9"
-
 services:
+  # PostgreSQL Database
   db:
     image: postgres:15
-    container_name: app-postgres
+    container_name: duragraph-postgres
     environment:
       POSTGRES_USER: appuser
       POSTGRES_PASSWORD: apppass
@@ -13,6 +12,63 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # NATS JetStream
+  nats:
+    image: nats:2.10-alpine
+    container_name: duragraph-nats
+    command: "-js -sd /data -m 8222"
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP management
+    volumes:
+      - natsdata:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # API Server
+  server:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.server
+    container_name: duragraph-server
+    ports:
+      - "8081:8080"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=appuser
+      - DB_PASSWORD=apppass
+      - DB_NAME=appdb
+      - DB_SSLMODE=disable
+      - NATS_URL=nats://nats:4222
+      - PORT=8080
+      - HOST=0.0.0.0
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Dashboard (development)
+  dashboard:
+    build:
+      context: dashboard
+      dockerfile: ../deploy/docker/Dockerfile.dashboard
+    container_name: duragraph-dashboard
+    ports:
+      - "5173:80"
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  natsdata:

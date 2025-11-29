@@ -1,0 +1,35 @@
+{
+  "name": "duragraph-pulumi",
+  "version": "1.0.0",
+  "description": "Pulumi infrastructure as code for DuraGraph - multi-cloud deployment",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc",
+    "deploy": "pulumi up",
+    "destroy": "pulumi destroy",
+    "preview": "pulumi preview",
+    "stack:init": "pulumi stack init",
+    "stack:select": "pulumi stack select",
+    "config:set": "pulumi config set"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.100.0",
+    "@pulumi/aws": "^6.15.0",
+    "@pulumi/gcp": "^7.8.0",
+    "@pulumi/azure-native": "^2.25.0",
+    "@pulumi/digitalocean": "^4.23.0",
+    "@pulumi/docker": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "pulumi",
+    "infrastructure",
+    "duragraph",
+    "multi-cloud",
+    "iac"
+  ],
+  "license": "Apache-2.0"
+}

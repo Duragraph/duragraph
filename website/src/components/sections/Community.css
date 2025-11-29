@@ -1,0 +1,45 @@
+.community-section {
+  text-align: center;
+}
+
+.community-subtitle {
+  font-size: 1.25rem;
+  font-family: 'Poppins', sans-serif;
+  color: var(--duragraph-text-secondary);
+  max-width: 600px;
+  margin: 0 auto 3rem;
+  line-height: 1.6;
+}
+
+.community-buttons {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.community-buttons button {
+  border: 2px solid var(--duragraph-border-strong) !important;
+  color: var(--duragraph-text-primary) !important;
+  font-family: 'Poppins', sans-serif !important;
+  font-size: 1rem !important;
+}
+
+.community-buttons button:hover {
+  background-color: var(--duragraph-surface) !important;
+  border-color: var(--duragraph-indigo) !important;
+}
+
+@media (max-width: 768px) {
+  .community-buttons {
+    flex-direction: column;
+    width: 100%;
+    max-width: 300px;
+    margin: 0 auto;
+  }
+
+  .community-buttons button {
+    width: 100%;
+  }
+}

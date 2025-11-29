@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod tidy:*)",
+      "Bash(go build:*)",
+      "Bash(task up:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker compose:*)",
+      "Bash(lsof:*)",
+      "Bash(./test-workflow.sh:*)",
+      "Bash(curl:*)",
+      "Bash(pnpm run check:*)",
+      "Bash(pnpm dev:*)",
+      "Bash(find:*)",
+      "Bash(pnpm build:*)",
+      "Bash(tree:*)",
+      "Bash(pnpm remove:*)",
+      "Bash(mkdir:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

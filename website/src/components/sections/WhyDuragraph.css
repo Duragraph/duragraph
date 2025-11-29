@@ -1,0 +1,93 @@
+.why-duragraph {
+  text-align: center;
+}
+
+.section-title {
+  font-size: 3.5rem;
+  font-weight: 700;
+  font-family: 'Space Grotesk', 'Poppins', sans-serif;
+  color: var(--duragraph-text-primary);
+  margin: 0 0 4rem 0;
+  letter-spacing: -0.02em;
+}
+
+.features-container {
+  display: flex;
+  border: 2px solid var(--duragraph-border-strong);
+  background-color: var(--duragraph-surface);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.feature-section {
+  flex: 1;
+  padding: 3rem 2rem;
+  text-align: center;
+  transition: background-color 0.3s;
+}
+
+.feature-section:hover {
+  background-color: var(--duragraph-background);
+}
+
+.feature-divider {
+  border-right: 2px solid var(--duragraph-border-strong);
+}
+
+.feature-icon {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.icon-indigo {
+  background: var(--duragraph-indigo);
+}
+
+.icon-cyan {
+  background: var(--duragraph-cyan-mint);
+}
+
+.icon-coral {
+  background: var(--duragraph-coral);
+}
+
+.feature-title {
+  font-size: 2rem;
+  font-weight: 600;
+  font-family: 'Space Grotesk', 'Poppins', sans-serif;
+  color: var(--duragraph-text-primary);
+  margin: 0 0 1.25rem 0;
+  letter-spacing: -0.01em;
+}
+
+.feature-description {
+  font-size: 1.125rem;
+  font-family: 'Poppins', sans-serif;
+  color: var(--duragraph-text-secondary);
+  margin: 0;
+  line-height: 1.6;
+}
+
+@media (max-width: 968px) {
+  .features-container {
+    flex-direction: column;
+  }
+
+  .feature-divider {
+    border-right: none;
+    border-bottom: 2px solid var(--duragraph-border-strong);
+  }
+
+  .section-title {
+    font-size: 2.5rem;
+  }
+
+  .feature-title {
+    font-size: 1.75rem;
+  }
+}

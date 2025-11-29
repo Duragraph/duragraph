@@ -1,0 +1,121 @@
+---
+title: Quickstart Guide
+description: Quickstart Guide
+---
+
+# Quickstart Guide
+
+Get up and running with Duragraph in under 5 minutes! This guide will help you run your first AI workflow.
+
+## Prerequisites
+
+- Docker and Docker Compose
+- Python 3.8+ (for SDK usage)
+- Git
+
+## 1. Start Duragraph Locally
+
+Clone and start the Duragraph services:
+
+```bash
+git clone https://github.com/adwiteeymauriya/duragraph.git
+cd duragraph
+docker compose up -d
+```
+
+This starts:
+- **API Server** (port 8080) - REST API and SSE streaming
+- **Temporal Server** - Workflow orchestration engine
+- **PostgreSQL** - State and checkpoint storage
+- **Workers** - Python/Go execution environments
+
+## 2. Install the Python SDK
+
+```bash
+pip install duragraph-sdk  # Coming in Q1 2024
+```
+
+## 3. Create Your First Workflow
+
+Create a file called `hello_workflow.py`:
+
+```python
+from duragraph import DuragraphClient, Workflow
+
+# Initialize client
+client = DuragraphClient(base_url="http://localhost:8080")
+
+# Define a simple workflow
+workflow = Workflow()
+workflow.add_step("greet", {
+    "type": "llm_call",
+    "model": "gpt-3.5-turbo",
+    "messages": [
+        {"role": "user", "content": "Say hello to the world!"}
+    ]
+})
+
+# Create and run the workflow
+run = client.create_run(
+    assistant_id="hello-assistant",
+    thread_id="hello-thread",
+    workflow=workflow
+)
+
+# Stream results
+for event in client.stream_events(run.id):
+    if event.type == "message":
+        print(f"🤖 {event.data.content}")
+```
+
+## 4. Run the Workflow
+
+```bash
+python hello_workflow.py
+```
+
+You should see:
+```
+🤖 Hello, world! 👋 It's great to be here!
+```
+
+## 5. Monitor Your Workflow
+
+Open the Duragraph Dashboard at [http://localhost:3000](http://localhost:3000) to:
+- View workflow execution logs
+- Monitor performance metrics
+- Debug failed runs
+- Explore workflow graphs
+
+## Next Steps
+
+🎉 **Congratulations!** You've successfully run your first Duragraph workflow.
+
+Ready to build more complex workflows? Check out:
+
+- **[Installation Guide](installation/self-hosted.md)** - Production deployment options
+- **[Tutorials](tutorials/first-workflow.md)** - Step-by-step workflow building
+- **[LangGraph Migration](tutorials/langgraph-migration.md)** - Migrate from LangGraph Cloud
+- **[Python SDK Reference](sdks/python.md)** - Complete SDK documentation
+
+## Troubleshooting
+
+**Services won't start?**
+```bash
+# Check service status
+docker compose ps
+
+# View logs
+docker compose logs api
+```
+
+**Python SDK not found?**
+The Python SDK is currently in development (Q1 2024). For now, you can interact with the REST API directly:
+
+```bash
+curl -X POST http://localhost:8080/runs \
+  -H "Content-Type: application/json" \
+  -d '{"assistant_id": "test", "thread_id": "test"}'
+```
+
+Need help? [Join our community](https://github.com/adwiteeymauriya/duragraph/discussions) or [report an issue](https://github.com/adwiteeymauriya/duragraph/issues).

@@ -1,0 +1,52 @@
+name: duragraph
+description: DuraGraph multi-cloud deployment with Pulumi
+runtime: nodejs
+
+config:
+  # Cloud provider selection
+  duragraph:provider:
+    description: Cloud provider to deploy to (aws, gcp, azure, digitalocean)
+    default: aws
+
+  # Application configuration
+  duragraph:environment:
+    description: Environment name (dev, staging, production)
+    default: dev
+
+  duragraph:region:
+    description: Cloud region to deploy to
+    default: us-east-1
+
+  # Database configuration
+  duragraph:dbInstanceSize:
+    description: Database instance size
+    default: small
+
+  # API configuration
+  duragraph:apiInstanceCount:
+    description: Number of API instances (min)
+    default: 1
+
+  duragraph:apiMaxInstances:
+    description: Maximum number of API instances for auto-scaling
+    default: 3
+
+  # Secrets (should be set via pulumi config set --secret)
+  duragraph:openaiApiKey:
+    description: OpenAI API key (optional)
+    secret: true
+    default: ""
+
+  duragraph:anthropicApiKey:
+    description: Anthropic API key (optional)
+    secret: true
+    default: ""
+
+  duragraph:jwtSecret:
+    description: JWT secret for authentication
+    secret: true
+    default: ""
+
+  duragraph:authEnabled:
+    description: Enable JWT authentication
+    default: "false"

@@ -13,11 +13,11 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Start services with Docker Compose
-        run: docker compose -f deploy/compose/docker-compose.yml up -d --build
+        run: docker compose -f deploy/compose/docker-compose.test.yml up -d --build --wait test-api
 
       - name: Run Conformance Tests
-        run: pytest -q tests/conformance
+        run: docker compose -f deploy/compose/docker-compose.test.yml run --rm test-runner
 
       - name: Shutdown Docker Compose
         if: always()
-        run: docker compose -f deploy/compose/docker-compose.yml down -v
+        run: docker compose -f deploy/compose/docker-compose.test.yml down -v

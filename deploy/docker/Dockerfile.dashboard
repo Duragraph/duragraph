@@ -1,0 +1,36 @@
+# Build stage
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install pnpm and dependencies
+RUN npm install -g pnpm@10
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Build the application (generates static site in build/)
+RUN pnpm build
+
+# Production stage - serve with Vite preview server
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Install pnpm and vite globally
+RUN npm install -g pnpm@10 vite
+
+# Copy built files from builder
+COPY --from=builder /app/build ./build
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/vite.config.ts ./vite.config.ts
+
+# Expose port
+EXPOSE 4173
+
+# Use Vite preview to serve the built static files
+CMD ["vite", "preview", "--host", "0.0.0.0", "--port", "4173"]
