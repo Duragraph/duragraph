@@ -13,7 +13,6 @@ services:
       # - devcontainer-pnpm:/home/vscode/.local/share/pnpm
       # - devcontainer-cache:/home/vscode/.cache
     command: sleep infinity
-    privileged: true
     networks:
       - duragraph-network
 

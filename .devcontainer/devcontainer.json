@@ -4,9 +4,11 @@
   "service": "duragraph-devcontainer",
   "workspaceFolder": "/workspace",
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
       "version": "latest",
-      "moby": true
+      "moby": true,
+      "installDockerBuildx": true,
+      "dockerDashComposeVersion": "v2"
     }
   },
   "customizations": {
