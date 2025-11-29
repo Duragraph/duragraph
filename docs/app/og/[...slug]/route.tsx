@@ -5,9 +5,13 @@ import { generate as DefaultImage } from 'fumadocs-ui/og';
 
 export const revalidate = false;
 
+interface RouteParams {
+  params: Promise<{ slug: string[] }>;
+}
+
 export async function GET(
   _req: Request,
-  { params }: RouteContext<'/og/docs/[...slug]'>,
+  { params }: RouteParams,
 ) {
   const { slug } = await params;
   const page = source.getPage(slug.slice(0, -1));
@@ -18,7 +22,7 @@ export async function GET(
       <DefaultImage
         title={page.data.title}
         description={page.data.description}
-        site="My App"
+        site="DuraGraph"
       />
     ),
     {
