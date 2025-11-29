@@ -24,7 +24,7 @@ services:
     image: nats:2.10-alpine
     container_name: duragraph-test-nats
     ports:
-      - "4222:4222"
+      - "4223:4222"
     command: ["-js"]
 
   # API server for testing
