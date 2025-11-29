@@ -1,7 +1,6 @@
 import pytest
 import requests
 import os
-import time
 
 BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8080/api/v1")
 
