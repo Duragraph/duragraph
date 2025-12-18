@@ -12,11 +12,17 @@ import (
 
 // AssistantHandler handles assistant-related HTTP requests
 type AssistantHandler struct {
-	createHandler *command.CreateAssistantHandler
-	updateHandler *command.UpdateAssistantHandler
-	deleteHandler *command.DeleteAssistantHandler
-	getHandler    *query.GetAssistantHandler
-	listHandler   *query.ListAssistantsHandler
+	createHandler        *command.CreateAssistantHandler
+	updateHandler        *command.UpdateAssistantHandler
+	deleteHandler        *command.DeleteAssistantHandler
+	createVersionHandler *command.CreateAssistantVersionHandler
+	setLatestHandler     *command.SetLatestVersionHandler
+	getHandler           *query.GetAssistantHandler
+	listHandler          *query.ListAssistantsHandler
+	searchHandler        *query.SearchAssistantsHandler
+	countHandler         *query.CountAssistantsHandler
+	getVersionsHandler   *query.GetAssistantVersionsHandler
+	getSchemaHandler     *query.GetAssistantSchemaHandler
 }
 
 // NewAssistantHandler creates a new AssistantHandler
@@ -24,15 +30,27 @@ func NewAssistantHandler(
 	createHandler *command.CreateAssistantHandler,
 	updateHandler *command.UpdateAssistantHandler,
 	deleteHandler *command.DeleteAssistantHandler,
+	createVersionHandler *command.CreateAssistantVersionHandler,
+	setLatestHandler *command.SetLatestVersionHandler,
 	getHandler *query.GetAssistantHandler,
 	listHandler *query.ListAssistantsHandler,
+	searchHandler *query.SearchAssistantsHandler,
+	countHandler *query.CountAssistantsHandler,
+	getVersionsHandler *query.GetAssistantVersionsHandler,
+	getSchemaHandler *query.GetAssistantSchemaHandler,
 ) *AssistantHandler {
 	return &AssistantHandler{
-		createHandler: createHandler,
-		updateHandler: updateHandler,
-		deleteHandler: deleteHandler,
-		getHandler:    getHandler,
-		listHandler:   listHandler,
+		createHandler:        createHandler,
+		updateHandler:        updateHandler,
+		deleteHandler:        deleteHandler,
+		createVersionHandler: createVersionHandler,
+		setLatestHandler:     setLatestHandler,
+		getHandler:           getHandler,
+		listHandler:          listHandler,
+		searchHandler:        searchHandler,
+		countHandler:         countHandler,
+		getVersionsHandler:   getVersionsHandler,
+		getSchemaHandler:     getSchemaHandler,
 	}
 }
 
@@ -203,5 +221,208 @@ func (h *AssistantHandler) Delete(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"id":     assistantID,
 		"status": "deleted",
+	})
+}
+
+// Search handles POST /assistants/search
+func (h *AssistantHandler) Search(c echo.Context) error {
+	var req dto.SearchAssistantsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	// Set defaults
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+
+	assistants, err := h.searchHandler.Handle(c.Request().Context(), query.SearchAssistants{
+		GraphID:  req.GraphID,
+		Metadata: req.Metadata,
+		Limit:    req.Limit,
+		Offset:   req.Offset,
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	response := make([]dto.AssistantResponse, len(assistants))
+	for i, assistant := range assistants {
+		response[i] = dto.AssistantResponse{
+			ID:           assistant.ID(),
+			Name:         assistant.Name(),
+			Description:  assistant.Description(),
+			Model:        assistant.Model(),
+			Instructions: assistant.Instructions(),
+			Tools:        assistant.Tools(),
+			Metadata:     assistant.Metadata(),
+			Version:      1, // Default version
+			CreatedAt:    assistant.CreatedAt().Unix(),
+			UpdatedAt:    assistant.UpdatedAt().Unix(),
+		}
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// Count handles POST /assistants/count
+func (h *AssistantHandler) Count(c echo.Context) error {
+	var req dto.CountAssistantsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	count, err := h.countHandler.Handle(c.Request().Context(), query.CountAssistants{
+		GraphID:  req.GraphID,
+		Metadata: req.Metadata,
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, dto.CountResponse{
+		Count: count,
+	})
+}
+
+// CreateVersion handles POST /assistants/:assistant_id/versions
+func (h *AssistantHandler) CreateVersion(c echo.Context) error {
+	assistantID := c.Param("assistant_id")
+
+	var req dto.CreateAssistantVersionRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	version, err := h.createVersionHandler.Handle(c.Request().Context(), command.CreateAssistantVersionCommand{
+		AssistantID: assistantID,
+		GraphID:     req.GraphID,
+		Config:      req.Config,
+		Context:     req.Context,
+	})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusCreated, dto.AssistantVersionResponse{
+		ID:          version.ID,
+		AssistantID: version.AssistantID,
+		Version:     version.Version,
+		GraphID:     version.GraphID,
+		Config:      version.Config,
+		Context:     version.Context,
+		CreatedAt:   version.CreatedAt.Unix(),
+	})
+}
+
+// GetVersions handles GET /assistants/:assistant_id/versions
+func (h *AssistantHandler) GetVersions(c echo.Context) error {
+	assistantID := c.Param("assistant_id")
+
+	limit := 10
+	if l := c.QueryParam("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	versions, err := h.getVersionsHandler.Handle(c.Request().Context(), assistantID, limit)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	response := make([]dto.AssistantVersionResponse, len(versions))
+	for i, v := range versions {
+		response[i] = dto.AssistantVersionResponse{
+			ID:          v.ID,
+			AssistantID: v.AssistantID,
+			Version:     v.Version,
+			GraphID:     v.GraphID,
+			Config:      v.Config,
+			Context:     v.Context,
+			CreatedAt:   v.CreatedAt.Unix(),
+		}
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// SetLatestVersion handles POST /assistants/:assistant_id/latest
+func (h *AssistantHandler) SetLatestVersion(c echo.Context) error {
+	assistantID := c.Param("assistant_id")
+
+	var req dto.SetLatestVersionRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	if req.Version <= 0 {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "version must be a positive integer",
+		})
+	}
+
+	if err := h.setLatestHandler.Handle(c.Request().Context(), command.SetLatestVersionCommand{
+		AssistantID: assistantID,
+		Version:     req.Version,
+	}); err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"assistant_id": assistantID,
+		"version":      req.Version,
+		"status":       "updated",
+	})
+}
+
+// GetSchemas handles GET /assistants/:assistant_id/schemas
+func (h *AssistantHandler) GetSchemas(c echo.Context) error {
+	assistantID := c.Param("assistant_id")
+
+	schema, err := h.getSchemaHandler.Handle(c.Request().Context(), assistantID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, dto.ErrorResponse{
+			Error:   "not_found",
+			Message: "Assistant not found",
+		})
+	}
+
+	return c.JSON(http.StatusOK, dto.AssistantSchemaResponse{
+		GraphID:      schema.GraphID,
+		InputSchema:  schema.InputSchema,
+		OutputSchema: schema.OutputSchema,
+		StateSchema:  schema.StateSchema,
+		ConfigSchema: schema.ConfigSchema,
 	})
 }

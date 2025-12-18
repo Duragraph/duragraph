@@ -72,6 +72,7 @@ func main() {
 	threadRepo := postgres.NewThreadRepository(pool, eventStore)
 	graphRepo := postgres.NewGraphRepository(pool, eventStore)
 	interruptRepo := postgres.NewInterruptRepository(pool, eventStore)
+	checkpointRepo := postgres.NewCheckpointRepository(pool)
 
 	// Initialize NATS publisher
 	logger := watermill.NewStdLogger(false, false)
@@ -138,6 +139,7 @@ func main() {
 	// Initialize command handlers
 	createRunHandler := command.NewCreateRunHandler(runRepo)
 	submitToolOutputsHandler := command.NewSubmitToolOutputsHandler(runRepo, interruptRepo)
+	deleteRunHandler := command.NewDeleteRunHandler(runRepo)
 	createAssistantHandler := command.NewCreateAssistantHandler(assistantRepo)
 	updateAssistantHandler := command.NewUpdateAssistantHandler(assistantRepo)
 	deleteAssistantHandler := command.NewDeleteAssistantHandler(assistantRepo)
@@ -150,8 +152,26 @@ func main() {
 	listRunsHandler := query.NewListRunsHandler(runRepo)
 	getAssistantHandler := query.NewGetAssistantHandler(assistantRepo)
 	listAssistantsHandler := query.NewListAssistantsHandler(assistantRepo)
+	searchAssistantsHandler := query.NewSearchAssistantsHandler(assistantRepo)
+	countAssistantsHandler := query.NewCountAssistantsHandler(assistantRepo)
 	getThreadHandler := query.NewGetThreadHandler(threadRepo)
 	listThreadsHandler := query.NewListThreadsHandler(threadRepo)
+	searchThreadsHandler := query.NewSearchThreadsHandler(threadRepo)
+	countThreadsHandler := query.NewCountThreadsHandler(threadRepo)
+	deleteThreadHandler := command.NewDeleteThreadHandler(threadRepo)
+
+	// Initialize checkpoint handlers
+	getThreadStateHandler := query.NewGetThreadStateHandler(checkpointRepo)
+	getThreadHistoryHandler := query.NewGetThreadHistoryHandler(checkpointRepo)
+	updateThreadStateHandler := command.NewUpdateThreadStateHandler(checkpointRepo)
+	createCheckpointHandler := command.NewCreateCheckpointHandler(checkpointRepo)
+	copyThreadHandler := command.NewCopyThreadHandler(threadRepo, checkpointRepo)
+
+	// Initialize assistant versioning handlers
+	createAssistantVersionHandler := command.NewCreateAssistantVersionHandler(assistantRepo)
+	setLatestVersionHandler := command.NewSetLatestVersionHandler(assistantRepo)
+	getAssistantVersionsHandler := query.NewGetAssistantVersionsHandler(assistantRepo)
+	getAssistantSchemaHandler := query.NewGetAssistantSchemaHandler(assistantRepo, graphRepo)
 
 	// Initialize application services
 	runService := service.NewRunService(
@@ -166,7 +186,9 @@ func main() {
 	// Initialize HTTP handlers
 	runHandler := handlers.NewRunHandler(
 		createRunHandler,
+		createThreadHandler,
 		submitToolOutputsHandler,
+		deleteRunHandler,
 		getRunHandler,
 		listRunsHandler,
 		runService,
@@ -175,17 +197,34 @@ func main() {
 		createAssistantHandler,
 		updateAssistantHandler,
 		deleteAssistantHandler,
+		createAssistantVersionHandler,
+		setLatestVersionHandler,
 		getAssistantHandler,
 		listAssistantsHandler,
+		searchAssistantsHandler,
+		countAssistantsHandler,
+		getAssistantVersionsHandler,
+		getAssistantSchemaHandler,
 	)
 	threadHandler := handlers.NewThreadHandler(
 		createThreadHandler,
 		updateThreadHandler,
+		deleteThreadHandler,
 		addMessageHandler,
 		getThreadHandler,
 		listThreadsHandler,
+		searchThreadsHandler,
+		countThreadsHandler,
 	)
 	streamHandler := handlers.NewStreamHandler(subscriber)
+	systemHandler := handlers.NewSystemHandler("2.0.0-ddd")
+	threadStateHandler := handlers.NewThreadStateHandler(
+		getThreadStateHandler,
+		getThreadHistoryHandler,
+		updateThreadStateHandler,
+		createCheckpointHandler,
+		copyThreadHandler,
+	)
 
 	// Initialize Echo server
 	e := echo.New()
@@ -220,31 +259,69 @@ func main() {
 	// Prometheus metrics endpoint
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 
+	// System endpoints (LangGraph compatible)
+	e.GET("/ok", systemHandler.Ok)
+	e.GET("/info", systemHandler.Info)
+
 	// API routes
 	api := e.Group("/api/v1")
 
-	// Run routes
-	api.POST("/runs", runHandler.CreateRun)
-	api.GET("/runs/:run_id", runHandler.GetRun)
+	// Thread Run routes (LangGraph compatible)
+	api.POST("/threads/:thread_id/runs", runHandler.CreateRun)
 	api.GET("/threads/:thread_id/runs", runHandler.ListRuns)
-	api.POST("/runs/:run_id/submit_tool_outputs", runHandler.SubmitToolOutputs)
+	api.GET("/threads/:thread_id/runs/:run_id", runHandler.GetRun)
+	api.POST("/threads/:thread_id/runs/:run_id/cancel", runHandler.CancelRun)
+	api.GET("/threads/:thread_id/runs/:run_id/join", runHandler.JoinRun)
+	api.DELETE("/threads/:thread_id/runs/:run_id", runHandler.DeleteRun)
 
-	// Stream route
-	api.GET("/stream", streamHandler.Stream)
+	// Stateless Run routes (LangGraph compatible)
+	api.POST("/runs", runHandler.CreateStatelessRun)
+	api.POST("/runs/wait", runHandler.CreateRunAndWait)
+	api.POST("/runs/stream", runHandler.CreateStatelessRunWithStream)
+	api.POST("/runs/batch", runHandler.CreateBatchRuns)
+	api.POST("/runs/cancel", runHandler.CancelStatelessRuns)
+
+	// Stream routes (LangGraph compatible)
+	api.POST("/threads/:thread_id/runs/stream", runHandler.CreateRunWithStream)
+	api.GET("/threads/:thread_id/runs/:run_id/stream", streamHandler.StreamRun)
+	api.GET("/stream", streamHandler.Stream) // Legacy SSE endpoint
+
+	// Human-in-the-loop (state update)
+	api.POST("/threads/:thread_id/state", runHandler.UpdateState)
 
 	// Assistant routes
 	api.POST("/assistants", assistantHandler.Create)
+	api.POST("/assistants/search", assistantHandler.Search)
+	api.POST("/assistants/count", assistantHandler.Count)
 	api.GET("/assistants/:assistant_id", assistantHandler.Get)
 	api.GET("/assistants", assistantHandler.List)
 	api.PATCH("/assistants/:assistant_id", assistantHandler.Update)
 	api.DELETE("/assistants/:assistant_id", assistantHandler.Delete)
 
+	// Assistant versioning routes (LangGraph compatible)
+	api.POST("/assistants/:assistant_id/versions", assistantHandler.CreateVersion)
+	api.GET("/assistants/:assistant_id/versions", assistantHandler.GetVersions)
+	api.POST("/assistants/:assistant_id/latest", assistantHandler.SetLatestVersion)
+	api.GET("/assistants/:assistant_id/schemas", assistantHandler.GetSchemas)
+
 	// Thread routes
 	api.POST("/threads", threadHandler.Create)
+	api.POST("/threads/search", threadHandler.Search)
+	api.POST("/threads/count", threadHandler.Count)
 	api.GET("/threads/:thread_id", threadHandler.Get)
 	api.GET("/threads", threadHandler.List)
 	api.PATCH("/threads/:thread_id", threadHandler.Update)
+	api.DELETE("/threads/:thread_id", threadHandler.Delete)
 	api.POST("/threads/:thread_id/messages", threadHandler.AddMessage)
+
+	// Thread state routes (LangGraph compatible)
+	api.GET("/threads/:thread_id/state", threadStateHandler.GetState)
+	api.POST("/threads/:thread_id/state", threadStateHandler.UpdateState)
+	api.GET("/threads/:thread_id/state/:checkpoint_id", threadStateHandler.GetStateAtCheckpoint)
+	api.POST("/threads/:thread_id/state/checkpoint", threadStateHandler.CreateCheckpoint)
+	api.GET("/threads/:thread_id/history", threadStateHandler.GetHistory)
+	api.POST("/threads/:thread_id/history", threadStateHandler.PostHistory)
+	api.POST("/threads/:thread_id/copy", threadStateHandler.CopyThread)
 
 	// Start server
 	go func() {

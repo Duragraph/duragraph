@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/humanloop"
 	"github.com/duragraph/duragraph/internal/domain/run"
@@ -154,4 +155,86 @@ func (s *RunService) ResumeRun(ctx context.Context, runID string) error {
 	// In production, would reload graph execution context and continue
 
 	return s.ExecuteRun(ctx, runID)
+}
+
+// CancelRun cancels a run
+func (s *RunService) CancelRun(ctx context.Context, runID string) error {
+	// Load run
+	runAgg, err := s.runRepo.FindByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+
+	// Check if run can be cancelled
+	if runAgg.Status().IsTerminal() {
+		return errors.InvalidState(runAgg.Status().String(), "cancel")
+	}
+
+	// Cancel the run
+	if err := runAgg.Cancel("cancelled by user"); err != nil {
+		return err
+	}
+
+	// Save the updated run
+	if err := s.runRepo.Update(ctx, runAgg); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// WaitForRun waits for a run to complete and returns the result
+func (s *RunService) WaitForRun(ctx context.Context, runID string, timeout time.Duration) (*run.Run, error) {
+	// Set default timeout if not provided
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Poll for run completion
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, errors.Internal("run wait timeout", ctx.Err())
+
+		case <-ticker.C:
+			runAgg, err := s.runRepo.FindByID(ctx, runID)
+			if err != nil {
+				return nil, err
+			}
+
+			// Check if run has reached a terminal state
+			if runAgg.Status().IsTerminal() || runAgg.Status() == run.StatusRequiresAction {
+				return runAgg, nil
+			}
+		}
+	}
+}
+
+// CreateAndWaitForRun creates a run and waits for it to complete
+func (s *RunService) CreateAndWaitForRun(ctx context.Context, threadID, assistantID string, input map[string]interface{}, timeout time.Duration) (*run.Run, error) {
+	// Create the run
+	runAgg, err := run.NewRun(threadID, assistantID, input)
+	if err != nil {
+		return nil, err
+	}
+
+	// Save the run
+	if err := s.runRepo.Save(ctx, runAgg); err != nil {
+		return nil, err
+	}
+
+	// Execute in background
+	go func() {
+		s.ExecuteRun(context.Background(), runAgg.ID())
+	}()
+
+	// Wait for completion
+	return s.WaitForRun(ctx, runAgg.ID(), timeout)
 }

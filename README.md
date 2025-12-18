@@ -109,6 +109,64 @@ run = await client.runs.create(
 
 **📖 [Full API Documentation](https://duragraph.dev/docs/api)**
 
+## 🔌 LangGraph-Compatible API Endpoints
+
+DuraGraph implements the full LangGraph Cloud API specification:
+
+### System
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/ok` | Health check (returns `{"ok": true}`) |
+| GET | `/info` | Server info (version, capabilities) |
+| GET | `/health` | Detailed health status |
+
+### Assistants
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/assistants` | Create assistant |
+| GET | `/api/v1/assistants` | List assistants |
+| GET | `/api/v1/assistants/:id` | Get assistant |
+| PATCH | `/api/v1/assistants/:id` | Update assistant |
+| DELETE | `/api/v1/assistants/:id` | Delete assistant |
+| POST | `/api/v1/assistants/search` | Search assistants |
+| POST | `/api/v1/assistants/count` | Count assistants |
+| POST | `/api/v1/assistants/:id/versions` | Create version |
+| GET | `/api/v1/assistants/:id/versions` | List versions |
+| GET | `/api/v1/assistants/:id/schemas` | Get schemas |
+
+### Threads
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/threads` | Create thread |
+| GET | `/api/v1/threads` | List threads |
+| GET | `/api/v1/threads/:id` | Get thread |
+| PATCH | `/api/v1/threads/:id` | Update thread |
+| DELETE | `/api/v1/threads/:id` | Delete thread |
+| POST | `/api/v1/threads/search` | Search threads |
+| POST | `/api/v1/threads/count` | Count threads |
+| POST | `/api/v1/threads/:id/messages` | Add message |
+| GET | `/api/v1/threads/:id/state` | Get state |
+| POST | `/api/v1/threads/:id/state` | Update state |
+| GET | `/api/v1/threads/:id/history` | Get history |
+| POST | `/api/v1/threads/:id/copy` | Fork thread |
+
+### Runs
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/threads/:id/runs` | Create run |
+| GET | `/api/v1/threads/:id/runs` | List runs |
+| GET | `/api/v1/threads/:id/runs/:run_id` | Get run |
+| POST | `/api/v1/threads/:id/runs/:run_id/cancel` | Cancel run |
+| POST | `/api/v1/runs` | Create stateless run |
+| POST | `/api/v1/runs/batch` | Batch create runs |
+| POST | `/api/v1/runs/cancel` | Batch cancel runs |
+
+### Streaming
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/threads/:id/runs/stream` | Stream run events |
+| GET | `/api/v1/threads/:id/runs/:run_id/stream` | Stream existing run |
+
 ## 🗂️ Project Structure
 
 ```

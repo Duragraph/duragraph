@@ -1,0 +1,518 @@
+# DuraGraph Backend Development Guide
+# Conventions, patterns, and guidelines for Go development
+
+metadata:
+  version: "1.0.0"
+  language: go
+  go_version: "1.23+"
+  framework: echo_v4
+
+# ============================================
+# Project Structure
+# ============================================
+project_structure:
+  description: |
+    DuraGraph follows Clean Architecture / Hexagonal Architecture
+    with Domain-Driven Design principles.
+
+  layout:
+    cmd:
+      server:
+        description: Main entry point for the API server
+        files:
+          - main.go
+          - config/config.go
+
+    internal:
+      domain:
+        description: Pure domain logic (no external dependencies)
+        subfolders:
+          run:
+            description: Run aggregate and events
+          workflow:
+            description: Assistant, Thread, Graph entities
+          execution:
+            description: Execution context and events
+          humanloop:
+            description: Interrupt handling
+
+      application:
+        description: Use cases and application services
+        subfolders:
+          command:
+            description: Write operations (CQRS commands)
+          query:
+            description: Read operations (CQRS queries)
+          service:
+            description: Domain services
+
+      infrastructure:
+        description: External concerns and technical implementations
+        subfolders:
+          http:
+            description: HTTP handlers, middleware, DTOs
+          persistence:
+            description: PostgreSQL repositories, event store
+          messaging:
+            description: NATS publisher/subscriber, outbox relay
+          graph:
+            description: Graph execution engine
+          llm:
+            description: LLM provider clients
+          tools:
+            description: Tool registry and executors
+          cache:
+            description: Redis caching
+          auth:
+            description: JWT, OAuth2 authentication
+          monitoring:
+            description: Prometheus metrics
+
+      pkg:
+        description: Shared utilities
+        subfolders:
+          errors:
+            description: Custom error types
+          eventbus:
+            description: Event bus interface
+          uuid:
+            description: UUID utilities
+
+    deploy:
+      sql:
+        description: Database migrations
+      docker:
+        description: Docker configurations
+
+# ============================================
+# Naming Conventions
+# ============================================
+naming_conventions:
+  files:
+    style: snake_case
+    examples:
+      - create_run.go
+      - run_repository.go
+      - event_store.go
+
+  packages:
+    style: lowercase
+    examples:
+      - run
+      - workflow
+      - persistence
+
+  structs:
+    style: PascalCase
+    examples:
+      - Run
+      - CreateRunHandler
+      - RunRepository
+
+  interfaces:
+    style: PascalCase
+    suffix: None (Go convention)
+    examples:
+      - Repository
+      - EventStore
+      - Publisher
+
+  variables:
+    style: camelCase
+    acronyms: UPPERCASE
+    examples:
+      - runID
+      - threadID
+      - createdAt
+      - httpClient
+
+  constants:
+    style: PascalCase or SCREAMING_SNAKE_CASE
+    examples:
+      - EventTypeRunCreated
+      - MaxRetries
+      - DEFAULT_TIMEOUT
+
+  errors:
+    prefix: Err
+    style: PascalCase
+    examples:
+      - ErrNotFound
+      - ErrInvalidState
+      - ErrUnauthorized
+
+  environment_variables:
+    style: SCREAMING_SNAKE_CASE
+    prefix: None (or DURAGRAPH_ for namespacing)
+    examples:
+      - DB_HOST
+      - NATS_URL
+      - OPENAI_API_KEY
+
+  json_fields:
+    style: snake_case
+    examples:
+      - run_id
+      - thread_id
+      - created_at
+
+  database:
+    tables: snake_case, plural
+    columns: snake_case
+    examples:
+      tables:
+        - runs
+        - assistants
+        - event_streams
+      columns:
+        - created_at
+        - assistant_id
+
+# ============================================
+# Code Patterns
+# ============================================
+code_patterns:
+  command_handler:
+    description: |
+      Command handlers implement write operations following CQRS.
+      They load aggregates, call methods that emit events, and save.
+    location: internal/application/command/
+    template: |
+      type CreateRunHandler struct {
+          runRepo run.Repository
+      }
+
+      func NewCreateRunHandler(runRepo run.Repository) *CreateRunHandler {
+          return &CreateRunHandler{runRepo: runRepo}
+      }
+
+      func (h *CreateRunHandler) Handle(ctx context.Context, cmd CreateRun) (string, error) {
+          // Create aggregate
+          r, err := run.NewRun(cmd.ThreadID, cmd.AssistantID, cmd.Input)
+          if err != nil {
+              return "", err
+          }
+
+          // Save (persists events to event store + outbox)
+          if err := h.runRepo.Save(ctx, r); err != nil {
+              return "", err
+          }
+
+          return r.ID(), nil
+      }
+
+  query_handler:
+    description: |
+      Query handlers implement read operations.
+      They read directly from projections, not event store.
+    location: internal/application/query/
+    template: |
+      type GetRunHandler struct {
+          runRepo run.Repository
+      }
+
+      func (h *GetRunHandler) Handle(ctx context.Context, query GetRun) (*RunDTO, error) {
+          r, err := h.runRepo.GetByID(ctx, query.RunID)
+          if err != nil {
+              return nil, err
+          }
+
+          return toRunDTO(r), nil
+      }
+
+  aggregate:
+    description: |
+      Aggregates are the consistency boundary in DDD.
+      They emit domain events and enforce invariants.
+    location: internal/domain/
+    template: |
+      type Run struct {
+          id          string
+          status      Status
+          events      []DomainEvent
+          version     int
+      }
+
+      func (r *Run) Start() error {
+          if r.status != StatusQueued {
+              return ErrInvalidState
+          }
+          r.status = StatusInProgress
+          r.events = append(r.events, RunStarted{
+              RunID:      r.id,
+              OccurredAt: time.Now(),
+          })
+          return nil
+      }
+
+  repository:
+    description: |
+      Repositories abstract persistence. They load aggregates
+      from events and save new events.
+    location: internal/infrastructure/persistence/
+    interface: |
+      type Repository interface {
+          GetByID(ctx context.Context, id string) (*Run, error)
+          Save(ctx context.Context, run *Run) error
+          ListByThreadID(ctx context.Context, threadID string, limit, offset int) ([]*Run, error)
+      }
+
+  http_handler:
+    description: |
+      HTTP handlers bind requests, call command/query handlers,
+      and return responses.
+    location: internal/infrastructure/http/handlers/
+    template: |
+      func (h *RunHandler) CreateRun(c echo.Context) error {
+          var req dto.CreateRunRequest
+          if err := c.Bind(&req); err != nil {
+              return err
+          }
+
+          if err := c.Validate(&req); err != nil {
+              return err
+          }
+
+          runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
+              ThreadID:    req.ThreadID,
+              AssistantID: req.AssistantID,
+              Input:       req.Input,
+          })
+          if err != nil {
+              return err
+          }
+
+          return c.JSON(http.StatusCreated, dto.CreateRunResponse{RunID: runID})
+      }
+
+# ============================================
+# Error Handling
+# ============================================
+error_handling:
+  custom_errors:
+    location: internal/pkg/errors/errors.go
+    types:
+      - name: InvalidInput
+        http_status: 400
+        description: Validation errors
+      - name: NotFound
+        http_status: 404
+        description: Resource not found
+      - name: InvalidState
+        http_status: 400
+        description: Invalid state transition
+      - name: Unauthorized
+        http_status: 401
+        description: Authentication required
+      - name: Forbidden
+        http_status: 403
+        description: Permission denied
+      - name: Internal
+        http_status: 500
+        description: Internal server error
+
+  error_wrapping:
+    description: Use fmt.Errorf with %w to wrap errors
+    example: |
+      if err != nil {
+          return fmt.Errorf("failed to save run: %w", err)
+      }
+
+  error_middleware:
+    location: internal/infrastructure/http/middleware/error.go
+    description: |
+      Converts domain errors to HTTP responses with appropriate
+      status codes and error messages.
+
+# ============================================
+# Testing
+# ============================================
+testing:
+  conventions:
+    file_naming: "{file}_test.go"
+    function_naming: "Test{FunctionName}_{Scenario}"
+    table_driven: Preferred for multiple test cases
+
+  types:
+    unit:
+      description: Test individual functions/methods in isolation
+      command: "go test -short ./..."
+      mocking: Use interfaces and mocks
+
+    integration:
+      description: Test with real infrastructure (DB, NATS)
+      command: "go test ./... -tags=integration"
+      setup: Use testcontainers or docker-compose
+
+  example: |
+    func TestRun_Start_FromQueued_Succeeds(t *testing.T) {
+        // Arrange
+        r, _ := run.NewRun("thread-1", "assistant-1", nil)
+
+        // Act
+        err := r.Start()
+
+        // Assert
+        assert.NoError(t, err)
+        assert.Equal(t, run.StatusInProgress, r.Status())
+        assert.Len(t, r.Events(), 2) // Created + Started
+    }
+
+    func TestRun_Start_FromCompleted_Fails(t *testing.T) {
+        r, _ := run.NewRun("thread-1", "assistant-1", nil)
+        r.Start()
+        r.Complete(nil)
+
+        err := r.Start()
+
+        assert.Error(t, err)
+        assert.True(t, errors.Is(err, run.ErrInvalidState))
+    }
+
+# ============================================
+# Git Conventions
+# ============================================
+git_conventions:
+  commit_messages:
+    format: "<type>(<scope>): <subject>"
+    types:
+      - feat: New feature
+      - fix: Bug fix
+      - docs: Documentation only
+      - style: Formatting, no code change
+      - refactor: Code refactoring
+      - perf: Performance improvement
+      - test: Adding tests
+      - build: Build system changes
+      - ci: CI configuration
+      - chore: Other changes
+    scopes:
+      - run
+      - workflow
+      - api
+      - db
+      - nats
+      - auth
+      - graph
+      - llm
+    examples:
+      - "feat(run): add cancel functionality"
+      - "fix(api): handle empty thread list"
+      - "refactor(graph): simplify node execution"
+
+  branch_naming:
+    format: "<type>/<short-description>"
+    examples:
+      - feature/human-in-the-loop
+      - fix/run-status-update
+      - refactor/event-store
+
+# ============================================
+# Observability
+# ============================================
+observability:
+  logging:
+    library: slog (standard library)
+    format: JSON in production
+    fields:
+      required:
+        - trace_id
+        - request_id
+        - level
+        - msg
+        - time
+      optional:
+        - run_id
+        - user_id
+        - duration_ms
+    example: |
+      slog.Info("run started",
+          "trace_id", ctx.Value("trace_id"),
+          "run_id", run.ID(),
+          "assistant_id", run.AssistantID(),
+      )
+
+  metrics:
+    library: Prometheus
+    naming: "duragraph_{subsystem}_{name}_{unit}"
+    types:
+      counter: For cumulative values (requests, errors)
+      gauge: For current values (active connections)
+      histogram: For distributions (latency)
+    examples:
+      - duragraph_http_requests_total
+      - duragraph_http_request_duration_seconds
+      - duragraph_runs_active
+      - duragraph_events_published_total
+
+  tracing:
+    library: OpenTelemetry (future)
+    propagation: W3C Trace Context
+
+# ============================================
+# Configuration
+# ============================================
+configuration:
+  location: cmd/server/config/config.go
+  method: Environment variables
+  validation: At startup, fail fast
+
+  variables:
+    server:
+      - name: PORT
+        default: "8080"
+        description: HTTP server port
+      - name: HOST
+        default: "0.0.0.0"
+        description: HTTP server host
+
+    database:
+      - name: DB_HOST
+        required: true
+      - name: DB_PORT
+        default: "5432"
+      - name: DB_USER
+        required: true
+      - name: DB_PASSWORD
+        required: true
+      - name: DB_NAME
+        required: true
+      - name: DB_SSLMODE
+        default: "disable"
+
+    nats:
+      - name: NATS_URL
+        default: "nats://localhost:4222"
+
+    auth:
+      - name: AUTH_ENABLED
+        default: "false"
+      - name: JWT_SECRET
+        required_if: AUTH_ENABLED=true
+
+    llm:
+      - name: OPENAI_API_KEY
+        required: false
+      - name: ANTHROPIC_API_KEY
+        required: false
+
+# ============================================
+# Dependencies
+# ============================================
+dependencies:
+  core:
+    - github.com/labstack/echo/v4: HTTP framework
+    - github.com/jackc/pgx/v5: PostgreSQL driver
+    - github.com/nats-io/nats.go: NATS client
+
+  utilities:
+    - github.com/google/uuid: UUID generation
+    - github.com/prometheus/client_golang: Metrics
+
+  testing:
+    - github.com/stretchr/testify: Assertions
+    - github.com/golang/mock: Mocking
+
+  optional:
+    - github.com/redis/go-redis/v9: Redis client
+    - golang.org/x/oauth2: OAuth2 client

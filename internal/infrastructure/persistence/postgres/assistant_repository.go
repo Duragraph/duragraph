@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/workflow"
@@ -188,5 +189,209 @@ func (r *AssistantRepository) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return errors.Internal("failed to delete assistant", err)
 	}
+	return nil
+}
+
+// Search retrieves assistants matching the given filters
+func (r *AssistantRepository) Search(ctx context.Context, filters workflow.AssistantSearchFilters) ([]*workflow.Assistant, error) {
+	query := `
+		SELECT id, name, description, model, instructions, tools, metadata, created_at, updated_at
+		FROM assistants
+		WHERE 1=1
+	`
+	args := make([]interface{}, 0)
+	argIdx := 1
+
+	if filters.GraphID != "" {
+		query += fmt.Sprintf(" AND graph_id = $%d", argIdx)
+		args = append(args, filters.GraphID)
+		argIdx++
+	}
+
+	if filters.Metadata != nil {
+		metadataJSON, _ := json.Marshal(filters.Metadata)
+		query += fmt.Sprintf(" AND metadata @> $%d", argIdx)
+		args = append(args, metadataJSON)
+		argIdx++
+	}
+
+	query += ` ORDER BY created_at DESC`
+
+	if filters.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argIdx)
+		args = append(args, filters.Limit)
+		argIdx++
+	}
+
+	if filters.Offset > 0 {
+		query += fmt.Sprintf(" OFFSET $%d", argIdx)
+		args = append(args, filters.Offset)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, errors.Internal("failed to search assistants", err)
+	}
+	defer rows.Close()
+
+	assistants := make([]*workflow.Assistant, 0)
+
+	for rows.Next() {
+		var assistantID, name, description, model, instructions string
+		var toolsJSON, metadataJSON []byte
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(&assistantID, &name, &description, &model, &instructions,
+			&toolsJSON, &metadataJSON, &createdAt, &updatedAt)
+		if err != nil {
+			return nil, errors.Internal("failed to scan assistant", err)
+		}
+
+		var tools []map[string]interface{}
+		json.Unmarshal(toolsJSON, &tools)
+
+		var metadata map[string]interface{}
+		json.Unmarshal(metadataJSON, &metadata)
+
+		assistant, _ := workflow.ReconstructAssistant(
+			assistantID, name, description, model, instructions,
+			tools, metadata, createdAt, updatedAt,
+		)
+		assistants = append(assistants, assistant)
+	}
+
+	return assistants, nil
+}
+
+// Count returns the number of assistants matching the given filters
+func (r *AssistantRepository) Count(ctx context.Context, filters workflow.AssistantSearchFilters) (int, error) {
+	query := `SELECT COUNT(*) FROM assistants WHERE 1=1`
+	args := make([]interface{}, 0)
+	argIdx := 1
+
+	if filters.GraphID != "" {
+		query += fmt.Sprintf(" AND graph_id = $%d", argIdx)
+		args = append(args, filters.GraphID)
+		argIdx++
+	}
+
+	if filters.Metadata != nil {
+		metadataJSON, _ := json.Marshal(filters.Metadata)
+		query += fmt.Sprintf(" AND metadata @> $%d", argIdx)
+		args = append(args, metadataJSON)
+	}
+
+	var count int
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, errors.Internal("failed to count assistants", err)
+	}
+
+	return count, nil
+}
+
+// FindVersions retrieves version history for an assistant
+func (r *AssistantRepository) FindVersions(ctx context.Context, assistantID string, limit int) ([]workflow.AssistantVersionInfo, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	query := `
+		SELECT id, assistant_id, version, COALESCE(graph_id, ''), config, COALESCE(context, '[]'), created_at
+		FROM assistant_versions
+		WHERE assistant_id = $1
+		ORDER BY version DESC
+		LIMIT $2
+	`
+
+	rows, err := r.pool.Query(ctx, query, assistantID, limit)
+	if err != nil {
+		return nil, errors.Internal("failed to find assistant versions", err)
+	}
+	defer rows.Close()
+
+	versions := make([]workflow.AssistantVersionInfo, 0)
+	for rows.Next() {
+		var id, aID, graphID string
+		var version int
+		var configJSON, contextJSON []byte
+		var createdAt time.Time
+
+		if err := rows.Scan(&id, &aID, &version, &graphID, &configJSON, &contextJSON, &createdAt); err != nil {
+			return nil, errors.Internal("failed to scan assistant version", err)
+		}
+
+		var config map[string]interface{}
+		var context []interface{}
+		json.Unmarshal(configJSON, &config)
+		json.Unmarshal(contextJSON, &context)
+
+		versions = append(versions, workflow.AssistantVersionInfo{
+			ID:          id,
+			AssistantID: aID,
+			Version:     version,
+			GraphID:     graphID,
+			Config:      config,
+			Context:     context,
+			CreatedAt:   createdAt,
+		})
+	}
+
+	return versions, nil
+}
+
+// SaveVersion saves a new version of an assistant
+func (r *AssistantRepository) SaveVersion(ctx context.Context, version workflow.AssistantVersionInfo) error {
+	configJSON, _ := json.Marshal(version.Config)
+	contextJSON, _ := json.Marshal(version.Context)
+
+	query := `
+		INSERT INTO assistant_versions (id, assistant_id, version, graph_id, config, context, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+
+	_, err := r.pool.Exec(ctx, query,
+		version.ID,
+		version.AssistantID,
+		version.Version,
+		version.GraphID,
+		configJSON,
+		contextJSON,
+		version.CreatedAt,
+	)
+	if err != nil {
+		return errors.Internal("failed to save assistant version", err)
+	}
+
+	return nil
+}
+
+// SetLatestVersion updates the assistant to point to a specific version
+func (r *AssistantRepository) SetLatestVersion(ctx context.Context, assistantID string, version int) error {
+	// Get the version config
+	var configJSON, contextJSON []byte
+	var graphID string
+
+	query := `
+		SELECT graph_id, config, context
+		FROM assistant_versions
+		WHERE assistant_id = $1 AND version = $2
+	`
+	err := r.pool.QueryRow(ctx, query, assistantID, version).Scan(&graphID, &configJSON, &contextJSON)
+	if err != nil {
+		return errors.Internal("failed to find assistant version", err)
+	}
+
+	// Update the assistant
+	updateQuery := `
+		UPDATE assistants
+		SET version = $1, graph_id = $2, updated_at = $3
+		WHERE id = $4
+	`
+	_, err = r.pool.Exec(ctx, updateQuery, version, graphID, time.Now(), assistantID)
+	if err != nil {
+		return errors.Internal("failed to update assistant version", err)
+	}
+
 	return nil
 }
