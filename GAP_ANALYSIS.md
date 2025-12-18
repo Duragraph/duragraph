@@ -1,17 +1,39 @@
 # DuraGraph vs LangGraph Cloud API - Gap Analysis
 
+**Reference Spec:** `schemas/openapi/duragraph-latest.yaml` (LangSmith Deployment 0.1.0)
+
 ## Summary
 
 | Category | LangGraph Cloud | DuraGraph | Gap |
 |----------|----------------|-----------|-----|
-| Assistants | 9 endpoints | 5 endpoints | 4 missing |
-| Threads | 8 endpoints | 5 endpoints | 3 missing |
-| Thread Runs | 10 endpoints | 3 endpoints | 7 missing |
-| Stateless Runs | 4 endpoints | 0 endpoints | 4 missing |
-| Crons | 4 endpoints | 0 endpoints | 4 missing (Phase 2) |
-| Store | 4 endpoints | 0 endpoints | 4 missing (Phase 2) |
-| MCP | 3 endpoints | 0 endpoints | 3 missing (Phase 2) |
-| **TOTAL** | **42 endpoints** | **13 endpoints** | **29 missing** |
+| Assistants | 10 endpoints | 5 endpoints | 5 missing |
+| Threads | 10 endpoints | 5 endpoints | 5 missing |
+| Thread Runs | 11 endpoints | 4 endpoints | 7 missing |
+| Stateless Runs | 4 endpoints | 1 endpoint | 3 missing |
+| System | 3 endpoints | 2 endpoints | 1 missing |
+| Crons | 5 endpoints | 0 endpoints | 5 missing (Phase 2) |
+| Store | 3 endpoints | 0 endpoints | 3 missing (Phase 2) |
+| MCP | 1 endpoint | 0 endpoints | 1 missing (Phase 2) |
+| A2A | 1 endpoint | 0 endpoints | 1 missing (Phase 2) |
+| **TOTAL** | **48 endpoints** | **17 endpoints** | **31 missing** |
+
+---
+
+## Latest Spec Changes (duragraph-latest.yaml)
+
+### New Endpoints (vs previous spec)
+- `POST /assistants/count` - Count assistants
+- `POST /threads/count` - Count threads
+- `POST /runs/crons/count` - Count crons (Phase 2)
+- `POST /threads/{thread_id}/stream` - Direct thread streaming
+- `GET /ok` - Health check
+- `GET /info` - System information
+- `GET /a2a/{assistant_id}` - Agent-to-Agent Protocol (Phase 2)
+
+### Schema Changes
+- **Run.status enum**: `completed` → `success`, `failed` → `error`, added `timeout`, `interrupted`
+- **Assistant**: Added `context` field (static context)
+- **Run**: Added `kwargs` field (required)
 
 ---
 
@@ -21,6 +43,7 @@
 - Crons API (scheduled runs)
 - Store API (key-value persistence)
 - MCP API (model context protocol)
+- A2A API (agent-to-agent protocol)
 - Graph visualization endpoints
 - UI/Dashboard
 
@@ -33,66 +56,79 @@
 | Endpoint | Method | LangGraph | DuraGraph | Status |
 |----------|--------|-----------|-----------|--------|
 | `/assistants` | POST | ✅ | ✅ | Implemented |
-| `/assistants/search` | POST | ✅ | ❌ | **MISSING** |
+| `/assistants/search` | POST | ✅ | ❌ | **MISSING** (#13) |
+| `/assistants/count` | POST | ✅ | ❌ | **MISSING** (#13) |
 | `/assistants/{assistant_id}` | GET | ✅ | ✅ | Implemented |
 | `/assistants/{assistant_id}` | PATCH | ✅ | ✅ | Implemented |
 | `/assistants/{assistant_id}` | DELETE | ✅ | ✅ | Implemented |
-| `/assistants/{assistant_id}/graph` | GET | ✅ | ❌ | **MISSING** (Phase 2 - visualization) |
-| `/assistants/{assistant_id}/schemas` | GET | ✅ | ❌ | **MISSING** |
-| `/assistants/{assistant_id}/versions` | POST | ✅ | ❌ | **MISSING** |
-| `/assistants/{assistant_id}/latest` | POST | ✅ | ❌ | **MISSING** |
-| `/assistants/{assistant_id}/subgraphs` | GET | ✅ | ❌ | **MISSING** (Phase 2 - visualization) |
-| `/assistants/{assistant_id}/subgraphs/{namespace}` | GET | ✅ | ❌ | **MISSING** (Phase 2 - visualization) |
+| `/assistants/{assistant_id}/graph` | GET | ✅ | ❌ | Phase 2 (visualization) |
+| `/assistants/{assistant_id}/schemas` | GET | ✅ | ❌ | **MISSING** (#14) |
+| `/assistants/{assistant_id}/versions` | POST | ✅ | ❌ | **MISSING** (#15) |
+| `/assistants/{assistant_id}/latest` | POST | ✅ | ❌ | **MISSING** (#16) |
+| `/assistants/{assistant_id}/subgraphs` | GET | ✅ | ❌ | Phase 2 (visualization) |
+| `/assistants/{assistant_id}/subgraphs/{namespace}` | GET | ✅ | ❌ | Phase 2 (visualization) |
 
-**Phase 1 Missing:** search, schemas, versions, latest (4 endpoints)
+**Phase 1 Missing:** search, count, schemas, versions, latest (5 endpoints)
 
 ### 2. THREADS API
 
 | Endpoint | Method | LangGraph | DuraGraph | Status |
 |----------|--------|-----------|-----------|--------|
 | `/threads` | POST | ✅ | ✅ | Implemented |
-| `/threads/search` | POST | ✅ | ❌ | **MISSING** |
+| `/threads/search` | POST | ✅ | ❌ | **MISSING** (#17) |
+| `/threads/count` | POST | ✅ | ❌ | **MISSING** (#17) |
 | `/threads/{thread_id}` | GET | ✅ | ✅ | Implemented |
 | `/threads/{thread_id}` | PATCH | ✅ | ✅ | Implemented |
-| `/threads/{thread_id}` | DELETE | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/copy` | POST | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/state` | GET | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/state` | POST | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/state/{checkpoint_id}` | GET | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/state/checkpoint` | POST | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/history` | GET | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/history` | POST | ✅ | ❌ | **MISSING** |
+| `/threads/{thread_id}` | DELETE | ✅ | ❌ | **MISSING** (#18) |
+| `/threads/{thread_id}/copy` | POST | ✅ | ❌ | **MISSING** (#19) |
+| `/threads/{thread_id}/stream` | POST | ✅ | ❌ | **MISSING** (#34) |
+| `/threads/{thread_id}/state` | GET | ✅ | ❌ | **MISSING** (#25) |
+| `/threads/{thread_id}/state` | POST | ✅ | ❌ | **MISSING** (#26) |
+| `/threads/{thread_id}/state/{checkpoint_id}` | GET | ✅ | ❌ | **MISSING** (#27) |
+| `/threads/{thread_id}/state/checkpoint` | POST | ✅ | ❌ | **MISSING** (#28) |
+| `/threads/{thread_id}/history` | GET | ✅ | ❌ | **MISSING** (#29) |
+| `/threads/{thread_id}/history` | POST | ✅ | ❌ | **MISSING** (#29) |
 
-**Phase 1 Missing:** search, delete, copy, state (GET/POST), state checkpoint, history (8 endpoints)
+**Phase 1 Missing:** search, count, delete, copy, stream, state (GET/POST), state checkpoint, history (10 endpoints)
 
 ### 3. THREAD RUNS API
 
 | Endpoint | Method | LangGraph | DuraGraph | Status |
 |----------|--------|-----------|-----------|--------|
-| `/threads/{thread_id}/runs` | POST | ✅ | ✅ (as `/runs`) | **NEEDS PATH CHANGE** |
-| `/threads/{thread_id}/runs` | GET | ✅ | ✅ | Implemented |
-| `/threads/{thread_id}/runs/stream` | POST | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/runs/wait` | POST | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/runs/{run_id}` | GET | ✅ | ✅ (as `/runs/:run_id`) | **NEEDS PATH CHANGE** |
-| `/threads/{thread_id}/runs/{run_id}` | DELETE | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/runs/{run_id}/cancel` | POST | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/runs/{run_id}/join` | GET | ✅ | ❌ | **MISSING** |
-| `/threads/{thread_id}/runs/{run_id}/stream` | GET | ✅ | ❌ | **MISSING** |
+| `/threads/{thread_id}/runs` | POST | ✅ | ✅ | ✅ Implemented (#12) |
+| `/threads/{thread_id}/runs` | GET | ✅ | ✅ | ✅ Implemented |
+| `/threads/{thread_id}/runs/stream` | POST | ✅ | ⚠️ | Stub (#34) |
+| `/threads/{thread_id}/runs/wait` | POST | ✅ | ❌ | **MISSING** (#38) |
+| `/threads/{thread_id}/runs/{run_id}` | GET | ✅ | ✅ | ✅ Implemented (#12) |
+| `/threads/{thread_id}/runs/{run_id}` | DELETE | ✅ | ❌ | **MISSING** (#40) |
+| `/threads/{thread_id}/runs/{run_id}/cancel` | POST | ✅ | ⚠️ | Stub (#39) |
+| `/threads/{thread_id}/runs/{run_id}/join` | GET | ✅ | ❌ | **MISSING** (#37) |
+| `/threads/{thread_id}/runs/{run_id}/stream` | GET | ✅ | ✅ | ✅ Implemented (#12) |
 | `/threads/{thread_id}/runs/crons` | POST | ✅ | ❌ | Phase 2 (Crons) |
 
-**Phase 1 Missing:** stream, wait, delete, cancel, join, stream (existing) + path restructure (8 items)
+**Phase 1 Progress:** Routes restructured ✅, stubs added for stream/cancel, missing: wait, delete, join (4 items)
 
 ### 4. STATELESS RUNS API
 
 | Endpoint | Method | LangGraph | DuraGraph | Status |
 |----------|--------|-----------|-----------|--------|
-| `/runs` | POST | ✅ | ⚠️ | Exists but different semantics |
-| `/runs/stream` | POST | ✅ | ❌ | **MISSING** |
-| `/runs/wait` | POST | ✅ | ❌ | **MISSING** |
-| `/runs/batch` | POST | ✅ | ❌ | **MISSING** |
-| `/runs/cancel` | POST | ✅ | ❌ | **MISSING** |
+| `/runs` | POST | ✅ | ✅ | ✅ Implemented (#12) |
+| `/runs/stream` | POST | ✅ | ❌ | **MISSING** (#20) |
+| `/runs/wait` | POST | ✅ | ⚠️ | Stub (#20) |
+| `/runs/batch` | POST | ✅ | ❌ | **MISSING** (#21) |
+| `/runs/cancel` | POST | ✅ | ❌ | **MISSING** (#22) |
 
-**Phase 1 Missing:** stream, wait, batch, cancel (4 endpoints)
+**Phase 1 Progress:** POST /runs implemented ✅, missing: stream, batch, cancel (3 endpoints)
+
+### 5. SYSTEM API
+
+| Endpoint | Method | LangGraph | DuraGraph | Status |
+|----------|--------|-----------|-----------|--------|
+| `/ok` | GET | ✅ | ❌ | **MISSING** (#10) |
+| `/info` | GET | ✅ | ❌ | **MISSING** (#10) |
+| `/metrics` | GET | ✅ | ✅ | ✅ Implemented |
+
+**Phase 1 Missing:** /ok, /info (2 endpoints)
 
 ### 5. STREAMING
 
