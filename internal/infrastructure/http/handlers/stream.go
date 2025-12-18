@@ -23,7 +23,20 @@ func NewStreamHandler(subscriber *nats.Subscriber) *StreamHandler {
 	}
 }
 
-// Stream handles GET /stream?run_id=xxx
+// StreamRun handles GET /threads/:thread_id/runs/:run_id/stream (LangGraph compatible)
+func (h *StreamHandler) StreamRun(c echo.Context) error {
+	runID := c.Param("run_id")
+	if runID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "run_id is required in path",
+		})
+	}
+
+	return h.streamByRunID(c, runID)
+}
+
+// Stream handles GET /stream?run_id=xxx (legacy endpoint)
 func (h *StreamHandler) Stream(c echo.Context) error {
 	runID := c.QueryParam("run_id")
 
@@ -34,6 +47,11 @@ func (h *StreamHandler) Stream(c echo.Context) error {
 		})
 	}
 
+	return h.streamByRunID(c, runID)
+}
+
+// streamByRunID is the common streaming implementation
+func (h *StreamHandler) streamByRunID(c echo.Context, runID string) error {
 	// Set SSE headers
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")

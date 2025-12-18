@@ -49,19 +49,20 @@ class APIClient:
         return r.json()
 
     def start_run(self, assistant_id, thread_id, input_data=None):
+        """Create a run using LangGraph-compatible path: POST /threads/{thread_id}/runs"""
         data = {
             "assistant_id": assistant_id,
-            "thread_id": thread_id,
             "input": input_data or {"message": "hello"},
         }
-        r = requests.post(f"{self.base_url}/runs", json=data)
+        r = requests.post(f"{self.base_url}/threads/{thread_id}/runs", json=data)
         if r.status_code == 501:
             pytest.skip("Runs API not implemented yet (501)")
         r.raise_for_status()
         return r.json()
 
-    def get_run(self, run_id):
-        r = requests.get(f"{self.base_url}/runs/{run_id}")
+    def get_run(self, thread_id, run_id):
+        """Get a run using LangGraph-compatible path: GET /threads/{thread_id}/runs/{run_id}"""
+        r = requests.get(f"{self.base_url}/threads/{thread_id}/runs/{run_id}")
         if r.status_code == 501:
             pytest.skip("GET /runs not implemented yet (501)")
         r.raise_for_status()
@@ -122,12 +123,13 @@ def test_get_run():
     # Setup
     assistant = client.create_assistant()
     thread = client.create_thread()
+    thread_id = thread["thread_id"]
 
     # Create and get run
-    run = client.start_run(assistant["assistant_id"], thread["thread_id"])
+    run = client.start_run(assistant["assistant_id"], thread_id)
     run_id = run["run_id"]
 
     # Get run (status may be queued, in_progress, completed, or failed)
-    run_data = client.get_run(run_id)
+    run_data = client.get_run(thread_id, run_id)
     assert run_data["run_id"] == run_id
     assert run_data["status"] in ["queued", "in_progress", "completed", "failed"]

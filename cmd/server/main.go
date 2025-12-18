@@ -223,14 +223,23 @@ func main() {
 	// API routes
 	api := e.Group("/api/v1")
 
-	// Run routes
-	api.POST("/runs", runHandler.CreateRun)
-	api.GET("/runs/:run_id", runHandler.GetRun)
+	// Thread Run routes (LangGraph compatible)
+	api.POST("/threads/:thread_id/runs", runHandler.CreateRun)
 	api.GET("/threads/:thread_id/runs", runHandler.ListRuns)
-	api.POST("/runs/:run_id/submit_tool_outputs", runHandler.SubmitToolOutputs)
+	api.GET("/threads/:thread_id/runs/:run_id", runHandler.GetRun)
+	api.POST("/threads/:thread_id/runs/:run_id/cancel", runHandler.CancelRun)
 
-	// Stream route
-	api.GET("/stream", streamHandler.Stream)
+	// Stateless Run routes (LangGraph compatible)
+	api.POST("/runs", runHandler.CreateStatelessRun)
+	api.POST("/runs/wait", runHandler.CreateRunAndWait)
+
+	// Stream routes (LangGraph compatible)
+	api.POST("/threads/:thread_id/runs/stream", runHandler.CreateRunWithStream)
+	api.GET("/threads/:thread_id/runs/:run_id/stream", streamHandler.StreamRun)
+	api.GET("/stream", streamHandler.Stream) // Legacy SSE endpoint
+
+	// Human-in-the-loop (state update)
+	api.POST("/threads/:thread_id/state", runHandler.UpdateState)
 
 	// Assistant routes
 	api.POST("/assistants", assistantHandler.Create)
