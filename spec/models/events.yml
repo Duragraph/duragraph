@@ -5,9 +5,9 @@ metadata:
   version: "1.0.0"
   pattern: event_sourcing
   conventions:
-    naming: "{domain}.{action}" (e.g., run.created)
-    timestamps: occurred_at (UTC with timezone)
-    ids: UUID strings
+    naming: "{domain}.{action}"  # e.g., run.created
+    timestamps: "occurred_at (UTC with timezone)"
+    ids: "UUID strings"
 
 # ============================================
 # Run Domain Events
