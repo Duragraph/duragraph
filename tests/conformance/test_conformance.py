@@ -115,7 +115,6 @@ def test_create_run():
     assert run["status"] == "queued"
 
 
-@pytest.mark.skip(reason="GET /runs/:id requires event projection - TODO")
 def test_get_run():
     """Test getting run status"""
     client = APIClient()
@@ -132,4 +131,4 @@ def test_get_run():
     # Get run (status may be queued, in_progress, completed, or failed)
     run_data = client.get_run(thread_id, run_id)
     assert run_data["run_id"] == run_id
-    assert run_data["status"] in ["queued", "in_progress", "completed", "failed"]
+    assert run_data["status"] in ["queued", "in_progress", "completed", "failed", "success", "error"]

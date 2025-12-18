@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
@@ -14,7 +15,9 @@ import (
 // RunHandler handles run-related HTTP requests
 type RunHandler struct {
 	createRunHandler         *command.CreateRunHandler
+	createThreadHandler      *command.CreateThreadHandler
 	submitToolOutputsHandler *command.SubmitToolOutputsHandler
+	deleteRunHandler         *command.DeleteRunHandler
 	getRunHandler            *query.GetRunHandler
 	listRunsHandler          *query.ListRunsHandler
 	runService               *service.RunService
@@ -23,14 +26,18 @@ type RunHandler struct {
 // NewRunHandler creates a new RunHandler
 func NewRunHandler(
 	createRunHandler *command.CreateRunHandler,
+	createThreadHandler *command.CreateThreadHandler,
 	submitToolOutputsHandler *command.SubmitToolOutputsHandler,
+	deleteRunHandler *command.DeleteRunHandler,
 	getRunHandler *query.GetRunHandler,
 	listRunsHandler *query.ListRunsHandler,
 	runService *service.RunService,
 ) *RunHandler {
 	return &RunHandler{
 		createRunHandler:         createRunHandler,
+		createThreadHandler:      createThreadHandler,
 		submitToolOutputsHandler: submitToolOutputsHandler,
+		deleteRunHandler:         deleteRunHandler,
 		getRunHandler:            getRunHandler,
 		listRunsHandler:          listRunsHandler,
 		runService:               runService,
@@ -112,10 +119,19 @@ func (h *RunHandler) CreateStatelessRun(c echo.Context) error {
 	// For stateless runs, create ephemeral thread or use provided thread_id
 	threadID := req.ThreadID
 	if threadID == "" {
-		// Generate ephemeral thread ID for stateless run
-		threadID = "ephemeral-" + c.Request().Header.Get("X-Request-ID")
-		if threadID == "ephemeral-" {
-			threadID = "ephemeral-stateless"
+		// Create an ephemeral thread for stateless run
+		var err error
+		threadID, err = h.createThreadHandler.Handle(c.Request().Context(), command.CreateThread{
+			Metadata: map[string]interface{}{
+				"ephemeral": true,
+				"stateless": true,
+			},
+		})
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+				Error:   "internal_error",
+				Message: "failed to create ephemeral thread: " + err.Error(),
+			})
 		}
 	}
 
@@ -146,28 +162,251 @@ func (h *RunHandler) CreateStatelessRun(c echo.Context) error {
 
 // CreateRunAndWait handles POST /runs/wait (create run and wait for completion)
 func (h *RunHandler) CreateRunAndWait(c echo.Context) error {
-	// TODO: Implement blocking run with timeout
-	return c.JSON(http.StatusNotImplemented, dto.ErrorResponse{
-		Error:   "not_implemented",
-		Message: "POST /runs/wait is not yet implemented",
+	var req dto.CreateRunRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	if req.AssistantID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "assistant_id is required",
+		})
+	}
+
+	// Use provided thread_id or generate ephemeral one
+	threadID := req.ThreadID
+	if threadID == "" {
+		threadID = "ephemeral-" + c.Request().Header.Get("X-Request-ID")
+		if threadID == "ephemeral-" {
+			threadID = "ephemeral-wait"
+		}
+	}
+
+	// Parse timeout from query param (default 5 minutes)
+	timeout := 5 * time.Minute
+	if timeoutStr := c.QueryParam("timeout"); timeoutStr != "" {
+		if parsed, err := time.ParseDuration(timeoutStr); err == nil {
+			timeout = parsed
+		}
+	}
+
+	// Create and wait for run
+	runAgg, err := h.runService.CreateAndWaitForRun(
+		c.Request().Context(),
+		threadID,
+		req.AssistantID,
+		req.Input,
+		timeout,
+	)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, dto.GetRunResponse{
+		RunID:       runAgg.ID(),
+		ThreadID:    runAgg.ThreadID(),
+		AssistantID: runAgg.AssistantID(),
+		Status:      runAgg.Status().Normalize().String(),
+		Input:       runAgg.Input(),
+		Output:      runAgg.Output(),
+		Error:       runAgg.Error(),
+		Metadata:    runAgg.Metadata(),
+		CreatedAt:   runAgg.CreatedAt(),
+		StartedAt:   runAgg.StartedAt(),
+		CompletedAt: runAgg.CompletedAt(),
+		UpdatedAt:   runAgg.UpdatedAt(),
 	})
 }
 
 // CreateRunWithStream handles POST /threads/:thread_id/runs/stream
 func (h *RunHandler) CreateRunWithStream(c echo.Context) error {
-	// TODO: Implement streaming run creation
-	return c.JSON(http.StatusNotImplemented, dto.ErrorResponse{
-		Error:   "not_implemented",
-		Message: "POST /threads/:thread_id/runs/stream is not yet implemented",
+	threadID := c.Param("thread_id")
+	if threadID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "thread_id is required in path",
+		})
+	}
+
+	var req dto.CreateRunRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	if req.AssistantID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "assistant_id is required",
+		})
+	}
+
+	// Create run
+	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
+		ThreadID:    threadID,
+		AssistantID: req.AssistantID,
+		Input:       req.Input,
 	})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	// Start execution asynchronously
+	go func() {
+		h.runService.ExecuteRun(context.Background(), runID)
+	}()
+
+	// Set up SSE headers
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+
+	// Stream initial event
+	c.Response().Write([]byte("event: run_created\n"))
+	c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\", \"thread_id\": \"" + threadID + "\", \"status\": \"pending\"}\n\n"))
+	c.Response().Flush()
+
+	// Poll for updates
+	timeout := 5 * time.Minute
+	ctx, cancel := context.WithTimeout(c.Request().Context(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	lastStatus := ""
+	for {
+		select {
+		case <-ctx.Done():
+			c.Response().Write([]byte("event: timeout\n"))
+			c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\"}\n\n"))
+			c.Response().Flush()
+			return nil
+		case <-ticker.C:
+			runAgg, err := h.runService.WaitForRun(ctx, runID, 100*time.Millisecond)
+			if err != nil {
+				continue
+			}
+
+			status := runAgg.Status().Normalize().String()
+			if status != lastStatus {
+				lastStatus = status
+				c.Response().Write([]byte("event: status_update\n"))
+				c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\", \"status\": \"" + status + "\"}\n\n"))
+				c.Response().Flush()
+
+				if runAgg.Status().IsTerminal() {
+					c.Response().Write([]byte("event: end\n"))
+					c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\"}\n\n"))
+					c.Response().Flush()
+					return nil
+				}
+			}
+		}
+	}
 }
 
 // CancelRun handles POST /threads/:thread_id/runs/:run_id/cancel
 func (h *RunHandler) CancelRun(c echo.Context) error {
-	// TODO: Implement run cancellation
-	return c.JSON(http.StatusNotImplemented, dto.ErrorResponse{
-		Error:   "not_implemented",
-		Message: "Run cancellation is not yet implemented",
+	runID := c.Param("run_id")
+	if runID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "run_id is required",
+		})
+	}
+
+	if err := h.runService.CancelRun(c.Request().Context(), runID); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"run_id": runID,
+		"status": "cancelled",
+	})
+}
+
+// JoinRun handles GET /threads/:thread_id/runs/:run_id/join (wait for run completion)
+func (h *RunHandler) JoinRun(c echo.Context) error {
+	runID := c.Param("run_id")
+	if runID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "run_id is required",
+		})
+	}
+
+	// Parse timeout from query param (default 5 minutes)
+	timeout := 5 * time.Minute
+	if timeoutStr := c.QueryParam("timeout"); timeoutStr != "" {
+		if parsed, err := time.ParseDuration(timeoutStr); err == nil {
+			timeout = parsed
+		}
+	}
+
+	// Wait for run to complete
+	runAgg, err := h.runService.WaitForRun(c.Request().Context(), runID, timeout)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, dto.GetRunResponse{
+		RunID:       runAgg.ID(),
+		ThreadID:    runAgg.ThreadID(),
+		AssistantID: runAgg.AssistantID(),
+		Status:      runAgg.Status().Normalize().String(),
+		Input:       runAgg.Input(),
+		Output:      runAgg.Output(),
+		Error:       runAgg.Error(),
+		Metadata:    runAgg.Metadata(),
+		CreatedAt:   runAgg.CreatedAt(),
+		StartedAt:   runAgg.StartedAt(),
+		CompletedAt: runAgg.CompletedAt(),
+		UpdatedAt:   runAgg.UpdatedAt(),
+	})
+}
+
+// DeleteRun handles DELETE /threads/:thread_id/runs/:run_id
+func (h *RunHandler) DeleteRun(c echo.Context) error {
+	runID := c.Param("run_id")
+	if runID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "run_id is required",
+		})
+	}
+
+	err := h.deleteRunHandler.Handle(c.Request().Context(), command.DeleteRunCommand{
+		RunID: runID,
+	})
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"run_id": runID,
+		"status": "deleted",
 	})
 }
 
@@ -286,4 +525,197 @@ func (h *RunHandler) SubmitToolOutputs(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"status": "resumed",
 	})
+}
+
+// CreateStatelessRunWithStream handles POST /runs/stream
+func (h *RunHandler) CreateStatelessRunWithStream(c echo.Context) error {
+	var req dto.CreateRunRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	if req.AssistantID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "assistant_id is required",
+		})
+	}
+
+	// Use provided thread_id or generate ephemeral one
+	threadID := req.ThreadID
+	if threadID == "" {
+		threadID = "ephemeral-" + c.Request().Header.Get("X-Request-ID")
+		if threadID == "ephemeral-" {
+			threadID = "ephemeral-stream"
+		}
+	}
+
+	// Create run
+	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
+		ThreadID:    threadID,
+		AssistantID: req.AssistantID,
+		Input:       req.Input,
+	})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	// Start execution asynchronously
+	go func() {
+		h.runService.ExecuteRun(context.Background(), runID)
+	}()
+
+	// Set up SSE headers
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+
+	// Stream initial event
+	c.Response().Write([]byte("event: run_created\n"))
+	c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\", \"thread_id\": \"" + threadID + "\", \"status\": \"pending\"}\n\n"))
+	c.Response().Flush()
+
+	// Poll for updates (simplified - production would use event bus)
+	timeout := 5 * time.Minute
+	ctx, cancel := context.WithTimeout(c.Request().Context(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	lastStatus := ""
+	for {
+		select {
+		case <-ctx.Done():
+			c.Response().Write([]byte("event: timeout\n"))
+			c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\"}\n\n"))
+			c.Response().Flush()
+			return nil
+		case <-ticker.C:
+			runAgg, err := h.runService.WaitForRun(ctx, runID, 100*time.Millisecond)
+			if err != nil {
+				continue
+			}
+
+			status := runAgg.Status().Normalize().String()
+			if status != lastStatus {
+				lastStatus = status
+				c.Response().Write([]byte("event: status_update\n"))
+				c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\", \"status\": \"" + status + "\"}\n\n"))
+				c.Response().Flush()
+
+				if runAgg.Status().IsTerminal() {
+					c.Response().Write([]byte("event: end\n"))
+					c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\"}\n\n"))
+					c.Response().Flush()
+					return nil
+				}
+			}
+		}
+	}
+}
+
+// CreateBatchRuns handles POST /runs/batch
+func (h *RunHandler) CreateBatchRuns(c echo.Context) error {
+	var reqs []dto.CreateRunRequest
+	if err := c.Bind(&reqs); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	if len(reqs) == 0 {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "at least one run request is required",
+		})
+	}
+
+	responses := make([]dto.CreateRunResponse, 0, len(reqs))
+	for _, req := range reqs {
+		if req.AssistantID == "" {
+			responses = append(responses, dto.CreateRunResponse{
+				Status: "error",
+			})
+			continue
+		}
+
+		// Use provided thread_id or generate ephemeral one
+		threadID := req.ThreadID
+		if threadID == "" {
+			threadID = "ephemeral-batch"
+		}
+
+		runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
+			ThreadID:    threadID,
+			AssistantID: req.AssistantID,
+			Input:       req.Input,
+		})
+		if err != nil {
+			responses = append(responses, dto.CreateRunResponse{
+				Status: "error",
+			})
+			continue
+		}
+
+		// Start execution asynchronously
+		go func(id string) {
+			h.runService.ExecuteRun(context.Background(), id)
+		}(runID)
+
+		responses = append(responses, dto.CreateRunResponse{
+			RunID:       runID,
+			ThreadID:    threadID,
+			AssistantID: req.AssistantID,
+			Status:      "pending",
+		})
+	}
+
+	return c.JSON(http.StatusCreated, responses)
+}
+
+// CancelStatelessRuns handles POST /runs/cancel
+func (h *RunHandler) CancelStatelessRuns(c echo.Context) error {
+	var req struct {
+		RunIDs []string `json:"run_ids"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	if len(req.RunIDs) == 0 {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "at least one run_id is required",
+		})
+	}
+
+	results := make([]map[string]string, 0, len(req.RunIDs))
+	for _, runID := range req.RunIDs {
+		err := h.runService.CancelRun(c.Request().Context(), runID)
+		if err != nil {
+			results = append(results, map[string]string{
+				"run_id": runID,
+				"status": "error",
+				"error":  err.Error(),
+			})
+		} else {
+			results = append(results, map[string]string{
+				"run_id": runID,
+				"status": "cancelled",
+			})
+		}
+	}
+
+	return c.JSON(http.StatusOK, results)
 }

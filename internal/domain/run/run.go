@@ -328,3 +328,63 @@ func (r *Run) applyEvent(event eventbus.Event) error {
 
 	return nil
 }
+
+// RunData holds raw data for reconstructing a Run from database projection
+type RunData struct {
+	ID          string
+	ThreadID    string
+	AssistantID string
+	Status      string
+	Input       map[string]interface{}
+	Output      map[string]interface{}
+	Error       string
+	Metadata    map[string]interface{}
+	CreatedAt   time.Time
+	StartedAt   *time.Time
+	CompletedAt *time.Time
+	UpdatedAt   time.Time
+}
+
+// ReconstructFromData rebuilds a Run from database projection data
+func ReconstructFromData(data RunData) *Run {
+	status := StatusQueued
+	switch data.Status {
+	case "queued":
+		status = StatusQueued
+	case "in_progress":
+		status = StatusInProgress
+	case "completed", "success":
+		status = StatusCompleted
+	case "failed", "error":
+		status = StatusFailed
+	case "cancelled":
+		status = StatusCancelled
+	case "requires_action":
+		status = StatusRequiresAction
+	case "timeout":
+		status = StatusTimeout
+	case "interrupted":
+		status = StatusInterrupted
+	}
+
+	metadata := data.Metadata
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+
+	return &Run{
+		id:          data.ID,
+		threadID:    data.ThreadID,
+		assistantID: data.AssistantID,
+		status:      status,
+		input:       data.Input,
+		output:      data.Output,
+		error:       data.Error,
+		metadata:    metadata,
+		createdAt:   data.CreatedAt,
+		startedAt:   data.StartedAt,
+		completedAt: data.CompletedAt,
+		updatedAt:   data.UpdatedAt,
+		events:      make([]eventbus.Event, 0),
+	}
+}

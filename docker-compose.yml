@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: apppass
       POSTGRES_DB: appdb
     ports:
-      - "5432:5432"
+      - "${DURAGRAPH_DB_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/sql:/docker-entrypoint-initdb.d
@@ -24,8 +24,8 @@ services:
     container_name: duragraph-nats
     command: "-js -sd /data -m 8222"
     ports:
-      - "4222:4222"  # Client connections
-      - "8222:8222"  # HTTP management
+      - "${DURAGRAPH_NATS_PORT:-4223}:4222"  # Client connections
+      - "${DURAGRAPH_NATS_MGMT_PORT:-8223}:8222"  # HTTP management
     volumes:
       - natsdata:/data
     healthcheck:

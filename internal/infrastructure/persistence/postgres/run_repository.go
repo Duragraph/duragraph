@@ -65,7 +65,8 @@ func (r *RunRepository) Save(ctx context.Context, runAgg *run.Run) error {
 
 // FindByID retrieves a run by ID
 func (r *RunRepository) FindByID(ctx context.Context, id string) (*run.Run, error) {
-	var runID, threadID, assistantID, status, errorMsg string
+	var runID, threadID, assistantID, status string
+	var errorMsg *string
 	var inputJSON, outputJSON, metadataJSON []byte
 	var createdAt, updatedAt time.Time
 	var startedAt, completedAt *time.Time
@@ -85,21 +86,33 @@ func (r *RunRepository) FindByID(ctx context.Context, id string) (*run.Run, erro
 		return nil, errors.NotFound("run", id)
 	}
 
-	// Reconstruct run (simplified - in production would load from events)
+	// Parse JSON fields
 	var input, output, metadata map[string]interface{}
 	json.Unmarshal(inputJSON, &input)
 	json.Unmarshal(outputJSON, &output)
 	json.Unmarshal(metadataJSON, &metadata)
 
-	runAgg, err := run.NewRun(threadID, assistantID, input)
-	if err != nil {
-		return nil, err
+	// Get error string from pointer
+	errStr := ""
+	if errorMsg != nil {
+		errStr = *errorMsg
 	}
 
-	// TODO: Reconstruct full state from events
-	// For now, returning basic run
-
-	return runAgg, nil
+	// Reconstruct run from database projection data
+	return run.ReconstructFromData(run.RunData{
+		ID:          runID,
+		ThreadID:    threadID,
+		AssistantID: assistantID,
+		Status:      status,
+		Input:       input,
+		Output:      output,
+		Error:       errStr,
+		Metadata:    metadata,
+		CreatedAt:   createdAt,
+		StartedAt:   startedAt,
+		CompletedAt: completedAt,
+		UpdatedAt:   updatedAt,
+	}), nil
 }
 
 // FindByThreadID retrieves runs for a specific thread

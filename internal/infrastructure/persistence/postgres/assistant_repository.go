@@ -289,3 +289,109 @@ func (r *AssistantRepository) Count(ctx context.Context, filters workflow.Assist
 
 	return count, nil
 }
+
+// FindVersions retrieves version history for an assistant
+func (r *AssistantRepository) FindVersions(ctx context.Context, assistantID string, limit int) ([]workflow.AssistantVersionInfo, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	query := `
+		SELECT id, assistant_id, version, COALESCE(graph_id, ''), config, COALESCE(context, '[]'), created_at
+		FROM assistant_versions
+		WHERE assistant_id = $1
+		ORDER BY version DESC
+		LIMIT $2
+	`
+
+	rows, err := r.pool.Query(ctx, query, assistantID, limit)
+	if err != nil {
+		return nil, errors.Internal("failed to find assistant versions", err)
+	}
+	defer rows.Close()
+
+	versions := make([]workflow.AssistantVersionInfo, 0)
+	for rows.Next() {
+		var id, aID, graphID string
+		var version int
+		var configJSON, contextJSON []byte
+		var createdAt time.Time
+
+		if err := rows.Scan(&id, &aID, &version, &graphID, &configJSON, &contextJSON, &createdAt); err != nil {
+			return nil, errors.Internal("failed to scan assistant version", err)
+		}
+
+		var config map[string]interface{}
+		var context []interface{}
+		json.Unmarshal(configJSON, &config)
+		json.Unmarshal(contextJSON, &context)
+
+		versions = append(versions, workflow.AssistantVersionInfo{
+			ID:          id,
+			AssistantID: aID,
+			Version:     version,
+			GraphID:     graphID,
+			Config:      config,
+			Context:     context,
+			CreatedAt:   createdAt,
+		})
+	}
+
+	return versions, nil
+}
+
+// SaveVersion saves a new version of an assistant
+func (r *AssistantRepository) SaveVersion(ctx context.Context, version workflow.AssistantVersionInfo) error {
+	configJSON, _ := json.Marshal(version.Config)
+	contextJSON, _ := json.Marshal(version.Context)
+
+	query := `
+		INSERT INTO assistant_versions (id, assistant_id, version, graph_id, config, context, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+
+	_, err := r.pool.Exec(ctx, query,
+		version.ID,
+		version.AssistantID,
+		version.Version,
+		version.GraphID,
+		configJSON,
+		contextJSON,
+		version.CreatedAt,
+	)
+	if err != nil {
+		return errors.Internal("failed to save assistant version", err)
+	}
+
+	return nil
+}
+
+// SetLatestVersion updates the assistant to point to a specific version
+func (r *AssistantRepository) SetLatestVersion(ctx context.Context, assistantID string, version int) error {
+	// Get the version config
+	var configJSON, contextJSON []byte
+	var graphID string
+
+	query := `
+		SELECT graph_id, config, context
+		FROM assistant_versions
+		WHERE assistant_id = $1 AND version = $2
+	`
+	err := r.pool.QueryRow(ctx, query, assistantID, version).Scan(&graphID, &configJSON, &contextJSON)
+	if err != nil {
+		return errors.Internal("failed to find assistant version", err)
+	}
+
+	// Update the assistant
+	updateQuery := `
+		UPDATE assistants
+		SET version = $1, graph_id = $2, updated_at = $3
+		WHERE id = $4
+	`
+	_, err = r.pool.Exec(ctx, updateQuery, version, graphID, time.Now(), assistantID)
+	if err != nil {
+		return errors.Internal("failed to update assistant version", err)
+	}
+
+	return nil
+}

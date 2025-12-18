@@ -6,14 +6,14 @@ import "time"
 
 // CreateRunRequest represents the request to create a run
 type CreateRunRequest struct {
-	AssistantID string                 `json:"assistant_id"`
-	ThreadID    string                 `json:"thread_id,omitempty"`
-	Input       map[string]interface{} `json:"input,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	Config      map[string]interface{} `json:"config,omitempty"`
-	Kwargs      map[string]interface{} `json:"kwargs,omitempty"`
-	StreamMode  []string               `json:"stream_mode,omitempty"`
-	OnCompletion string                `json:"on_completion,omitempty"`
+	AssistantID  string                 `json:"assistant_id"`
+	ThreadID     string                 `json:"thread_id,omitempty"`
+	Input        map[string]interface{} `json:"input,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Config       map[string]interface{} `json:"config,omitempty"`
+	Kwargs       map[string]interface{} `json:"kwargs,omitempty"`
+	StreamMode   []string               `json:"stream_mode,omitempty"`
+	OnCompletion string                 `json:"on_completion,omitempty"`
 }
 
 // CreateRunResponse represents the response from creating a run
@@ -197,4 +197,81 @@ type CountThreadsRequest struct {
 // CountResponse represents a count response
 type CountResponse struct {
 	Count int `json:"count"`
+}
+
+// ThreadStateResponse represents the current state of a thread
+type ThreadStateResponse struct {
+	Values       map[string]interface{}   `json:"values"`
+	Next         []string                 `json:"next"`
+	Tasks        []map[string]interface{} `json:"tasks,omitempty"`
+	Metadata     map[string]interface{}   `json:"metadata,omitempty"`
+	CreatedAt    int64                    `json:"created_at"`
+	CheckpointID string                   `json:"checkpoint_id,omitempty"`
+	CheckpointNS string                   `json:"checkpoint_ns,omitempty"`
+	ParentConfig map[string]interface{}   `json:"parent_config,omitempty"`
+}
+
+// UpdateThreadStateRequest represents the request to update thread state
+type UpdateThreadStateRequest struct {
+	Values       map[string]interface{} `json:"values"`
+	AsNode       string                 `json:"as_node,omitempty"`
+	CheckpointNS string                 `json:"checkpoint_ns,omitempty"`
+}
+
+// ThreadHistoryEntry represents a single entry in thread history
+type ThreadHistoryEntry struct {
+	CheckpointID       string                 `json:"checkpoint_id"`
+	ParentCheckpointID string                 `json:"parent_checkpoint_id,omitempty"`
+	Values             map[string]interface{} `json:"values"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt          int64                  `json:"created_at"`
+}
+
+// GetThreadHistoryRequest represents the request to get thread history
+type GetThreadHistoryRequest struct {
+	CheckpointNS string `json:"checkpoint_ns,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+	Before       string `json:"before,omitempty"`
+}
+
+// CopyThreadRequest represents the request to copy a thread
+type CopyThreadRequest struct {
+	CheckpointID string `json:"checkpoint_id,omitempty"`
+}
+
+// CopyThreadResponse represents the response from copying a thread
+type CopyThreadResponse struct {
+	ThreadID string `json:"thread_id"`
+}
+
+// AssistantVersionResponse represents a version of an assistant
+type AssistantVersionResponse struct {
+	ID          string                 `json:"id"`
+	AssistantID string                 `json:"assistant_id"`
+	Version     int                    `json:"version"`
+	GraphID     string                 `json:"graph_id,omitempty"`
+	Config      map[string]interface{} `json:"config"`
+	Context     []interface{}          `json:"context,omitempty"`
+	CreatedAt   int64                  `json:"created_at"`
+}
+
+// CreateAssistantVersionRequest represents the request to create a new version
+type CreateAssistantVersionRequest struct {
+	GraphID string                 `json:"graph_id,omitempty"`
+	Config  map[string]interface{} `json:"config,omitempty"`
+	Context []interface{}          `json:"context,omitempty"`
+}
+
+// SetLatestVersionRequest represents the request to set the latest version
+type SetLatestVersionRequest struct {
+	Version int `json:"version"`
+}
+
+// AssistantSchemaResponse represents the schema of an assistant
+type AssistantSchemaResponse struct {
+	GraphID      string                 `json:"graph_id,omitempty"`
+	InputSchema  map[string]interface{} `json:"input_schema"`
+	OutputSchema map[string]interface{} `json:"output_schema"`
+	StateSchema  map[string]interface{} `json:"state_schema"`
+	ConfigSchema map[string]interface{} `json:"config_schema"`
 }
