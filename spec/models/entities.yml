@@ -1,0 +1,670 @@
+# DuraGraph Database Entities
+# PostgreSQL schema definitions for all domain entities
+
+metadata:
+  version: "1.0.0"
+  database: postgresql
+  schema: public
+  conventions:
+    primary_key: UUID (gen_random_uuid)
+    timestamps: created_at, updated_at (UTC with timezone)
+    soft_delete: Not used (event sourcing provides audit trail)
+    naming: snake_case
+
+# ============================================
+# Workflow Domain (Assistants, Threads, Graphs)
+# ============================================
+entities:
+  assistants:
+    description: AI assistant configuration and workflow definition
+    table_name: assistants
+    bounded_context: workflow
+    columns:
+      id:
+        type: uuid
+        primary_key: true
+        default: gen_random_uuid()
+      name:
+        type: varchar(255)
+        nullable: false
+        description: Human-readable name for the assistant
+      description:
+        type: text
+        nullable: true
+        description: Description of the assistant's purpose
+      model:
+        type: varchar(100)
+        nullable: true
+        description: Default LLM model (e.g., gpt-4, claude-3)
+      instructions:
+        type: text
+        nullable: true
+        description: System prompt/instructions for the assistant
+      tools:
+        type: jsonb
+        default: "'[]'::jsonb"
+        description: Array of tool definitions available to the assistant
+      metadata:
+        type: jsonb
+        default: "'{}'::jsonb"
+        description: Arbitrary key-value metadata
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+      updated_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_assistants_name
+        columns: [name]
+      - name: idx_assistants_created_at
+        columns: [created_at]
+        order: DESC
+    triggers:
+      - name: update_assistants_updated_at
+        event: BEFORE UPDATE
+        function: update_updated_at_column()
+
+  threads:
+    description: Conversation context containing messages
+    table_name: threads
+    bounded_context: workflow
+    columns:
+      id:
+        type: uuid
+        primary_key: true
+        default: gen_random_uuid()
+      metadata:
+        type: jsonb
+        default: "'{}'::jsonb"
+        description: Arbitrary key-value metadata (user_id, session_id, etc.)
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+      updated_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_threads_created_at
+        columns: [created_at]
+        order: DESC
+    triggers:
+      - name: update_threads_updated_at
+        event: BEFORE UPDATE
+        function: update_updated_at_column()
+
+  messages:
+    description: Individual messages within a thread
+    table_name: messages
+    bounded_context: workflow
+    columns:
+      id:
+        type: uuid
+        primary_key: true
+        default: gen_random_uuid()
+      thread_id:
+        type: uuid
+        nullable: false
+        references:
+          table: threads
+          column: id
+          on_delete: CASCADE
+      role:
+        type: varchar(50)
+        nullable: false
+        description: "Message role: 'user', 'assistant', 'system', 'tool'"
+        check: role IN ('user', 'assistant', 'system', 'tool')
+      content:
+        type: text
+        nullable: false
+        description: Message content
+      metadata:
+        type: jsonb
+        default: "'{}'::jsonb"
+        description: Additional message metadata (tool_call_id, etc.)
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_messages_thread_id
+        columns: [thread_id]
+      - name: idx_messages_created_at
+        columns: [created_at]
+        order: DESC
+
+  graphs:
+    description: Workflow graph definition with nodes and edges
+    table_name: graphs
+    bounded_context: workflow
+    columns:
+      id:
+        type: uuid
+        primary_key: true
+        default: gen_random_uuid()
+      assistant_id:
+        type: uuid
+        nullable: true
+        references:
+          table: assistants
+          column: id
+          on_delete: CASCADE
+      name:
+        type: varchar(255)
+        nullable: false
+      version:
+        type: varchar(50)
+        nullable: false
+        default: "'1.0.0'"
+      description:
+        type: text
+        nullable: true
+      nodes:
+        type: jsonb
+        nullable: false
+        default: "'[]'::jsonb"
+        description: Array of node definitions (id, type, config)
+      edges:
+        type: jsonb
+        nullable: false
+        default: "'[]'::jsonb"
+        description: Array of edge definitions (source, target, condition)
+      config:
+        type: jsonb
+        default: "'{}'::jsonb"
+        description: Graph-level configuration
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+      updated_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_graphs_assistant_id
+        columns: [assistant_id]
+      - name: idx_graphs_name
+        columns: [name]
+    constraints:
+      - type: unique
+        columns: [assistant_id, version]
+    triggers:
+      - name: update_graphs_updated_at
+        event: BEFORE UPDATE
+        function: update_updated_at_column()
+
+# ============================================
+# Run Domain (Workflow Execution)
+# ============================================
+  runs:
+    description: Single workflow execution instance
+    table_name: runs
+    bounded_context: run
+    aggregate_root: true
+    columns:
+      id:
+        type: uuid
+        primary_key: true
+        default: gen_random_uuid()
+      thread_id:
+        type: uuid
+        nullable: false
+        references:
+          table: threads
+          column: id
+          on_delete: CASCADE
+      assistant_id:
+        type: uuid
+        nullable: false
+        references:
+          table: assistants
+          column: id
+          on_delete: CASCADE
+      status:
+        type: varchar(50)
+        nullable: false
+        default: "'queued'"
+        description: Run status
+        check: status IN ('queued', 'in_progress', 'requires_action', 'completed', 'failed', 'cancelled')
+      input:
+        type: jsonb
+        nullable: true
+        description: Input provided to start the run
+      output:
+        type: jsonb
+        nullable: true
+        description: Final output from the run
+      error:
+        type: text
+        nullable: true
+        description: Error message if run failed
+      metadata:
+        type: jsonb
+        default: "'{}'::jsonb"
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+      started_at:
+        type: timestamptz
+        nullable: true
+        description: When the run actually started executing
+      completed_at:
+        type: timestamptz
+        nullable: true
+        description: When the run completed (success or failure)
+      updated_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_runs_thread_id
+        columns: [thread_id]
+      - name: idx_runs_assistant_id
+        columns: [assistant_id]
+      - name: idx_runs_status
+        columns: [status]
+      - name: idx_runs_created_at
+        columns: [created_at]
+        order: DESC
+    triggers:
+      - name: update_runs_updated_at
+        event: BEFORE UPDATE
+        function: update_updated_at_column()
+
+# ============================================
+# Human-in-the-Loop Domain
+# ============================================
+  interrupts:
+    description: Human-in-the-loop interrupts requiring user action
+    table_name: interrupts
+    bounded_context: humanloop
+    columns:
+      id:
+        type: uuid
+        primary_key: true
+        default: gen_random_uuid()
+      run_id:
+        type: uuid
+        nullable: false
+        references:
+          table: runs
+          column: id
+          on_delete: CASCADE
+      node_id:
+        type: varchar(255)
+        nullable: false
+        description: ID of the node that triggered the interrupt
+      reason:
+        type: varchar(100)
+        nullable: false
+        description: Reason for interrupt
+        check: reason IN ('tool_call', 'approval_required', 'input_needed')
+      state:
+        type: jsonb
+        nullable: false
+        description: Current execution state at time of interrupt
+      tool_calls:
+        type: jsonb
+        nullable: true
+        description: Pending tool calls if reason is 'tool_call'
+      resolved:
+        type: boolean
+        nullable: false
+        default: "false"
+      resolved_at:
+        type: timestamptz
+        nullable: true
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_interrupts_run_id
+        columns: [run_id]
+      - name: idx_interrupts_resolved
+        columns: [resolved]
+
+# ============================================
+# Execution Domain (Audit Trail)
+# ============================================
+  execution_history:
+    description: Audit log of node executions within a run
+    table_name: execution_history
+    bounded_context: execution
+    columns:
+      id:
+        type: bigserial
+        primary_key: true
+      run_id:
+        type: uuid
+        nullable: false
+        references:
+          table: runs
+          column: id
+          on_delete: CASCADE
+      node_id:
+        type: varchar(255)
+        nullable: false
+        description: ID of the executed node
+      node_type:
+        type: varchar(50)
+        nullable: false
+        description: "Type of node: 'llm', 'tool', 'conditional', 'start', 'end'"
+      status:
+        type: varchar(50)
+        nullable: false
+        description: Execution status
+        check: status IN ('started', 'completed', 'failed', 'skipped')
+      input:
+        type: jsonb
+        nullable: true
+      output:
+        type: jsonb
+        nullable: true
+      error:
+        type: text
+        nullable: true
+      started_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+      completed_at:
+        type: timestamptz
+        nullable: true
+      duration_ms:
+        type: integer
+        nullable: true
+        description: Execution duration in milliseconds
+    indexes:
+      - name: idx_execution_history_run_id
+        columns: [run_id]
+      - name: idx_execution_history_node_id
+        columns: [node_id]
+      - name: idx_execution_history_started_at
+        columns: [started_at]
+        order: DESC
+
+# ============================================
+# Event Sourcing Infrastructure
+# ============================================
+  event_streams:
+    description: Aggregate stream metadata for event sourcing
+    table_name: event_streams
+    bounded_context: infrastructure
+    columns:
+      stream_id:
+        type: uuid
+        primary_key: true
+      aggregate_type:
+        type: varchar(100)
+        nullable: false
+        description: "Type of aggregate: 'Run', 'Assistant', 'Thread'"
+      aggregate_id:
+        type: uuid
+        nullable: false
+      version:
+        type: integer
+        nullable: false
+        default: "0"
+        description: Current version (incremented on each event)
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+      updated_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_event_streams_aggregate
+        columns: [aggregate_type, aggregate_id]
+    constraints:
+      - type: unique
+        columns: [aggregate_type, aggregate_id]
+
+  events:
+    description: Immutable event log (append-only)
+    table_name: events
+    bounded_context: infrastructure
+    columns:
+      id:
+        type: bigserial
+        primary_key: true
+      event_id:
+        type: uuid
+        nullable: false
+        unique: true
+        default: gen_random_uuid()
+      stream_id:
+        type: uuid
+        nullable: false
+        references:
+          table: event_streams
+          column: stream_id
+          on_delete: CASCADE
+      aggregate_type:
+        type: varchar(100)
+        nullable: false
+      aggregate_id:
+        type: uuid
+        nullable: false
+      event_type:
+        type: varchar(100)
+        nullable: false
+        description: "Event type: 'RunCreated', 'RunStarted', etc."
+      event_version:
+        type: integer
+        nullable: false
+        description: Version of this event within the stream
+      payload:
+        type: jsonb
+        nullable: false
+        description: Event data
+      metadata:
+        type: jsonb
+        default: "'{}'::jsonb"
+        description: Event metadata (correlation_id, causation_id, user_id)
+      occurred_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_events_stream_id
+        columns: [stream_id, event_version]
+      - name: idx_events_aggregate
+        columns: [aggregate_type, aggregate_id]
+      - name: idx_events_event_type
+        columns: [event_type]
+      - name: idx_events_occurred_at
+        columns: [occurred_at]
+        order: DESC
+    constraints:
+      - type: unique
+        columns: [stream_id, event_version]
+    triggers:
+      - name: increment_version_on_event
+        event: AFTER INSERT
+        function: increment_stream_version()
+        description: Auto-increments stream version on event insert
+
+  snapshots:
+    description: Aggregate state snapshots for performance
+    table_name: snapshots
+    bounded_context: infrastructure
+    columns:
+      id:
+        type: bigserial
+        primary_key: true
+      stream_id:
+        type: uuid
+        nullable: false
+        references:
+          table: event_streams
+          column: stream_id
+          on_delete: CASCADE
+      aggregate_type:
+        type: varchar(100)
+        nullable: false
+      aggregate_id:
+        type: uuid
+        nullable: false
+      version:
+        type: integer
+        nullable: false
+        description: Stream version at time of snapshot
+      state:
+        type: jsonb
+        nullable: false
+        description: Serialized aggregate state
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+    indexes:
+      - name: idx_snapshots_stream
+        columns: [stream_id, version]
+        order: DESC
+      - name: idx_snapshots_aggregate
+        columns: [aggregate_type, aggregate_id]
+    constraints:
+      - type: unique
+        columns: [stream_id, version]
+
+# ============================================
+# Outbox Pattern
+# ============================================
+  outbox:
+    description: Transactional outbox for reliable event publishing
+    table_name: outbox
+    bounded_context: infrastructure
+    columns:
+      id:
+        type: bigserial
+        primary_key: true
+      event_id:
+        type: uuid
+        nullable: false
+        unique: true
+      aggregate_type:
+        type: varchar(100)
+        nullable: false
+      aggregate_id:
+        type: uuid
+        nullable: false
+      event_type:
+        type: varchar(100)
+        nullable: false
+      payload:
+        type: jsonb
+        nullable: false
+      metadata:
+        type: jsonb
+        default: "'{}'::jsonb"
+      created_at:
+        type: timestamptz
+        default: now()
+        nullable: false
+      published_at:
+        type: timestamptz
+        nullable: true
+      published:
+        type: boolean
+        nullable: false
+        default: "false"
+      attempts:
+        type: integer
+        nullable: false
+        default: "0"
+        description: Number of publish attempts
+      last_error:
+        type: text
+        nullable: true
+        description: Last error message if publish failed
+      next_retry_at:
+        type: timestamptz
+        nullable: true
+        description: When to retry publishing
+    indexes:
+      - name: idx_outbox_published
+        columns: [published, next_retry_at]
+        where: NOT published
+      - name: idx_outbox_event_id
+        columns: [event_id]
+      - name: idx_outbox_created_at
+        columns: [created_at]
+        order: DESC
+      - name: idx_outbox_aggregate
+        columns: [aggregate_type, aggregate_id]
+    triggers:
+      - name: auto_publish_to_outbox
+        event: AFTER INSERT ON events
+        function: publish_event_to_outbox()
+        description: Auto-populates outbox when events are inserted
+
+# ============================================
+# Utility Functions
+# ============================================
+functions:
+  update_updated_at_column:
+    description: Updates the updated_at column to current timestamp
+    returns: trigger
+    language: plpgsql
+    body: |
+      BEGIN
+          NEW.updated_at = NOW();
+          RETURN NEW;
+      END;
+
+  increment_stream_version:
+    description: Increments stream version when event is inserted
+    returns: trigger
+    language: plpgsql
+    body: |
+      BEGIN
+          UPDATE event_streams
+          SET version = version + 1,
+              updated_at = NOW()
+          WHERE stream_id = NEW.stream_id;
+          RETURN NEW;
+      END;
+
+  publish_event_to_outbox:
+    description: Copies event to outbox table for reliable publishing
+    returns: trigger
+    language: plpgsql
+    body: |
+      BEGIN
+          INSERT INTO outbox (
+              event_id, aggregate_type, aggregate_id,
+              event_type, payload, metadata
+          ) VALUES (
+              NEW.event_id, NEW.aggregate_type, NEW.aggregate_id,
+              NEW.event_type, NEW.payload, NEW.metadata
+          );
+          RETURN NEW;
+      END;
+
+  cleanup_published_outbox:
+    description: Cleanup old published events from outbox
+    returns: integer
+    language: plpgsql
+    parameters:
+      - name: retention_days
+        type: integer
+        default: 7
+    body: |
+      DECLARE
+          deleted_count INTEGER;
+      BEGIN
+          DELETE FROM outbox
+          WHERE published = TRUE
+            AND published_at < NOW() - (retention_days || ' days')::INTERVAL;
+          GET DIAGNOSTICS deleted_count = ROW_COUNT;
+          RETURN deleted_count;
+      END;

@@ -1,0 +1,408 @@
+# DuraGraph Go Workers Specification
+# NATS JetStream consumers for background processing
+
+metadata:
+  version: "1.0.0"
+  runtime: go
+  framework: custom
+  message_broker: nats_jetstream
+
+# ============================================
+# Worker Configuration
+# ============================================
+worker_config:
+  global:
+    graceful_shutdown_timeout: 30s
+    health_check_interval: 10s
+    metrics_port: 9090
+
+  nats:
+    url: "${NATS_URL}"
+    max_reconnects: -1  # Infinite
+    reconnect_wait: 2s
+    ping_interval: 2m
+    max_pending: 65536
+
+  retry:
+    max_attempts: 3
+    initial_delay: 1s
+    max_delay: 30s
+    multiplier: 2.0
+    jitter: true
+
+  concurrency:
+    default: 10
+    max_per_worker: 50
+
+# ============================================
+# Outbox Relay Worker
+# ============================================
+outbox_relay_worker:
+  name: outbox-relay
+  description: |
+    Polls the outbox table and publishes events to NATS JetStream.
+    Implements the transactional outbox pattern for reliable event delivery.
+
+  location: internal/infrastructure/messaging/outbox_relay.go
+
+  config:
+    poll_interval: 1s
+    batch_size: 100
+    cleanup_interval: 1h
+    cleanup_retention_days: 7
+
+  steps:
+    - name: poll_outbox
+      action: query_unpublished_messages
+      timeout: 5s
+      query: |
+        SELECT * FROM outbox
+        WHERE NOT published
+          AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+        ORDER BY created_at ASC
+        LIMIT $1
+
+    - name: publish_to_nats
+      action: nats_publish
+      timeout: 10s
+      subject_pattern: "{event_type}"
+
+    - name: mark_published
+      action: update_outbox
+      timeout: 5s
+      query: |
+        UPDATE outbox
+        SET published = TRUE, published_at = NOW()
+        WHERE event_id = $1
+
+  on_error:
+    - action: increment_attempts
+    - action: set_next_retry
+      delay_formula: "min(initial_delay * pow(multiplier, attempts), max_delay)"
+    - action: log_error
+
+  metrics:
+    - name: duragraph_outbox_messages_published_total
+      type: counter
+      labels: [event_type]
+    - name: duragraph_outbox_messages_failed_total
+      type: counter
+      labels: [event_type, error_type]
+    - name: duragraph_outbox_publish_duration_seconds
+      type: histogram
+      labels: [event_type]
+    - name: duragraph_outbox_pending_count
+      type: gauge
+
+# ============================================
+# Graph Execution Worker
+# ============================================
+graph_execution_worker:
+  name: graph-executor
+  description: |
+    Executes workflow graphs by traversing nodes and edges.
+    Handles LLM calls, tool execution, and conditional branching.
+
+  location: internal/infrastructure/graph/engine.go
+
+  consumer:
+    stream: WORKER_COMMANDS
+    consumer_name: graph-executor
+    filter_subjects:
+      - worker.graph.execute
+    deliver_policy: all
+    ack_policy: explicit
+    ack_wait: 5m
+    max_deliver: 3
+    max_ack_pending: 50
+
+  concurrency: 20
+
+  jobs:
+    execute_graph:
+      trigger: worker.graph.execute
+      description: Execute a complete workflow graph
+
+      steps:
+        - name: load_graph
+          action: get_graph_from_db
+          timeout: 5s
+
+        - name: initialize_state
+          action: create_execution_context
+          timeout: 1s
+
+        - name: publish_run_started
+          action: publish_event
+          event: run.started
+
+        - name: execute_nodes
+          action: traverse_and_execute
+          timeout: 10m
+          loop:
+            max_iterations: 1000
+            continue_condition: "has_next_node"
+
+        - name: publish_run_completed
+          action: publish_event
+          event: run.completed
+
+      on_error:
+        - action: publish_event
+          event: run.failed
+        - action: log_error
+        - action: update_run_status
+          status: failed
+
+      on_interrupt:
+        - action: save_execution_state
+        - action: publish_event
+          event: run.requires_action
+
+  node_executors:
+    start:
+      description: Entry point node
+      action: passthrough
+      timeout: 1s
+
+    end:
+      description: Exit point node
+      action: finalize
+      timeout: 1s
+
+    llm:
+      description: LLM inference node
+      action: invoke_llm
+      timeout: 2m
+      config:
+        providers:
+          - openai
+          - anthropic
+        fallback_enabled: true
+
+    tool:
+      description: Tool execution node
+      action: execute_tool
+      timeout: 1m
+      config:
+        tool_registry: internal/infrastructure/tools/registry.go
+
+    conditional:
+      description: Conditional branching node
+      action: evaluate_condition
+      timeout: 5s
+
+  metrics:
+    - name: duragraph_graph_executions_total
+      type: counter
+      labels: [status]
+    - name: duragraph_graph_execution_duration_seconds
+      type: histogram
+      labels: [graph_id]
+    - name: duragraph_node_executions_total
+      type: counter
+      labels: [node_type, status]
+    - name: duragraph_node_execution_duration_seconds
+      type: histogram
+      labels: [node_type]
+
+# ============================================
+# LLM Worker
+# ============================================
+llm_worker:
+  name: llm-worker
+  description: |
+    Handles LLM inference requests. Supports multiple providers
+    with fallback capabilities.
+
+  consumer:
+    stream: WORKER_COMMANDS
+    consumer_name: llm-worker
+    filter_subjects:
+      - worker.llm.invoke
+    deliver_policy: all
+    ack_policy: explicit
+    ack_wait: 2m
+    max_deliver: 3
+    max_ack_pending: 100
+
+  concurrency: 50
+
+  providers:
+    openai:
+      base_url: https://api.openai.com/v1
+      api_key_env: OPENAI_API_KEY
+      models:
+        - gpt-4
+        - gpt-4-turbo
+        - gpt-3.5-turbo
+      timeout: 60s
+      max_retries: 2
+
+    anthropic:
+      base_url: https://api.anthropic.com/v1
+      api_key_env: ANTHROPIC_API_KEY
+      models:
+        - claude-3-opus
+        - claude-3-sonnet
+        - claude-3-haiku
+      timeout: 60s
+      max_retries: 2
+
+  fallback:
+    enabled: true
+    order:
+      - openai
+      - anthropic
+
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 500
+    tokens_per_minute: 100000
+
+  metrics:
+    - name: duragraph_llm_requests_total
+      type: counter
+      labels: [provider, model, status]
+    - name: duragraph_llm_request_duration_seconds
+      type: histogram
+      labels: [provider, model]
+    - name: duragraph_llm_tokens_total
+      type: counter
+      labels: [provider, model, type]  # type: prompt, completion
+
+# ============================================
+# Tool Execution Worker
+# ============================================
+tool_worker:
+  name: tool-worker
+  description: |
+    Executes tools/functions as part of workflow execution.
+    Tools can be built-in or user-defined.
+
+  consumer:
+    stream: WORKER_COMMANDS
+    consumer_name: tool-worker
+    filter_subjects:
+      - worker.tool.execute
+    deliver_policy: all
+    ack_policy: explicit
+    ack_wait: 1m
+    max_deliver: 3
+    max_ack_pending: 100
+
+  concurrency: 30
+
+  built_in_tools:
+    http_request:
+      description: Make HTTP requests
+      timeout: 30s
+      config:
+        max_redirects: 5
+        allowed_hosts: []  # Empty means all allowed
+
+    code_interpreter:
+      description: Execute Python code (sandboxed)
+      timeout: 60s
+      config:
+        sandbox: true
+        max_memory_mb: 512
+
+    file_search:
+      description: Search through uploaded files
+      timeout: 30s
+
+  security:
+    sandbox_enabled: true
+    allowed_domains: []  # Configure for production
+    blocked_domains:
+      - localhost
+      - 127.0.0.1
+      - 0.0.0.0
+
+  metrics:
+    - name: duragraph_tool_executions_total
+      type: counter
+      labels: [tool_name, status]
+    - name: duragraph_tool_execution_duration_seconds
+      type: histogram
+      labels: [tool_name]
+
+# ============================================
+# SSE Stream Handler
+# ============================================
+sse_stream_handler:
+  name: sse-stream
+  description: |
+    Subscribes to events and streams them to connected clients
+    via Server-Sent Events.
+
+  location: internal/infrastructure/http/handlers/stream.go
+
+  subscriptions:
+    - subject: run.*
+    - subject: execution.node_*
+    - subject: interrupt.*
+
+  config:
+    heartbeat_interval: 30s
+    client_timeout: 5m
+    max_clients_per_run: 100
+
+  event_mapping:
+    run.created:
+      sse_event: run_created
+    run.started:
+      sse_event: run_started
+    run.completed:
+      sse_event: run_completed
+    run.failed:
+      sse_event: run_failed
+    run.requires_action:
+      sse_event: requires_action
+    execution.node_started:
+      sse_event: node_started
+    execution.node_completed:
+      sse_event: node_completed
+
+  metrics:
+    - name: duragraph_sse_connections_active
+      type: gauge
+      labels: [run_id]
+    - name: duragraph_sse_events_sent_total
+      type: counter
+      labels: [event_type]
+
+# ============================================
+# Cleanup Worker (Scheduled)
+# ============================================
+cleanup_worker:
+  name: cleanup-worker
+  description: |
+    Scheduled worker that cleans up old data.
+    Runs on a cron schedule.
+
+  schedules:
+    - name: cleanup_outbox
+      cron: "0 * * * *"  # Every hour
+      action: cleanup_published_outbox
+      config:
+        retention_days: 7
+
+    - name: cleanup_execution_history
+      cron: "0 3 * * *"  # Daily at 3 AM
+      action: cleanup_old_execution_history
+      config:
+        retention_days: 30
+
+    - name: refresh_materialized_views
+      cron: "*/5 * * * *"  # Every 5 minutes
+      action: refresh_run_status_view
+
+  metrics:
+    - name: duragraph_cleanup_records_deleted_total
+      type: counter
+      labels: [table]
+    - name: duragraph_cleanup_last_run_timestamp
+      type: gauge
+      labels: [job_name]

@@ -1,0 +1,283 @@
+# DuraGraph Specification Generation Guide
+# Meta-specification for generating technical specs for DuraGraph
+#
+# This file serves as an instruction manual for AI assistants and developers
+# to generate comprehensive technical specifications for DuraGraph.
+
+metadata:
+  version: "1.0.0"
+  purpose: >
+    Guide for creating and maintaining technical specifications
+    for DuraGraph using spec-driven development methodology.
+  author: DuraGraph Team
+  applicable_to: LangGraph Cloud-compatible API development
+
+# ============================================
+# Overview
+# ============================================
+overview:
+  what_is_duragraph: >
+    DuraGraph is an open-source LangGraph Cloud-compatible API built with
+    Event Sourcing and CQRS patterns for reliable AI workflow orchestration.
+    It provides a self-hosted, enterprise-ready alternative to LangGraph Cloud.
+
+  core_capabilities:
+    - LangGraph Cloud API compatibility
+    - Event sourcing for audit and replay
+    - CQRS for scalable reads and writes
+    - Graph execution engine for workflows
+    - Real-time streaming via SSE
+    - Human-in-the-loop interrupts
+
+  tech_stack:
+    backend: Go 1.23+ with Echo v4
+    database: PostgreSQL 15 with pgx/v5
+    messaging: NATS JetStream
+    eventing: Watermill
+    monitoring: Prometheus
+    caching: Redis (optional)
+
+# ============================================
+# Spec Folder Structure
+# ============================================
+spec_structure:
+  description: >
+    The spec folder contains detailed technical specifications.
+    Each file is a YAML document with a consistent structure.
+
+  folders:
+    api:
+      purpose: "REST API definitions (LangGraph Cloud compatible)"
+      files:
+        - openapi.yml
+      key_sections:
+        - paths (endpoints)
+        - schemas (request/response)
+        - security schemes
+        - LangGraph compatibility notes
+
+    async:
+      purpose: "Event-driven messaging specifications"
+      files:
+        - asyncapi.yml
+      key_sections:
+        - channels (NATS subjects)
+        - messages (event schemas)
+        - operations (publish/subscribe)
+        - JetStream configuration
+
+    models:
+      purpose: "Data models and storage"
+      files:
+        - entities.yml (database tables, event store)
+        - events.yml (domain event schemas)
+        - dto.yml (data transfer objects)
+      key_sections:
+        - tables/columns
+        - indexes
+        - relationships
+        - event sourcing schema
+
+    outbox:
+      purpose: "Transactional outbox pattern"
+      files:
+        - schema.sql
+        - outbox.yml
+      key_sections:
+        - outbox table
+        - relay worker configuration
+        - retry policies
+
+    observability:
+      purpose: "Monitoring, logging, tracing"
+      files:
+        - metrics.yml
+        - traces.yml
+      key_sections:
+        - Prometheus metrics
+        - SLOs/SLIs
+        - alerting rules
+
+    workers:
+      purpose: "Background worker specifications"
+      files:
+        - go-workers.yml
+      key_sections:
+        - worker definitions
+        - triggers (event-driven)
+        - retry policies
+        - concurrency limits
+
+    auth:
+      purpose: "Authentication and authorization"
+      files:
+        - auth.yml
+        - rate-limiting.yml
+      key_sections:
+        - JWT configuration
+        - OAuth2 providers
+        - rate limits
+
+    backend:
+      purpose: "Development conventions and patterns"
+      files:
+        - development-guide.yml
+      key_sections:
+        - naming conventions
+        - project structure
+        - code patterns
+        - git conventions
+
+# ============================================
+# Domain Model: Core Aggregates
+# ============================================
+domain_model:
+  description: >
+    DuraGraph follows Domain-Driven Design with event sourcing.
+    These are the core aggregates and their responsibilities.
+
+  aggregates:
+    Run:
+      description: Represents a single workflow execution
+      location: internal/domain/run/
+      states:
+        - queued
+        - in_progress
+        - completed
+        - failed
+        - cancelled
+        - requires_action
+      events:
+        - RunCreated
+        - RunStarted
+        - RunCompleted
+        - RunFailed
+        - RunCancelled
+        - RunRequiresAction
+        - RunResumed
+
+    Assistant:
+      description: AI assistant configuration (graph definition)
+      location: internal/domain/workflow/
+      fields:
+        - id
+        - name
+        - description
+        - graph_schema
+        - config
+        - metadata
+
+    Thread:
+      description: Conversation context with messages
+      location: internal/domain/workflow/
+      fields:
+        - id
+        - messages
+        - metadata
+      events:
+        - ThreadCreated
+        - MessageAdded
+
+    Graph:
+      description: Workflow graph definition with nodes and edges
+      location: internal/domain/workflow/
+      components:
+        - nodes (LLM, tool, conditional, start, end)
+        - edges (normal, conditional)
+        - entry_point
+
+# ============================================
+# API Compatibility: LangGraph Cloud
+# ============================================
+langgraph_compatibility:
+  description: >
+    DuraGraph aims to be a drop-in replacement for LangGraph Cloud.
+    These endpoints must match LangGraph Cloud's API contract.
+
+  endpoints:
+    runs:
+      - POST /api/v1/runs (create and execute run)
+      - GET /api/v1/runs/:run_id (get run status)
+      - GET /api/v1/threads/:thread_id/runs (list runs for thread)
+      - POST /api/v1/runs/:run_id/submit_tool_outputs
+
+    assistants:
+      - POST /api/v1/assistants (create assistant)
+      - GET /api/v1/assistants/:assistant_id
+      - GET /api/v1/assistants (list assistants)
+      - PATCH /api/v1/assistants/:assistant_id
+      - DELETE /api/v1/assistants/:assistant_id
+
+    threads:
+      - POST /api/v1/threads (create thread)
+      - GET /api/v1/threads/:thread_id
+      - GET /api/v1/threads (list threads)
+      - PATCH /api/v1/threads/:thread_id
+      - POST /api/v1/threads/:thread_id/messages
+
+    streaming:
+      - GET /api/v1/stream?run_id={id} (SSE stream)
+
+# ============================================
+# Event Flow Architecture
+# ============================================
+event_flow:
+  description: >
+    Events flow through the system using the outbox pattern
+    for reliable delivery to NATS JetStream.
+
+  write_path:
+    steps:
+      - HTTP request received
+      - Handler validates and binds request
+      - Command handler creates/modifies aggregate
+      - Aggregate emits domain events
+      - Repository saves events + outbox (single transaction)
+      - Response returned to client
+
+  outbox_relay:
+    steps:
+      - Background worker polls outbox table
+      - Publishes events to NATS JetStream
+      - Marks messages as published
+      - Cleanup worker removes old published messages
+
+  subscribe_path:
+    steps:
+      - NATS consumer receives event
+      - Worker processes event
+      - Updates projections or triggers downstream actions
+      - SSE handler broadcasts to connected clients
+
+# ============================================
+# Checklist
+# ============================================
+checklist:
+  core_specs:
+    - "[ ] models/entities.yml - Database schema"
+    - "[ ] models/events.yml - Domain events"
+    - "[ ] api/openapi.yml - REST API"
+    - "[ ] async/asyncapi.yml - NATS events"
+
+  infrastructure_specs:
+    - "[ ] outbox/outbox.yml - Outbox pattern"
+    - "[ ] workers/go-workers.yml - Background jobs"
+    - "[ ] observability/metrics.yml - Prometheus metrics"
+
+  auth_specs:
+    - "[ ] auth/auth.yml - JWT/OAuth2"
+    - "[ ] auth/rate-limiting.yml - Rate limits"
+
+  development_specs:
+    - "[ ] backend/development-guide.yml - Conventions"
+    - "[ ] README.md - Documentation"
+
+# ============================================
+# Version History
+# ============================================
+version_history:
+  - version: "1.0.0"
+    date: "2024-12-07"
+    changes:
+      - "Initial version for DuraGraph"
+      - "Adapted from Finsightly spec guide"
