@@ -11,6 +11,9 @@ type CreateRunRequest struct {
 	Input       map[string]interface{} `json:"input,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 	Config      map[string]interface{} `json:"config,omitempty"`
+	Kwargs      map[string]interface{} `json:"kwargs,omitempty"`
+	StreamMode  []string               `json:"stream_mode,omitempty"`
+	OnCompletion string                `json:"on_completion,omitempty"`
 }
 
 // CreateRunResponse represents the response from creating a run
@@ -20,6 +23,7 @@ type CreateRunResponse struct {
 	AssistantID string                 `json:"assistant_id"`
 	Status      string                 `json:"status"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Kwargs      map[string]interface{} `json:"kwargs,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 }
 
@@ -33,6 +37,7 @@ type GetRunResponse struct {
 	Output      map[string]interface{} `json:"output,omitempty"`
 	Error       string                 `json:"error,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Kwargs      map[string]interface{} `json:"kwargs,omitempty"`
 	CreatedAt   time.Time              `json:"created_at"`
 	StartedAt   *time.Time             `json:"started_at,omitempty"`
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
@@ -52,12 +57,15 @@ type ToolOutput struct {
 
 // CreateAssistantRequest represents the request to create an assistant
 type CreateAssistantRequest struct {
+	GraphID      string                   `json:"graph_id,omitempty"`
 	Name         string                   `json:"name"`
 	Description  string                   `json:"description,omitempty"`
 	Model        string                   `json:"model,omitempty"`
 	Instructions string                   `json:"instructions,omitempty"`
 	Tools        []map[string]interface{} `json:"tools,omitempty"`
 	Metadata     map[string]interface{}   `json:"metadata,omitempty"`
+	Config       map[string]interface{}   `json:"config,omitempty"`
+	Context      []map[string]interface{} `json:"context,omitempty"`
 }
 
 // CreateAssistantResponse represents the response from creating an assistant
@@ -101,13 +109,17 @@ type UpdateAssistantRequest struct {
 
 // AssistantResponse represents an assistant resource
 type AssistantResponse struct {
-	ID           string                   `json:"id"`
+	ID           string                   `json:"assistant_id"`
+	GraphID      string                   `json:"graph_id,omitempty"`
 	Name         string                   `json:"name"`
 	Description  string                   `json:"description,omitempty"`
 	Model        string                   `json:"model,omitempty"`
 	Instructions string                   `json:"instructions,omitempty"`
 	Tools        []map[string]interface{} `json:"tools,omitempty"`
 	Metadata     map[string]interface{}   `json:"metadata,omitempty"`
+	Config       map[string]interface{}   `json:"config,omitempty"`
+	Context      []map[string]interface{} `json:"context,omitempty"`
+	Version      int                      `json:"version"`
 	CreatedAt    int64                    `json:"created_at"`
 	UpdatedAt    int64                    `json:"updated_at"`
 }
@@ -152,4 +164,37 @@ type AddMessageRequest struct {
 	Role     string                 `json:"role"`
 	Content  string                 `json:"content"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// SearchAssistantsRequest represents the request to search assistants
+type SearchAssistantsRequest struct {
+	GraphID  string                 `json:"graph_id,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Limit    int                    `json:"limit,omitempty"`
+	Offset   int                    `json:"offset,omitempty"`
+}
+
+// CountAssistantsRequest represents the request to count assistants
+type CountAssistantsRequest struct {
+	GraphID  string                 `json:"graph_id,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// SearchThreadsRequest represents the request to search threads
+type SearchThreadsRequest struct {
+	Status   string                 `json:"status,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Limit    int                    `json:"limit,omitempty"`
+	Offset   int                    `json:"offset,omitempty"`
+}
+
+// CountThreadsRequest represents the request to count threads
+type CountThreadsRequest struct {
+	Status   string                 `json:"status,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// CountResponse represents a count response
+type CountResponse struct {
+	Count int `json:"count"`
 }

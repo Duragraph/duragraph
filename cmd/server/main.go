@@ -150,8 +150,13 @@ func main() {
 	listRunsHandler := query.NewListRunsHandler(runRepo)
 	getAssistantHandler := query.NewGetAssistantHandler(assistantRepo)
 	listAssistantsHandler := query.NewListAssistantsHandler(assistantRepo)
+	searchAssistantsHandler := query.NewSearchAssistantsHandler(assistantRepo)
+	countAssistantsHandler := query.NewCountAssistantsHandler(assistantRepo)
 	getThreadHandler := query.NewGetThreadHandler(threadRepo)
 	listThreadsHandler := query.NewListThreadsHandler(threadRepo)
+	searchThreadsHandler := query.NewSearchThreadsHandler(threadRepo)
+	countThreadsHandler := query.NewCountThreadsHandler(threadRepo)
+	deleteThreadHandler := command.NewDeleteThreadHandler(threadRepo)
 
 	// Initialize application services
 	runService := service.NewRunService(
@@ -177,15 +182,21 @@ func main() {
 		deleteAssistantHandler,
 		getAssistantHandler,
 		listAssistantsHandler,
+		searchAssistantsHandler,
+		countAssistantsHandler,
 	)
 	threadHandler := handlers.NewThreadHandler(
 		createThreadHandler,
 		updateThreadHandler,
+		deleteThreadHandler,
 		addMessageHandler,
 		getThreadHandler,
 		listThreadsHandler,
+		searchThreadsHandler,
+		countThreadsHandler,
 	)
 	streamHandler := handlers.NewStreamHandler(subscriber)
+	systemHandler := handlers.NewSystemHandler("2.0.0-ddd")
 
 	// Initialize Echo server
 	e := echo.New()
@@ -220,6 +231,10 @@ func main() {
 	// Prometheus metrics endpoint
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 
+	// System endpoints (LangGraph compatible)
+	e.GET("/ok", systemHandler.Ok)
+	e.GET("/info", systemHandler.Info)
+
 	// API routes
 	api := e.Group("/api/v1")
 
@@ -243,6 +258,8 @@ func main() {
 
 	// Assistant routes
 	api.POST("/assistants", assistantHandler.Create)
+	api.POST("/assistants/search", assistantHandler.Search)
+	api.POST("/assistants/count", assistantHandler.Count)
 	api.GET("/assistants/:assistant_id", assistantHandler.Get)
 	api.GET("/assistants", assistantHandler.List)
 	api.PATCH("/assistants/:assistant_id", assistantHandler.Update)
@@ -250,9 +267,12 @@ func main() {
 
 	// Thread routes
 	api.POST("/threads", threadHandler.Create)
+	api.POST("/threads/search", threadHandler.Search)
+	api.POST("/threads/count", threadHandler.Count)
 	api.GET("/threads/:thread_id", threadHandler.Get)
 	api.GET("/threads", threadHandler.List)
 	api.PATCH("/threads/:thread_id", threadHandler.Update)
+	api.DELETE("/threads/:thread_id", threadHandler.Delete)
 	api.POST("/threads/:thread_id/messages", threadHandler.AddMessage)
 
 	// Start server

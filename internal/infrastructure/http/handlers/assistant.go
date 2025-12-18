@@ -17,6 +17,8 @@ type AssistantHandler struct {
 	deleteHandler *command.DeleteAssistantHandler
 	getHandler    *query.GetAssistantHandler
 	listHandler   *query.ListAssistantsHandler
+	searchHandler *query.SearchAssistantsHandler
+	countHandler  *query.CountAssistantsHandler
 }
 
 // NewAssistantHandler creates a new AssistantHandler
@@ -26,6 +28,8 @@ func NewAssistantHandler(
 	deleteHandler *command.DeleteAssistantHandler,
 	getHandler *query.GetAssistantHandler,
 	listHandler *query.ListAssistantsHandler,
+	searchHandler *query.SearchAssistantsHandler,
+	countHandler *query.CountAssistantsHandler,
 ) *AssistantHandler {
 	return &AssistantHandler{
 		createHandler: createHandler,
@@ -33,6 +37,8 @@ func NewAssistantHandler(
 		deleteHandler: deleteHandler,
 		getHandler:    getHandler,
 		listHandler:   listHandler,
+		searchHandler: searchHandler,
+		countHandler:  countHandler,
 	}
 }
 
@@ -203,5 +209,80 @@ func (h *AssistantHandler) Delete(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"id":     assistantID,
 		"status": "deleted",
+	})
+}
+
+// Search handles POST /assistants/search
+func (h *AssistantHandler) Search(c echo.Context) error {
+	var req dto.SearchAssistantsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	// Set defaults
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+
+	assistants, err := h.searchHandler.Handle(c.Request().Context(), query.SearchAssistants{
+		GraphID:  req.GraphID,
+		Metadata: req.Metadata,
+		Limit:    req.Limit,
+		Offset:   req.Offset,
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	response := make([]dto.AssistantResponse, len(assistants))
+	for i, assistant := range assistants {
+		response[i] = dto.AssistantResponse{
+			ID:           assistant.ID(),
+			Name:         assistant.Name(),
+			Description:  assistant.Description(),
+			Model:        assistant.Model(),
+			Instructions: assistant.Instructions(),
+			Tools:        assistant.Tools(),
+			Metadata:     assistant.Metadata(),
+			Version:      1, // Default version
+			CreatedAt:    assistant.CreatedAt().Unix(),
+			UpdatedAt:    assistant.UpdatedAt().Unix(),
+		}
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// Count handles POST /assistants/count
+func (h *AssistantHandler) Count(c echo.Context) error {
+	var req dto.CountAssistantsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	count, err := h.countHandler.Handle(c.Request().Context(), query.CountAssistants{
+		GraphID:  req.GraphID,
+		Metadata: req.Metadata,
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, dto.CountResponse{
+		Count: count,
 	})
 }

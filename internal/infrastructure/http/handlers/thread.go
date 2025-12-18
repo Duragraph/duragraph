@@ -14,25 +14,34 @@ import (
 type ThreadHandler struct {
 	createHandler     *command.CreateThreadHandler
 	updateHandler     *command.UpdateThreadHandler
+	deleteHandler     *command.DeleteThreadHandler
 	addMessageHandler *command.AddMessageHandler
 	getHandler        *query.GetThreadHandler
 	listHandler       *query.ListThreadsHandler
+	searchHandler     *query.SearchThreadsHandler
+	countHandler      *query.CountThreadsHandler
 }
 
 // NewThreadHandler creates a new ThreadHandler
 func NewThreadHandler(
 	createHandler *command.CreateThreadHandler,
 	updateHandler *command.UpdateThreadHandler,
+	deleteHandler *command.DeleteThreadHandler,
 	addMessageHandler *command.AddMessageHandler,
 	getHandler *query.GetThreadHandler,
 	listHandler *query.ListThreadsHandler,
+	searchHandler *query.SearchThreadsHandler,
+	countHandler *query.CountThreadsHandler,
 ) *ThreadHandler {
 	return &ThreadHandler{
 		createHandler:     createHandler,
 		updateHandler:     updateHandler,
+		deleteHandler:     deleteHandler,
 		addMessageHandler: addMessageHandler,
 		getHandler:        getHandler,
 		listHandler:       listHandler,
+		searchHandler:     searchHandler,
+		countHandler:      countHandler,
 	}
 }
 
@@ -227,5 +236,107 @@ func (h *ThreadHandler) AddMessage(c echo.Context) error {
 		Content:   message.Content,
 		Metadata:  message.Metadata,
 		CreatedAt: message.CreatedAt.Unix(),
+	})
+}
+
+// Delete handles DELETE /threads/:thread_id
+func (h *ThreadHandler) Delete(c echo.Context) error {
+	threadID := c.Param("thread_id")
+
+	cmd := command.DeleteThreadCommand{
+		ThreadID: threadID,
+	}
+
+	if err := h.deleteHandler.Handle(c.Request().Context(), cmd); err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"id":     threadID,
+		"status": "deleted",
+	})
+}
+
+// Search handles POST /threads/search
+func (h *ThreadHandler) Search(c echo.Context) error {
+	var req dto.SearchThreadsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	// Set defaults
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+
+	threads, err := h.searchHandler.Handle(c.Request().Context(), query.SearchThreads{
+		Status:   req.Status,
+		Metadata: req.Metadata,
+		Limit:    req.Limit,
+		Offset:   req.Offset,
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	response := make([]dto.ThreadResponse, len(threads))
+	for i, thread := range threads {
+		messages := make([]dto.MessageResponse, len(thread.Messages()))
+		for j, msg := range thread.Messages() {
+			messages[j] = dto.MessageResponse{
+				ID:        msg.ID,
+				Role:      msg.Role,
+				Content:   msg.Content,
+				Metadata:  msg.Metadata,
+				CreatedAt: msg.CreatedAt.Unix(),
+			}
+		}
+
+		response[i] = dto.ThreadResponse{
+			ID:        thread.ID(),
+			Messages:  messages,
+			Metadata:  thread.Metadata(),
+			CreatedAt: thread.CreatedAt().Unix(),
+			UpdatedAt: thread.UpdatedAt().Unix(),
+		}
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// Count handles POST /threads/count
+func (h *ThreadHandler) Count(c echo.Context) error {
+	var req dto.CountThreadsRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	count, err := h.countHandler.Handle(c.Request().Context(), query.CountThreads{
+		Status:   req.Status,
+		Metadata: req.Metadata,
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, dto.CountResponse{
+		Count: count,
 	})
 }

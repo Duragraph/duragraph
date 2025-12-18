@@ -283,3 +283,96 @@ func (r *ThreadRepository) Delete(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// Search retrieves threads matching the given filters
+func (r *ThreadRepository) Search(ctx context.Context, filters workflow.ThreadSearchFilters) ([]*workflow.Thread, error) {
+	query := `
+		SELECT id, metadata, created_at, updated_at
+		FROM threads
+		WHERE 1=1
+	`
+	args := make([]interface{}, 0)
+	argIdx := 1
+
+	if filters.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, filters.Status)
+		argIdx++
+	}
+
+	if filters.Metadata != nil {
+		metadataJSON, _ := json.Marshal(filters.Metadata)
+		query += fmt.Sprintf(" AND metadata @> $%d", argIdx)
+		args = append(args, metadataJSON)
+		argIdx++
+	}
+
+	query += ` ORDER BY created_at DESC`
+
+	if filters.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argIdx)
+		args = append(args, filters.Limit)
+		argIdx++
+	}
+
+	if filters.Offset > 0 {
+		query += fmt.Sprintf(" OFFSET $%d", argIdx)
+		args = append(args, filters.Offset)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, errors.Internal("failed to search threads", err)
+	}
+	defer rows.Close()
+
+	threads := make([]*workflow.Thread, 0)
+
+	for rows.Next() {
+		var threadID string
+		var metadataJSON []byte
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(&threadID, &metadataJSON, &createdAt, &updatedAt)
+		if err != nil {
+			return nil, errors.Internal("failed to scan thread", err)
+		}
+
+		var metadata map[string]interface{}
+		json.Unmarshal(metadataJSON, &metadata)
+
+		thread, _ := workflow.ReconstructThread(
+			threadID, nil, metadata, createdAt, updatedAt,
+		)
+		threads = append(threads, thread)
+	}
+
+	return threads, nil
+}
+
+// Count returns the number of threads matching the given filters
+func (r *ThreadRepository) Count(ctx context.Context, filters workflow.ThreadSearchFilters) (int, error) {
+	query := `SELECT COUNT(*) FROM threads WHERE 1=1`
+	args := make([]interface{}, 0)
+	argIdx := 1
+
+	if filters.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, filters.Status)
+		argIdx++
+	}
+
+	if filters.Metadata != nil {
+		metadataJSON, _ := json.Marshal(filters.Metadata)
+		query += fmt.Sprintf(" AND metadata @> $%d", argIdx)
+		args = append(args, metadataJSON)
+	}
+
+	var count int
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, errors.Internal("failed to count threads", err)
+	}
+
+	return count, nil
+}

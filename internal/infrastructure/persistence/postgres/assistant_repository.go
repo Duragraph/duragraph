@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/workflow"
@@ -189,4 +190,102 @@ func (r *AssistantRepository) Delete(ctx context.Context, id string) error {
 		return errors.Internal("failed to delete assistant", err)
 	}
 	return nil
+}
+
+// Search retrieves assistants matching the given filters
+func (r *AssistantRepository) Search(ctx context.Context, filters workflow.AssistantSearchFilters) ([]*workflow.Assistant, error) {
+	query := `
+		SELECT id, name, description, model, instructions, tools, metadata, created_at, updated_at
+		FROM assistants
+		WHERE 1=1
+	`
+	args := make([]interface{}, 0)
+	argIdx := 1
+
+	if filters.GraphID != "" {
+		query += fmt.Sprintf(" AND graph_id = $%d", argIdx)
+		args = append(args, filters.GraphID)
+		argIdx++
+	}
+
+	if filters.Metadata != nil {
+		metadataJSON, _ := json.Marshal(filters.Metadata)
+		query += fmt.Sprintf(" AND metadata @> $%d", argIdx)
+		args = append(args, metadataJSON)
+		argIdx++
+	}
+
+	query += ` ORDER BY created_at DESC`
+
+	if filters.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argIdx)
+		args = append(args, filters.Limit)
+		argIdx++
+	}
+
+	if filters.Offset > 0 {
+		query += fmt.Sprintf(" OFFSET $%d", argIdx)
+		args = append(args, filters.Offset)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, errors.Internal("failed to search assistants", err)
+	}
+	defer rows.Close()
+
+	assistants := make([]*workflow.Assistant, 0)
+
+	for rows.Next() {
+		var assistantID, name, description, model, instructions string
+		var toolsJSON, metadataJSON []byte
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(&assistantID, &name, &description, &model, &instructions,
+			&toolsJSON, &metadataJSON, &createdAt, &updatedAt)
+		if err != nil {
+			return nil, errors.Internal("failed to scan assistant", err)
+		}
+
+		var tools []map[string]interface{}
+		json.Unmarshal(toolsJSON, &tools)
+
+		var metadata map[string]interface{}
+		json.Unmarshal(metadataJSON, &metadata)
+
+		assistant, _ := workflow.ReconstructAssistant(
+			assistantID, name, description, model, instructions,
+			tools, metadata, createdAt, updatedAt,
+		)
+		assistants = append(assistants, assistant)
+	}
+
+	return assistants, nil
+}
+
+// Count returns the number of assistants matching the given filters
+func (r *AssistantRepository) Count(ctx context.Context, filters workflow.AssistantSearchFilters) (int, error) {
+	query := `SELECT COUNT(*) FROM assistants WHERE 1=1`
+	args := make([]interface{}, 0)
+	argIdx := 1
+
+	if filters.GraphID != "" {
+		query += fmt.Sprintf(" AND graph_id = $%d", argIdx)
+		args = append(args, filters.GraphID)
+		argIdx++
+	}
+
+	if filters.Metadata != nil {
+		metadataJSON, _ := json.Marshal(filters.Metadata)
+		query += fmt.Sprintf(" AND metadata @> $%d", argIdx)
+		args = append(args, metadataJSON)
+	}
+
+	var count int
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, errors.Internal("failed to count assistants", err)
+	}
+
+	return count, nil
 }
