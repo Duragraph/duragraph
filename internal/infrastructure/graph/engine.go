@@ -8,6 +8,7 @@ import (
 
 	"github.com/duragraph/duragraph/internal/domain/execution"
 	"github.com/duragraph/duragraph/internal/domain/workflow"
+	"github.com/duragraph/duragraph/internal/infrastructure/streaming"
 	"github.com/duragraph/duragraph/internal/pkg/errors"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 )
@@ -203,6 +204,15 @@ func (e *Engine) executePlan(ctx context.Context, runID string, plan *ExecutionP
 func (e *Engine) executeNode(ctx context.Context, runID, nodeID string, node workflow.Node, state *execution.ExecutionState, eventBus *eventbus.EventBus) (map[string]interface{}, error) {
 	startTime := time.Now()
 
+	// Emit debug event for node start
+	streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+		fmt.Sprintf("Starting node %s (%s)", nodeID, node.Type),
+		map[string]interface{}{
+			"node_id":   nodeID,
+			"node_type": string(node.Type),
+			"config":    node.Config,
+		})
+
 	// Publish node started event
 	eventBus.Publish(ctx, execution.NodeStarted{
 		RunID:      runID,
@@ -215,9 +225,22 @@ func (e *Engine) executeNode(ctx context.Context, runID, nodeID string, node wor
 	// Get executor for node type
 	executor := execution.GetExecutorForNodeType(string(node.Type))
 
+	// Emit debug event for executor selection
+	streaming.EmitDebugEvent(eventBus, ctx, runID, "debug",
+		fmt.Sprintf("Using executor for node type: %s", node.Type),
+		nil)
+
 	// Execute node
 	output, err := executor.Execute(ctx, nodeID, string(node.Type), node.Config, state)
 	if err != nil {
+		// Emit debug event for failure
+		streaming.EmitDebugEvent(eventBus, ctx, runID, "error",
+			fmt.Sprintf("Node %s failed: %s", nodeID, err.Error()),
+			map[string]interface{}{
+				"node_id": nodeID,
+				"error":   err.Error(),
+			})
+
 		// Publish node failed event
 		eventBus.Publish(ctx, execution.NodeFailed{
 			RunID:      runID,
@@ -232,10 +255,37 @@ func (e *Engine) executeNode(ctx context.Context, runID, nodeID string, node wor
 
 	duration := time.Since(startTime)
 
+	// Calculate state delta for updates streaming mode
+	previousState := make(map[string]interface{})
+	for k, v := range state.GlobalState {
+		previousState[k] = v
+	}
+
 	// Update global state with output
 	for k, v := range output {
 		state.UpdateGlobalState(k, v)
 	}
+
+	// Emit updates event with delta (only changed keys)
+	delta := make(map[string]interface{})
+	for k, v := range output {
+		delta[k] = v
+	}
+	if len(delta) > 0 {
+		streaming.EmitUpdatesEvent(eventBus, ctx, runID, nodeID, delta)
+	}
+
+	// Emit values event with full state
+	streaming.EmitValuesEvent(eventBus, ctx, runID, state.GlobalState)
+
+	// Emit debug event for completion
+	streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+		fmt.Sprintf("Completed node %s in %dms", nodeID, duration.Milliseconds()),
+		map[string]interface{}{
+			"node_id":     nodeID,
+			"duration_ms": duration.Milliseconds(),
+			"output_keys": getMapKeys(output),
+		})
 
 	// Publish node completed event
 	eventBus.Publish(ctx, execution.NodeCompleted{
@@ -248,6 +298,15 @@ func (e *Engine) executeNode(ctx context.Context, runID, nodeID string, node wor
 	})
 
 	return output, nil
+}
+
+// getMapKeys returns the keys of a map
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // areDependenciesSatisfied checks if all dependencies for a node are satisfied
