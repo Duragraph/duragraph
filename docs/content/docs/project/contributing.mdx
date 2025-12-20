@@ -1,11 +1,9 @@
 ---
 title: Contributing Guide
-description: Contributing Guide
+description: How to contribute to DuraGraph
 ---
 
-# Contributing Guide
-
-This document describes how to contribute to the Duragraph project. Please also review the [Code of Conduct](../../CODE_OF_CONDUCT.md) and [Security Policy](../../SECURITY.md).
+This document describes how to contribute to the DuraGraph project.
 
 ---
 
@@ -13,31 +11,31 @@ This document describes how to contribute to the Duragraph project. Please also 
 
 1. Clone the repo:
    ```bash
-   git clone https://github.com/your-org/duragraph.git
+   git clone https://github.com/Duragraph/duragraph.git
    cd duragraph
    ```
 
 2. Install dependencies:
    - **Go**: `go mod tidy`
-   - **Python**: `poetry install` (see `workers/python-adapter`)
-   - **Node/TypeScript** (if applicable): `npm install`
+   - **Task**: Install [Task](https://taskfile.dev) runner
 
 3. Run services locally:
    ```bash
-   make up
+   task up
    ```
 
 ---
 
-## Make Targets
+## Task Commands
 
-Common `make` targets are provided:
+Common `task` commands are provided:
 
-- `make build` – build Go binaries and containers
-- `make test` – run all tests (Go, Python, etc.)
-- `make lint` – run linting for all languages
-- `make up` – start local environment via Docker Compose
-- `make down` – stop local environment
+- `task build:server` – build Go server binary
+- `task test` – run all tests
+- `task lint:go` – run linting
+- `task up` – start local environment via Docker Compose
+- `task down` – stop local environment
+- `task health` – check health of all services
 
 ---
 
@@ -72,17 +70,16 @@ Consistency is enforced with pre-commit hooks.
 
 - All new features must include corresponding unit tests.
 - Conformance tests must pass before merging.
-- Integration tests validate API ↔ Temporal ↔ Workers.
+- Integration tests validate API ↔ Database ↔ Event streaming.
 
 Run full Go tests:
 ```bash
-go test ./...
+task test
 ```
 
-Python adapter tests:
+Run unit tests only:
 ```bash
-cd workers/python-adapter
-poetry run pytest
+task test:unit
 ```
 
 ---

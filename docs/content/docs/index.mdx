@@ -1,9 +1,7 @@
 ---
 title: DuraGraph
-description: DuraGraph
+description: Open-source LangGraph Cloud-compatible API for reliable AI workflow orchestration
 ---
-
-# DuraGraph
 
 ## Mission
 
@@ -12,19 +10,20 @@ Our mission is to enable reliable, observable, and maintainable pipelines that f
 
 ## Compatibility with LangGraph Cloud
 
-DuraGraph implements an **API shim** compatible with **LangGraph Cloud**.
+DuraGraph implements an **API-compatible layer** with **LangGraph Cloud**.
 This means:
 - Tools, clients, and SDKs built for LangGraph Cloud can run against DuraGraph.
 - OpenAPI contracts are aligned for seamless integration.
 - Migration and hybrid deployments are supported.
 
-## Why Temporal?
+## Architecture
 
-We selected [Temporal](https://temporal.io/) for the control plane and core orchestration engine because:
-- It provides stateful, durable workflow management.
-- Built-in retries, error handling, and compensation logic.
-- Proven scalability for high throughput workloads.
-- Rich observability and workflow introspection.
+DuraGraph is built on proven technologies for reliability and performance:
+- **Event Sourcing** for complete audit trails and state reconstruction
+- **CQRS** (Command Query Responsibility Segregation) for scalable reads and writes
+- **PostgreSQL** for durable event storage and projections
+- **NATS JetStream** for reliable event streaming
+- **Custom Graph Engine** for workflow execution with support for conditionals, loops, and human-in-the-loop
 
 This ensures **fault tolerance** and **deterministic execution** for AI-driven processes.
 
@@ -38,7 +37,6 @@ This ensures **fault tolerance** and **deterministic execution** for AI-driven p
 ## Non-Goals
 
 - Providing a custom LLM runtime (we integrate with existing providers).
-- Replacing Temporal itself (we build on top of it).
 - Becoming a full-featured cloud platform (our scope is orchestration, not hosting).
 
 ## Success Metrics
@@ -54,14 +52,15 @@ We measure success by:
 ```mermaid
 flowchart LR
   client["Client SDKs / LangGraph Cloud clients"]
-  shim[API Shim]
-  translator[Translator / IR]
-  temporal[Temporal Control Plane]
-  workers[Worker Adapters]
-  storage[(Storage)]
-  observability[(Observability / Metrics / Tracing)]
+  api[API Layer]
+  commands[Commands / Queries]
+  engine[Graph Engine]
+  events[(Event Store)]
+  nats[NATS JetStream]
+  observability[(Metrics / Tracing)]
 
-  client --> shim --> translator --> temporal --> workers
-  workers --> storage
-  workers --> observability
+  client --> api --> commands --> engine
+  engine --> events
+  engine --> nats
+  nats --> observability
 ```

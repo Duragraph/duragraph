@@ -1,11 +1,9 @@
 ---
 title: Quickstart Guide
-description: Quickstart Guide
+description: Get up and running with DuraGraph in under 5 minutes
 ---
 
-# Quickstart Guide
-
-Get up and running with Duragraph in under 5 minutes! This guide will help you run your first AI workflow.
+Get up and running with DuraGraph in under 5 minutes! This guide will help you run your first AI workflow.
 
 ## Prerequisites
 
@@ -13,21 +11,21 @@ Get up and running with Duragraph in under 5 minutes! This guide will help you r
 - Python 3.8+ (for SDK usage)
 - Git
 
-## 1. Start Duragraph Locally
+## 1. Start DuraGraph Locally
 
-Clone and start the Duragraph services:
+Clone and start the DuraGraph services:
 
 ```bash
-git clone https://github.com/adwiteeymauriya/duragraph.git
+git clone https://github.com/Duragraph/duragraph.git
 cd duragraph
-docker compose up -d
+task up
 ```
 
 This starts:
-- **API Server** (port 8080) - REST API and SSE streaming
-- **Temporal Server** - Workflow orchestration engine
-- **PostgreSQL** - State and checkpoint storage
-- **Workers** - Python/Go execution environments
+- **API Server** (port 8081) - REST API and SSE streaming
+- **PostgreSQL** - Event store and projections
+- **NATS JetStream** - Event streaming
+- **Dashboard** (port 3000) - Workflow monitoring UI
 
 ## 2. Install the Python SDK
 
@@ -118,4 +116,4 @@ curl -X POST http://localhost:8080/runs \
   -d '{"assistant_id": "test", "thread_id": "test"}'
 ```
 
-Need help? [Join our community](https://github.com/adwiteeymauriya/duragraph/discussions) or [report an issue](https://github.com/adwiteeymauriya/duragraph/issues).
+Need help? [Join our community](https://github.com/Duragraph/duragraph/discussions) or [report an issue](https://github.com/Duragraph/duragraph/issues).

@@ -1,11 +1,9 @@
 ---
 title: Security
-description: Security
+description: Security model and best practices for DuraGraph
 ---
 
-# Security
-
-This document outlines the security model, mitigations, and known risks in the Duragraph system.
+This document outlines the security model, mitigations, and known risks in the DuraGraph system.
 
 ---
 
@@ -24,8 +22,8 @@ This document outlines the security model, mitigations, and known risks in the D
 
 ## Isolation
 
-- **Namespaces**: Temporal namespaces used for environment isolation (e.g. `duragraph-dev`, `duragraph-prod`).
-- **Task Queues**: Separate queues for Go/Python workers prevent cross-language interference.
+- **Database**: PostgreSQL schema-level isolation for multi-tenant deployments.
+- **NATS**: Separate subjects for different environments (e.g. `duragraph.dev`, `duragraph.prod`).
 
 ---
 
