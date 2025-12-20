@@ -30,10 +30,11 @@ func (r *RunRepository) Save(ctx context.Context, runAgg *run.Run) error {
 	// Save to CRUD table
 	inputJSON, _ := json.Marshal(runAgg.Input())
 	metadataJSON, _ := json.Marshal(runAgg.Metadata())
+	configJSON, _ := json.Marshal(runAgg.Config())
 
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata, config, multitask_strategy, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`,
 		runAgg.ID(),
 		runAgg.ThreadID(),
@@ -41,6 +42,8 @@ func (r *RunRepository) Save(ctx context.Context, runAgg *run.Run) error {
 		runAgg.Status(),
 		inputJSON,
 		metadataJSON,
+		configJSON,
+		runAgg.MultitaskStrategy(),
 		runAgg.CreatedAt(),
 		runAgg.UpdatedAt(),
 	)
@@ -66,19 +69,20 @@ func (r *RunRepository) Save(ctx context.Context, runAgg *run.Run) error {
 // FindByID retrieves a run by ID
 func (r *RunRepository) FindByID(ctx context.Context, id string) (*run.Run, error) {
 	var runID, threadID, assistantID, status string
-	var errorMsg *string
-	var inputJSON, outputJSON, metadataJSON []byte
+	var errorMsg, multitaskStrategy *string
+	var inputJSON, outputJSON, metadataJSON, configJSON []byte
 	var createdAt, updatedAt time.Time
 	var startedAt, completedAt *time.Time
 
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, thread_id, assistant_id, status, input, output, error, metadata,
-		       created_at, started_at, completed_at, updated_at
+		       config, multitask_strategy, created_at, started_at, completed_at, updated_at
 		FROM runs
 		WHERE id = $1
 	`, id).Scan(
 		&runID, &threadID, &assistantID, &status,
 		&inputJSON, &outputJSON, &errorMsg, &metadataJSON,
+		&configJSON, &multitaskStrategy,
 		&createdAt, &startedAt, &completedAt, &updatedAt,
 	)
 
@@ -87,10 +91,11 @@ func (r *RunRepository) FindByID(ctx context.Context, id string) (*run.Run, erro
 	}
 
 	// Parse JSON fields
-	var input, output, metadata map[string]interface{}
+	var input, output, metadata, config map[string]interface{}
 	json.Unmarshal(inputJSON, &input)
 	json.Unmarshal(outputJSON, &output)
 	json.Unmarshal(metadataJSON, &metadata)
+	json.Unmarshal(configJSON, &config)
 
 	// Get error string from pointer
 	errStr := ""
@@ -98,20 +103,28 @@ func (r *RunRepository) FindByID(ctx context.Context, id string) (*run.Run, erro
 		errStr = *errorMsg
 	}
 
+	// Get multitask strategy from pointer
+	strategy := "reject"
+	if multitaskStrategy != nil {
+		strategy = *multitaskStrategy
+	}
+
 	// Reconstruct run from database projection data
 	return run.ReconstructFromData(run.RunData{
-		ID:          runID,
-		ThreadID:    threadID,
-		AssistantID: assistantID,
-		Status:      status,
-		Input:       input,
-		Output:      output,
-		Error:       errStr,
-		Metadata:    metadata,
-		CreatedAt:   createdAt,
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		UpdatedAt:   updatedAt,
+		ID:                runID,
+		ThreadID:          threadID,
+		AssistantID:       assistantID,
+		Status:            status,
+		Input:             input,
+		Output:            output,
+		Config:            config,
+		Error:             errStr,
+		Metadata:          metadata,
+		MultitaskStrategy: strategy,
+		CreatedAt:         createdAt,
+		StartedAt:         startedAt,
+		CompletedAt:       completedAt,
+		UpdatedAt:         updatedAt,
 	}), nil
 }
 
@@ -165,6 +178,79 @@ func (r *RunRepository) FindByStatus(ctx context.Context, status run.Status, lim
 	// Similar to FindByThreadID
 	// Implementation omitted for brevity
 	return nil, nil
+}
+
+// FindActiveByThreadID retrieves active (non-terminal) runs for a thread
+func (r *RunRepository) FindActiveByThreadID(ctx context.Context, threadID string) ([]*run.Run, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, thread_id, assistant_id, status, input, output, error, metadata,
+		       config, multitask_strategy, created_at, started_at, completed_at, updated_at
+		FROM runs
+		WHERE thread_id = $1
+		  AND status IN ('queued', 'in_progress', 'requires_action')
+		ORDER BY created_at DESC
+	`, threadID)
+
+	if err != nil {
+		return nil, errors.Internal("failed to query active runs", err)
+	}
+	defer rows.Close()
+
+	runs := make([]*run.Run, 0)
+
+	for rows.Next() {
+		var runID, tID, assistantID, status string
+		var errorMsg, multitaskStrategy *string
+		var inputJSON, outputJSON, metadataJSON, configJSON []byte
+		var createdAt, updatedAt time.Time
+		var startedAt, completedAt *time.Time
+
+		err := rows.Scan(
+			&runID, &tID, &assistantID, &status,
+			&inputJSON, &outputJSON, &errorMsg, &metadataJSON,
+			&configJSON, &multitaskStrategy,
+			&createdAt, &startedAt, &completedAt, &updatedAt,
+		)
+		if err != nil {
+			return nil, errors.Internal("failed to scan run", err)
+		}
+
+		var input, output, metadata, config map[string]interface{}
+		json.Unmarshal(inputJSON, &input)
+		json.Unmarshal(outputJSON, &output)
+		json.Unmarshal(metadataJSON, &metadata)
+		json.Unmarshal(configJSON, &config)
+
+		errStr := ""
+		if errorMsg != nil {
+			errStr = *errorMsg
+		}
+
+		strategy := "reject"
+		if multitaskStrategy != nil {
+			strategy = *multitaskStrategy
+		}
+
+		runAgg := run.ReconstructFromData(run.RunData{
+			ID:                runID,
+			ThreadID:          tID,
+			AssistantID:       assistantID,
+			Status:            status,
+			Input:             input,
+			Output:            output,
+			Config:            config,
+			Error:             errStr,
+			Metadata:          metadata,
+			MultitaskStrategy: strategy,
+			CreatedAt:         createdAt,
+			StartedAt:         startedAt,
+			CompletedAt:       completedAt,
+			UpdatedAt:         updatedAt,
+		})
+		runs = append(runs, runAgg)
+	}
+
+	return runs, nil
 }
 
 // Update updates an existing run

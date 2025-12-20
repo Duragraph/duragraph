@@ -42,6 +42,78 @@ func NewRunService(
 	}
 }
 
+// CheckMultitaskStrategy checks if a new run can be created based on the multitask strategy
+// Returns the action to take: "proceed", "reject", or the ID of the run to cancel
+func (s *RunService) CheckMultitaskStrategy(ctx context.Context, threadID, strategy string) (action string, existingRunID string, err error) {
+	// Default strategy is reject
+	if strategy == "" {
+		strategy = "reject"
+	}
+
+	// Find active runs for the thread
+	activeRuns, err := s.runRepo.FindActiveByThreadID(ctx, threadID)
+	if err != nil {
+		return "", "", err
+	}
+
+	// No active runs, proceed with new run
+	if len(activeRuns) == 0 {
+		return "proceed", "", nil
+	}
+
+	// Apply strategy based on active runs
+	switch strategy {
+	case "reject":
+		// Reject new run if there are active runs
+		return "reject", activeRuns[0].ID(), errors.InvalidState("run_in_progress", "create_run")
+
+	case "interrupt":
+		// Cancel active run and proceed with new one
+		return "interrupt", activeRuns[0].ID(), nil
+
+	case "rollback":
+		// Similar to interrupt but would restore previous checkpoint
+		// For now, treat same as interrupt
+		return "rollback", activeRuns[0].ID(), nil
+
+	case "enqueue":
+		// Queue the new run (proceed but mark for later execution)
+		// For now, just proceed - full queue implementation would need additional infrastructure
+		return "proceed", "", nil
+
+	default:
+		// Unknown strategy, default to reject
+		return "reject", activeRuns[0].ID(), errors.InvalidState("run_in_progress", "create_run")
+	}
+}
+
+// ApplyMultitaskStrategy applies the multitask strategy action
+// Returns true if the new run should proceed, false if rejected
+func (s *RunService) ApplyMultitaskStrategy(ctx context.Context, threadID, strategy string) (bool, error) {
+	action, existingRunID, err := s.CheckMultitaskStrategy(ctx, threadID, strategy)
+
+	switch action {
+	case "proceed":
+		return true, nil
+
+	case "reject":
+		return false, err
+
+	case "interrupt", "rollback":
+		// Cancel the existing run
+		if existingRunID != "" {
+			if cancelErr := s.CancelRun(ctx, existingRunID); cancelErr != nil {
+				// Log but don't fail - the existing run might have completed
+				fmt.Printf("Warning: failed to cancel existing run %s: %v\n", existingRunID, cancelErr)
+			}
+		}
+		return true, nil
+
+	default:
+		return false, err
+	}
+}
+
 // ExecuteRun starts and executes a run
 func (s *RunService) ExecuteRun(ctx context.Context, runID string) error {
 	// Load run

@@ -10,25 +10,34 @@ import (
 
 // Run represents a workflow run aggregate
 type Run struct {
-	id          string
-	threadID    string
-	assistantID string
-	status      Status
-	input       map[string]interface{}
-	output      map[string]interface{}
-	error       string
-	metadata    map[string]interface{}
-	createdAt   time.Time
-	startedAt   *time.Time
-	completedAt *time.Time
-	updatedAt   time.Time
+	id                string
+	threadID          string
+	assistantID       string
+	status            Status
+	input             map[string]interface{}
+	output            map[string]interface{}
+	config            map[string]interface{}
+	error             string
+	metadata          map[string]interface{}
+	multitaskStrategy string
+	createdAt         time.Time
+	startedAt         *time.Time
+	completedAt       *time.Time
+	updatedAt         time.Time
 
 	// Uncommitted events
 	events []eventbus.Event
 }
 
+// RunOptions holds optional parameters for creating a run
+type RunOptions struct {
+	Config            map[string]interface{}
+	Metadata          map[string]interface{}
+	MultitaskStrategy string
+}
+
 // NewRun creates a new Run aggregate
-func NewRun(threadID, assistantID string, input map[string]interface{}) (*Run, error) {
+func NewRun(threadID, assistantID string, input map[string]interface{}, opts ...RunOptions) (*Run, error) {
 	if threadID == "" {
 		return nil, errors.InvalidInput("thread_id", "thread_id is required")
 	}
@@ -39,25 +48,51 @@ func NewRun(threadID, assistantID string, input map[string]interface{}) (*Run, e
 	now := time.Now()
 	runID := pkguuid.New()
 
+	// Apply options
+	var options RunOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+
+	config := options.Config
+	if config == nil {
+		config = make(map[string]interface{})
+	}
+
+	metadata := options.Metadata
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+
+	multitaskStrategy := options.MultitaskStrategy
+	if multitaskStrategy == "" {
+		multitaskStrategy = "reject" // Default strategy
+	}
+
 	run := &Run{
-		id:          runID,
-		threadID:    threadID,
-		assistantID: assistantID,
-		status:      StatusQueued,
-		input:       input,
-		metadata:    make(map[string]interface{}),
-		createdAt:   now,
-		updatedAt:   now,
-		events:      make([]eventbus.Event, 0),
+		id:                runID,
+		threadID:          threadID,
+		assistantID:       assistantID,
+		status:            StatusQueued,
+		input:             input,
+		config:            config,
+		metadata:          metadata,
+		multitaskStrategy: multitaskStrategy,
+		createdAt:         now,
+		updatedAt:         now,
+		events:            make([]eventbus.Event, 0),
 	}
 
 	// Record domain event
 	run.recordEvent(RunCreated{
-		RunID:       runID,
-		ThreadID:    threadID,
-		AssistantID: assistantID,
-		Input:       input,
-		OccurredAt:  now,
+		RunID:             runID,
+		ThreadID:          threadID,
+		AssistantID:       assistantID,
+		Input:             input,
+		Config:            config,
+		Metadata:          metadata,
+		MultitaskStrategy: multitaskStrategy,
+		OccurredAt:        now,
 	})
 
 	return run, nil
@@ -101,6 +136,65 @@ func (r *Run) Error() string {
 // Metadata returns the metadata
 func (r *Run) Metadata() map[string]interface{} {
 	return r.metadata
+}
+
+// Config returns the config
+func (r *Run) Config() map[string]interface{} {
+	return r.config
+}
+
+// MultitaskStrategy returns the multitask strategy
+func (r *Run) MultitaskStrategy() string {
+	return r.multitaskStrategy
+}
+
+// RecursionLimit returns the recursion limit from config (default 25)
+func (r *Run) RecursionLimit() int {
+	if r.config == nil {
+		return 25
+	}
+	if limit, ok := r.config["recursion_limit"].(float64); ok {
+		return int(limit)
+	}
+	if limit, ok := r.config["recursion_limit"].(int); ok {
+		return limit
+	}
+	return 25
+}
+
+// Tags returns the tags from config
+func (r *Run) Tags() []string {
+	if r.config == nil {
+		return nil
+	}
+	tagsRaw, ok := r.config["tags"]
+	if !ok {
+		return nil
+	}
+	switch t := tagsRaw.(type) {
+	case []string:
+		return t
+	case []interface{}:
+		tags := make([]string, 0, len(t))
+		for _, v := range t {
+			if s, ok := v.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+		return tags
+	}
+	return nil
+}
+
+// Configurable returns the configurable fields from config
+func (r *Run) Configurable() map[string]interface{} {
+	if r.config == nil {
+		return nil
+	}
+	if configurable, ok := r.config["configurable"].(map[string]interface{}); ok {
+		return configurable
+	}
+	return nil
 }
 
 // CreatedAt returns the creation time
@@ -287,12 +381,20 @@ func (r *Run) applyEvent(event eventbus.Event) error {
 		r.threadID = e.ThreadID
 		r.assistantID = e.AssistantID
 		r.input = e.Input
+		r.config = e.Config
 		r.status = StatusQueued
 		r.createdAt = e.OccurredAt
 		r.updatedAt = e.OccurredAt
 		r.metadata = e.Metadata
 		if r.metadata == nil {
 			r.metadata = make(map[string]interface{})
+		}
+		if r.config == nil {
+			r.config = make(map[string]interface{})
+		}
+		r.multitaskStrategy = e.MultitaskStrategy
+		if r.multitaskStrategy == "" {
+			r.multitaskStrategy = "reject"
 		}
 
 	case RunStarted:
@@ -331,18 +433,20 @@ func (r *Run) applyEvent(event eventbus.Event) error {
 
 // RunData holds raw data for reconstructing a Run from database projection
 type RunData struct {
-	ID          string
-	ThreadID    string
-	AssistantID string
-	Status      string
-	Input       map[string]interface{}
-	Output      map[string]interface{}
-	Error       string
-	Metadata    map[string]interface{}
-	CreatedAt   time.Time
-	StartedAt   *time.Time
-	CompletedAt *time.Time
-	UpdatedAt   time.Time
+	ID                string
+	ThreadID          string
+	AssistantID       string
+	Status            string
+	Input             map[string]interface{}
+	Output            map[string]interface{}
+	Config            map[string]interface{}
+	Error             string
+	Metadata          map[string]interface{}
+	MultitaskStrategy string
+	CreatedAt         time.Time
+	StartedAt         *time.Time
+	CompletedAt       *time.Time
+	UpdatedAt         time.Time
 }
 
 // ReconstructFromData rebuilds a Run from database projection data
@@ -372,19 +476,31 @@ func ReconstructFromData(data RunData) *Run {
 		metadata = make(map[string]interface{})
 	}
 
+	config := data.Config
+	if config == nil {
+		config = make(map[string]interface{})
+	}
+
+	multitaskStrategy := data.MultitaskStrategy
+	if multitaskStrategy == "" {
+		multitaskStrategy = "reject"
+	}
+
 	return &Run{
-		id:          data.ID,
-		threadID:    data.ThreadID,
-		assistantID: data.AssistantID,
-		status:      status,
-		input:       data.Input,
-		output:      data.Output,
-		error:       data.Error,
-		metadata:    metadata,
-		createdAt:   data.CreatedAt,
-		startedAt:   data.StartedAt,
-		completedAt: data.CompletedAt,
-		updatedAt:   data.UpdatedAt,
-		events:      make([]eventbus.Event, 0),
+		id:                data.ID,
+		threadID:          data.ThreadID,
+		assistantID:       data.AssistantID,
+		status:            status,
+		input:             data.Input,
+		output:            data.Output,
+		config:            config,
+		error:             data.Error,
+		metadata:          metadata,
+		multitaskStrategy: multitaskStrategy,
+		createdAt:         data.CreatedAt,
+		startedAt:         data.StartedAt,
+		completedAt:       data.CompletedAt,
+		updatedAt:         data.UpdatedAt,
+		events:            make([]eventbus.Event, 0),
 	}
 }

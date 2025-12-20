@@ -21,6 +21,9 @@ type Repository interface {
 	// FindByStatus retrieves runs by status
 	FindByStatus(ctx context.Context, status Status, limit, offset int) ([]*Run, error)
 
+	// FindActiveByThreadID retrieves active (non-terminal) runs for a thread
+	FindActiveByThreadID(ctx context.Context, threadID string) ([]*Run, error)
+
 	// Update updates an existing run
 	Update(ctx context.Context, run *Run) error
 

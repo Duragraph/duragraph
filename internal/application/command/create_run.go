@@ -9,9 +9,12 @@ import (
 
 // CreateRun command
 type CreateRun struct {
-	ThreadID    string
-	AssistantID string
-	Input       map[string]interface{}
+	ThreadID          string
+	AssistantID       string
+	Input             map[string]interface{}
+	Config            map[string]interface{}
+	Metadata          map[string]interface{}
+	MultitaskStrategy string
 }
 
 // CreateRunHandler handles the CreateRun command
@@ -28,8 +31,12 @@ func NewCreateRunHandler(runRepo run.Repository) *CreateRunHandler {
 
 // Handle handles the CreateRun command
 func (h *CreateRunHandler) Handle(ctx context.Context, cmd CreateRun) (string, error) {
-	// Create run aggregate
-	runAgg, err := run.NewRun(cmd.ThreadID, cmd.AssistantID, cmd.Input)
+	// Create run aggregate with options
+	runAgg, err := run.NewRun(cmd.ThreadID, cmd.AssistantID, cmd.Input, run.RunOptions{
+		Config:            cmd.Config,
+		Metadata:          cmd.Metadata,
+		MultitaskStrategy: cmd.MultitaskStrategy,
+	})
 	if err != nil {
 		return "", err
 	}

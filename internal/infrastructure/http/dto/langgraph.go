@@ -6,17 +6,18 @@ import "time"
 
 // CreateRunRequest represents the request to create a run
 type CreateRunRequest struct {
-	AssistantID     string                 `json:"assistant_id"`
-	ThreadID        string                 `json:"thread_id,omitempty"`
-	Input           map[string]interface{} `json:"input,omitempty"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
-	Config          map[string]interface{} `json:"config,omitempty"`
-	Kwargs          map[string]interface{} `json:"kwargs,omitempty"`
-	StreamMode      []string               `json:"stream_mode,omitempty"`
-	OnCompletion    string                 `json:"on_completion,omitempty"`
-	InterruptBefore []string               `json:"interrupt_before,omitempty"` // Node IDs to interrupt before execution
-	InterruptAfter  []string               `json:"interrupt_after,omitempty"`  // Node IDs to interrupt after execution
-	Webhook         string                 `json:"webhook,omitempty"`          // Webhook URL for completion notification
+	AssistantID       string                 `json:"assistant_id"`
+	ThreadID          string                 `json:"thread_id,omitempty"`
+	Input             map[string]interface{} `json:"input,omitempty"`
+	Metadata          map[string]interface{} `json:"metadata,omitempty"`
+	Config            map[string]interface{} `json:"config,omitempty"`
+	Kwargs            map[string]interface{} `json:"kwargs,omitempty"`
+	StreamMode        []string               `json:"stream_mode,omitempty"`
+	OnCompletion      string                 `json:"on_completion,omitempty"`
+	InterruptBefore   []string               `json:"interrupt_before,omitempty"`   // Node IDs to interrupt before execution
+	InterruptAfter    []string               `json:"interrupt_after,omitempty"`    // Node IDs to interrupt after execution
+	Webhook           string                 `json:"webhook,omitempty"`            // Webhook URL for completion notification
+	MultitaskStrategy string                 `json:"multitask_strategy,omitempty"` // Strategy for concurrent runs: reject, interrupt, rollback, enqueue
 }
 
 // CreateRunResponse represents the response from creating a run
@@ -32,19 +33,21 @@ type CreateRunResponse struct {
 
 // GetRunResponse represents the response from getting a run
 type GetRunResponse struct {
-	RunID       string                 `json:"run_id"`
-	ThreadID    string                 `json:"thread_id"`
-	AssistantID string                 `json:"assistant_id"`
-	Status      string                 `json:"status"`
-	Input       map[string]interface{} `json:"input,omitempty"`
-	Output      map[string]interface{} `json:"output,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	Kwargs      map[string]interface{} `json:"kwargs,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	StartedAt   *time.Time             `json:"started_at,omitempty"`
-	CompletedAt *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	RunID             string                 `json:"run_id"`
+	ThreadID          string                 `json:"thread_id"`
+	AssistantID       string                 `json:"assistant_id"`
+	Status            string                 `json:"status"`
+	Input             map[string]interface{} `json:"input,omitempty"`
+	Output            map[string]interface{} `json:"output,omitempty"`
+	Error             string                 `json:"error,omitempty"`
+	Metadata          map[string]interface{} `json:"metadata,omitempty"`
+	Config            map[string]interface{} `json:"config,omitempty"`
+	Kwargs            map[string]interface{} `json:"kwargs,omitempty"`
+	MultitaskStrategy string                 `json:"multitask_strategy,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	StartedAt         *time.Time             `json:"started_at,omitempty"`
+	CompletedAt       *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt         time.Time              `json:"updated_at"`
 }
 
 // SubmitToolOutputsRequest represents the request to submit tool outputs
