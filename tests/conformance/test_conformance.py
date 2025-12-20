@@ -327,8 +327,8 @@ def test_delete_run():
     r = requests.delete(f"{BASE_URL}/threads/{thread_id}/runs/{run_id}")
     if r.status_code == 501:
         pytest.skip("Delete run not implemented yet")
-    # Accept 200, 204, or 404 (if run already completed and was cleaned up)
-    assert r.status_code in [200, 204, 404]
+    # Accept 200, 204, 404 (not found), or 409 (conflict - run still in progress)
+    assert r.status_code in [200, 204, 404, 409]
 
 
 def test_stateless_run():
