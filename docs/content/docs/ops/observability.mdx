@@ -1,9 +1,7 @@
 ---
 title: Observability
-description: Observability
+description: Monitoring and observability for DuraGraph
 ---
-
-# Observability
 
 This document describes how we configure OpenTelemetry (OTel) instrumentation, what we export, and how to investigate system behavior using metrics, traces, and logs.
 
@@ -11,11 +9,11 @@ This document describes how we configure OpenTelemetry (OTel) instrumentation, w
 
 ## OTel Setup
 
-The system uses OpenTelemetry SDKs in Go (API, bridge, workers) and Python (adapters). Configuration is driven by environment variables:
+The system uses OpenTelemetry SDKs in Go. Configuration is driven by environment variables:
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT` – OTLP collector endpoint.
 - `OTEL_EXPORTER_OTLP_HEADERS` – additional headers for exports.
-- `OTEL_SERVICE_NAME` – service identifier ("duragraph-api", "duragraph-bridge", "duragraph-pyworker", etc.).
+- `OTEL_SERVICE_NAME` – service identifier ("duragraph-api", "duragraph-server", etc.).
 - `OTEL_LOG_LEVEL` – log verbosity for OTel instrumentation.
 - `OTEL_RESOURCE_ATTRIBUTES` – additional dimensions (deployment, project, region).
 
@@ -24,8 +22,8 @@ The system uses OpenTelemetry SDKs in Go (API, bridge, workers) and Python (adap
 ## Telemetry Data
 
 ### Traces
-- **Run lifecycle** (`/runs` endpoints → Translator → Bridge → Temporal client).
-- **Activities** (e.g. `llm_call`, `tool`).
+- **Run lifecycle** (`/runs` endpoints → Command Handler → Graph Engine).
+- **Node execution** (e.g. `llm`, `tool`, `condition`).
 - **SSE streaming** events correlation.
 - Search attributes (e.g. `run_id`, `thread_id`, `assistant_id`) are added as trace attributes.
 

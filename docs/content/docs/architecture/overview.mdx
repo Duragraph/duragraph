@@ -1,69 +1,70 @@
 ---
 title: Architecture Overview
-description: Architecture Overview
+description: High-level overview of DuraGraph components and data flows
 ---
 
-# Architecture Overview
-
-This document provides a high-level overview of the components and data flows in the system.
+This document provides a high-level overview of the components and data flows in DuraGraph.
 
 ---
 
 ## Components
 
-- **API Service (`cmd/api`)**
-  Exposes REST + SSE endpoints. Hosts the OpenAPI spec. Handles idempotency and error models.
+- **API Server (`cmd/server`)**
+  Exposes REST + SSE endpoints. Implements LangGraph Cloud-compatible API. Handles request validation and error responses.
 
-- **Runtime Translator (`runtime/translator`)**
-  Validates Intermediate Representation (IR) against JSON Schema and compiles it into a Temporal workflow spec.
+- **Command Handlers (`internal/application/command`)**
+  Process write operations following CQRS. Create and modify domain aggregates, emitting domain events.
 
-- **Runtime Bridge (`runtime/bridge`)**
-  Wraps the Temporal client. Provides APIs for starting, signaling, querying, and canceling runs. Executes generic workflows and activities.
+- **Query Handlers (`internal/application/query`)**
+  Process read operations. Query projections directly for optimized reads.
 
-- **Workers**
-  Language-specific (Python, Go) adapters that execute activities such as LLM calls, tools, checkpoints, and token streaming.
+- **Graph Engine (`internal/infrastructure/graph`)**
+  Executes workflow graphs with support for conditionals, loops, subgraphs, and human-in-the-loop interrupts.
 
-- **Storage Backends**
-  Integration with Postgres and S3 for persisting checkpoints, logs, and workflow states.
+- **Event Store (`internal/infrastructure/persistence`)**
+  PostgreSQL-based event sourcing. Stores all domain events for audit and state reconstruction.
 
-- **Temporal Cluster**
-  Manages workflow execution, retries, signals, versioning, and search attributes.
+- **NATS JetStream (`internal/infrastructure/messaging`)**
+  Reliable event streaming via the outbox pattern. Publishes domain events for real-time updates.
+
+- **Projections**
+  Read-optimized views of domain state. Updated from events for fast queries.
 
 ---
 
 ## Data Flows
 
-1. **Client** calls API (`create run`).
-2. **API** validates request and forwards IR to `translator`.
-3. **Translator** compiles IR into a Temporal workflow spec.
-4. **Bridge** submits workflow to Temporal with search attributes.
-5. **Temporal** schedules Activities on Workers.
-6. **Workers** execute activities (LLM/tool/etc.), stream tokens if needed, and checkpoint state to Postgres/S3.
-7. **Client** consumes updates through `/stream` SSE endpoint.
+1. **Client** calls API (e.g., `POST /runs`).
+2. **API** validates request and invokes command handler.
+3. **Command Handler** creates/modifies aggregate, emitting domain events.
+4. **Repository** saves events to event store + outbox in single transaction.
+5. **Outbox Relay** publishes events to NATS JetStream.
+6. **Graph Engine** executes workflow nodes (LLM, tools, conditions).
+7. **Client** receives real-time updates via SSE stream.
 
 ---
 
-## Sequence Diagram (Mermaid)
+## Sequence Diagram
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant API
-    participant Translator
-    participant Bridge
-    participant Temporal
-    participant Worker
+    participant CommandHandler
+    participant Repository
+    participant EventStore
+    participant GraphEngine
+    participant NATS
 
     Client->>API: POST /runs
-    API->>Translator: Validate + Compile IR
-    Translator-->>API: TemporalWorkflowSpec
-    API->>Bridge: StartRun(spec)
-    Bridge->>Temporal: ExecuteWorkflow
-    Temporal->>Worker: Schedule Activity
-    Worker-->>Temporal: Result / Checkpoint
-    Temporal-->>Bridge: Workflow Events
-    Bridge-->>API: Events
-    API-->>Client: SSE Stream (/stream)
+    API->>CommandHandler: CreateRun
+    CommandHandler->>Repository: Save(run)
+    Repository->>EventStore: Append Events
+    Repository->>NATS: Publish via Outbox
+    API-->>Client: 201 Created
+    GraphEngine->>EventStore: Execute Graph
+    GraphEngine-->>NATS: Emit Events
+    NATS-->>Client: SSE Stream
 ```
 
 ---

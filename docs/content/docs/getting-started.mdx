@@ -1,11 +1,9 @@
 ---
 title: Getting Started
-description: Getting Started
+description: Set up DuraGraph and run your first workflow
 ---
 
-# Getting Started
-
-Welcome to the project! This guide will walk you through the basics of setting up your environment, running your first workflow, and exploring the system architecture.
+Welcome to DuraGraph! This guide will walk you through setting up your environment, running your first workflow, and exploring the system architecture.
 
 ---
 
@@ -13,34 +11,46 @@ Welcome to the project! This guide will walk you through the basics of setting u
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-org/your-repo.git
-   cd your-repo
+   git clone https://github.com/Duragraph/duragraph.git
+   cd duragraph
    ```
 
-2. Set up your Python environment:
+2. Start all services with Task:
    ```bash
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
+   task up
    ```
 
-3. (Optional) Build and run with Docker:
+   This starts PostgreSQL, NATS, the API server, and the dashboard.
+
+3. Verify services are running:
    ```bash
-   docker compose up --build
+   task health
    ```
 
 ---
 
 ## 2. Running a Hello World Workflow
 
-1. Start the services:
+1. Create an assistant:
    ```bash
-   ./init_structure.sh
+   curl -X POST http://localhost:8081/api/v1/assistants \
+     -H "Content-Type: application/json" \
+     -d '{"name": "hello-assistant", "graph_schema": {}}'
    ```
 
-2. Run the example workflow defined in [`schemas/ir/examples/hello.json`](../schemas/ir/examples/hello.json).
+2. Create a thread:
+   ```bash
+   curl -X POST http://localhost:8081/api/v1/threads \
+     -H "Content-Type: application/json" \
+     -d '{}'
+   ```
 
-3. Check logs/output to see the results.
+3. Create a run:
+   ```bash
+   curl -X POST http://localhost:8081/api/v1/runs \
+     -H "Content-Type: application/json" \
+     -d '{"thread_id": "<thread_id>", "assistant_id": "<assistant_id>", "input": {"message": "Hello!"}}'
+   ```
 
 ---
 
@@ -48,17 +58,15 @@ Welcome to the project! This guide will walk you through the basics of setting u
 
 To better understand the system, explore the architecture documentation:
 
-- [Overview](architecture/overview.md) – components, data flows, sequence diagrams
-- [API Shim](architecture/api-shim.md) – REST/SSE endpoints, idempotency, error model
-- [Temporal](architecture/temporal.md) – workflows, activities, signals/queries, retries, versioning
-- [Intermediate Representation (IR)](architecture/ir.md) – schema fields, examples, validation
-- [Workers](architecture/workers.md) – adapters, task queues, streaming, checkpointing
+- [Architecture Overview](architecture/overview) – components, data flows, sequence diagrams
+- [API Reference](api-reference/overview) – REST endpoints and schemas
+- [Quickstart Guide](user-guide/quickstart) – step-by-step tutorial
 
 ---
 
 ## 4. Contributing
 
-Please read the [Contributing Guide](../CONTRIBUTING.md), [Code of Conduct](../CODE_OF_CONDUCT.md), and [Security Policy](../SECURITY.md) before contributing.
+Please read the [Contributing Guide](project/contributing) before contributing.
 
 ---
 

@@ -1,9 +1,7 @@
 ---
 title: Service Level Objectives (SLOs)
-description: Service Level Objectives (SLOs)
+description: SLOs and performance targets for DuraGraph
 ---
-
-# Service Level Objectives (SLOs)
 
 This document outlines our defined SLOs, alerting thresholds, and how we validate system performance under load.
 
@@ -48,7 +46,7 @@ We use load tests (e.g. Locust, k6) to validate SLOs at scale:
 When the system is overloaded:
 - **API** returns `429 Too Many Requests` with `Retry-After` header.
 - Clients must back off and retry after suggested interval.
-- This ensures Temporal queues and worker pools are not overwhelmed.
+- This ensures event queues and API servers are not overwhelmed.
 
 ---
 

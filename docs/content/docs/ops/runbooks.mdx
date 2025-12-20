@@ -1,9 +1,7 @@
 ---
 title: Runbooks
-description: Runbooks
+description: Operational procedures for DuraGraph deployments
 ---
-
-# Runbooks
 
 This document provides runbooks for common operational procedures including releases, incidents, backups, and upgrades.
 
@@ -36,39 +34,38 @@ We follow a structured release train approach:
 ### SSE Stream Stuck
 - Check API logs for errors around `/stream`.
 - Restart affected API pods.
-- Validate Temporal queue health.
+- Validate NATS connection health.
 
-### Worker Crash
-- Inspect worker pod/container logs.
+### API Server Crash
+- Inspect server pod/container logs.
 - Restart pod in Kubernetes.
-- Verify reconnection to Temporal task queue.
+- Verify database connectivity.
 
-### Queue Backlog
-- Monitor Temporal task queue metrics.
-- Scale worker deployments (HPA or manual).
-- Prioritize critical task queues during incident.
+### Event Queue Backlog
+- Monitor NATS JetStream metrics.
+- Check outbox relay worker logs.
+- Scale API server instances if needed.
 
 ---
 
 ## Backups & Restores
 
-### Postgres
+### PostgreSQL
 - Backups: cron `pg_dump` to S3.
 - Restore: `psql < dump.sql` into new instance.
 
-### MinIO (S3)
-- Backups: versioned buckets enabled.
-- Restore: use `mc` (MinIO client) to copy objects back by version.
+### Event Store
+- Event store is append-only, backup with regular pg_dump.
+- Point-in-time recovery via PostgreSQL WAL archiving.
 
 ---
 
-## Temporal Upgrade / Versioning Checklist
+## Upgrade Checklist
 
-- Upgrade Temporal cluster version-by-version (no skips).
-- Validate worker **build-id** versioning to allow rolling upgrades:
-  - Always register new build-id.
-  - Maintain backwards-compatible workflows.
-- Run canaries to validate new version.
-- Update CLI tools and SDKs in sync with Temporal release.
+- Run database migrations before deploying new code.
+- Test migrations on staging environment first.
+- Validate API compatibility with existing clients.
+- Monitor error rates after deployment.
+- Keep rollback plan ready.
 
 ---
