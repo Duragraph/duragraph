@@ -1,45 +1,112 @@
 ---
 title: Migrating from LangGraph Cloud
-description: Migrating from LangGraph Cloud
+description: Complete guide for migrating from LangGraph Cloud to DuraGraph
 ---
 
 # Migrating from LangGraph Cloud
 
-This guide helps you migrate your existing LangGraph Cloud workflows to Duragraph with minimal code changes.
+This guide helps you migrate your existing LangGraph Cloud workflows to DuraGraph with minimal code changes.
 
 ## Why Migrate?
 
-✅ **Open Source** - Self-host and customize Duragraph
-✅ **Cost Control** - No per-execution pricing
-✅ **Data Sovereignty** - Keep your data in your infrastructure
-✅ **Enterprise Features** - Coming in Duragraph Cloud
+| Benefit | Description |
+|---------|-------------|
+| **Open Source** | Self-host and customize DuraGraph to your needs |
+| **Cost Control** | No per-execution pricing, pay only for infrastructure |
+| **Data Sovereignty** | Keep your data in your own infrastructure |
+| **LangGraph Compatible** | Drop-in API compatibility with LangGraph Cloud |
+| **Enterprise Ready** | Production-ready with PostgreSQL and NATS JetStream |
 
-## API Compatibility
+## Feature Comparison
 
-Duragraph provides **drop-in compatibility** with LangGraph Cloud's REST API. Most client SDKs work without modification.
+| Feature | LangGraph Cloud | DuraGraph | Status |
+|---------|----------------|-----------|--------|
+| Assistants API | ✅ | ✅ | Full parity |
+| Threads API | ✅ | ✅ | Full parity |
+| Runs API | ✅ | ✅ | Full parity |
+| SSE Streaming | ✅ | ✅ | Full parity |
+| Thread State | ✅ | ✅ | Full parity |
+| Checkpoints | ✅ | ✅ | Full parity |
+| Human-in-the-Loop | ✅ | ✅ | Full parity |
+| Search/Count | ✅ | ✅ | Full parity |
+| Webhooks | ✅ | 🚧 | Coming Q1 |
+| Crons | ✅ | 🚧 | Coming Q2 |
+| Store API | ✅ | 🚧 | Coming Q2 |
+| LangGraph Studio | ✅ | ❌ | Use DuraGraph Dashboard |
 
-### Compatible Endpoints
+## Complete Endpoint Mapping
 
-| LangGraph Cloud | Duragraph | Status |
-|----------------|-----------|---------|
-| `POST /assistants` | `POST /assistants` | ✅ Full |
-| `POST /threads` | `POST /threads` | ✅ Full |
-| `POST /runs` | `POST /runs` | ✅ Full |
-| `GET /runs/{run_id}/stream` | `GET /runs/{run_id}/stream` | ✅ Full |
-| `POST /runs/{run_id}/wait` | `POST /runs/{run_id}/wait` | ✅ Full |
+### System Endpoints
+
+| LangGraph Cloud | DuraGraph | Method | Status |
+|-----------------|-----------|--------|--------|
+| `/ok` | `/ok` | GET | ✅ |
+| `/info` | `/info` | GET | ✅ |
+| `/health` | `/health` | GET | ✅ |
+| `/metrics` | `/metrics` | GET | ✅ |
+
+### Assistant Endpoints
+
+| LangGraph Cloud | DuraGraph | Method | Status |
+|-----------------|-----------|--------|--------|
+| `/assistants` | `/api/v1/assistants` | POST | ✅ |
+| `/assistants` | `/api/v1/assistants` | GET | ✅ |
+| `/assistants/{id}` | `/api/v1/assistants/{id}` | GET | ✅ |
+| `/assistants/{id}` | `/api/v1/assistants/{id}` | PATCH | ✅ |
+| `/assistants/{id}` | `/api/v1/assistants/{id}` | DELETE | ✅ |
+| `/assistants/search` | `/api/v1/assistants/search` | POST | ✅ |
+| `/assistants/count` | `/api/v1/assistants/count` | POST | ✅ |
+| `/assistants/{id}/versions` | `/api/v1/assistants/{id}/versions` | GET | ✅ |
+| `/assistants/{id}/schemas` | `/api/v1/assistants/{id}/schemas` | GET | ✅ |
+
+### Thread Endpoints
+
+| LangGraph Cloud | DuraGraph | Method | Status |
+|-----------------|-----------|--------|--------|
+| `/threads` | `/api/v1/threads` | POST | ✅ |
+| `/threads` | `/api/v1/threads` | GET | ✅ |
+| `/threads/{id}` | `/api/v1/threads/{id}` | GET | ✅ |
+| `/threads/{id}` | `/api/v1/threads/{id}` | PATCH | ✅ |
+| `/threads/{id}` | `/api/v1/threads/{id}` | DELETE | ✅ |
+| `/threads/search` | `/api/v1/threads/search` | POST | ✅ |
+| `/threads/count` | `/api/v1/threads/count` | POST | ✅ |
+| `/threads/{id}/messages` | `/api/v1/threads/{id}/messages` | POST | ✅ |
+| `/threads/{id}/state` | `/api/v1/threads/{id}/state` | GET | ✅ |
+| `/threads/{id}/state` | `/api/v1/threads/{id}/state` | POST | ✅ |
+| `/threads/{id}/history` | `/api/v1/threads/{id}/history` | GET | ✅ |
+| `/threads/{id}/copy` | `/api/v1/threads/{id}/copy` | POST | ✅ |
+
+### Run Endpoints
+
+| LangGraph Cloud | DuraGraph | Method | Status |
+|-----------------|-----------|--------|--------|
+| `/threads/{id}/runs` | `/api/v1/threads/{id}/runs` | POST | ✅ |
+| `/threads/{id}/runs` | `/api/v1/threads/{id}/runs` | GET | ✅ |
+| `/threads/{id}/runs/{run_id}` | `/api/v1/threads/{id}/runs/{run_id}` | GET | ✅ |
+| `/threads/{id}/runs/{run_id}` | `/api/v1/threads/{id}/runs/{run_id}` | DELETE | ✅ |
+| `/threads/{id}/runs/{run_id}/cancel` | `/api/v1/threads/{id}/runs/{run_id}/cancel` | POST | ✅ |
+| `/threads/{id}/runs/{run_id}/resume` | `/api/v1/threads/{id}/runs/{run_id}/resume` | POST | ✅ |
+| `/threads/{id}/runs/{run_id}/join` | `/api/v1/threads/{id}/runs/{run_id}/join` | GET | ✅ |
+| `/threads/{id}/runs/stream` | `/api/v1/threads/{id}/runs/stream` | POST | ✅ |
+| `/runs` | `/api/v1/runs` | POST | ✅ |
+| `/runs/wait` | `/api/v1/runs/wait` | POST | ✅ |
+| `/runs/stream` | `/api/v1/runs/stream` | POST | ✅ |
+| `/runs/batch` | `/api/v1/runs/batch` | POST | ✅ |
 
 ## Step-by-Step Migration
 
 ### 1. Update Base URL
 
+The only required change is updating the base URL:
+
 ```python
 # Before (LangGraph Cloud)
 from langgraph_sdk import get_client
-client = get_client(url="https://api.langgraph.cloud")
+client = get_client(url="https://api.smith.langchain.com")
 
-# After (Duragraph)
-from langgraph_sdk import get_client  # Same SDK!
-client = get_client(url="https://your-duragraph-instance.com")
+# After (DuraGraph)
+from langgraph_sdk import get_client
+client = get_client(url="http://localhost:8081")  # Or your DuraGraph instance
 ```
 
 ### 2. Authentication Changes
@@ -47,109 +114,49 @@ client = get_client(url="https://your-duragraph-instance.com")
 ```python
 # Before (LangGraph Cloud)
 client = get_client(
-    url="https://api.langgraph.cloud",
+    url="https://api.smith.langchain.com",
     api_key="lsv2_..."
 )
 
-# After (Duragraph)
+# After (DuraGraph) - JWT or API Key
 client = get_client(
-    url="https://your-duragraph-instance.com",
-    api_key="your-duragraph-token"  # Or use basic auth
+    url="http://your-duragraph.com",
+    api_key="your-duragraph-token"
 )
 ```
 
-### 3. Graph Definition
+## SDK Examples
 
-Your graph definitions work unchanged:
-
-```python
-# This works exactly the same in Duragraph
-from langgraph import StateGraph
-from typing import TypedDict
-
-class State(TypedDict):
-    messages: list
-
-def chatbot(state: State):
-    # Your existing chatbot logic
-    return {"messages": state["messages"] + ["Hello!"]}
-
-# Build graph (unchanged)
-graph = StateGraph(State)
-graph.add_node("chatbot", chatbot)
-graph.set_entry_point("chatbot")
-graph.set_finish_point("chatbot")
-
-compiled_graph = graph.compile()
-```
-
-### 4. Deployment Changes
+### Python
 
 ```python
-# Before (LangGraph Cloud)
-assistant = await client.assistants.create(
-    graph_id="your-graph",
-    config={"model": "gpt-4"}
-)
-
-# After (Duragraph) - Same API!
-assistant = await client.assistants.create(
-    graph_id="your-graph",
-    config={"model": "gpt-4"}
-)
-```
-
-## Feature Mapping
-
-### Supported Features ✅
-
-- **Stateful Conversations** - Thread management
-- **Streaming Responses** - Real-time SSE events
-- **Human-in-the-Loop** - Interrupts and approvals (Q2)
-- **Webhooks** - Event notifications (Q2)
-- **Multi-turn Conversations** - Context preservation
-- **Error Handling** - Automatic retries and recovery
-
-### Coming Soon 🚧
-
-- **Checkpointing** - Custom checkpoint stores (Q1)
-- **Background Runs** - Long-running workflows (Q2)
-- **Scheduled Runs** - Cron-based execution (Q2)
-- **Multi-agent Coordination** - Agent-to-agent communication (Q3)
-
-### Not Supported ❌
-
-- **LangGraph Studio** - Use Duragraph Dashboard instead
-- **Cloud-only Features** - Managed infrastructure (use Duragraph Cloud)
-
-## Migration Examples
-
-### Simple Chatbot
-
-```python
-# Your existing LangGraph code works as-is
 import asyncio
 from langgraph_sdk import get_client
 
 async def main():
-    # Just change the URL!
-    client = get_client(url="http://localhost:8080")
+    # Connect to DuraGraph (same SDK as LangGraph Cloud)
+    client = get_client(url="http://localhost:8081")
 
-    # Everything else is identical
+    # Create an assistant
     assistant = await client.assistants.create(
         graph_id="chatbot",
-        config={"model": "gpt-3.5-turbo"}
+        name="My Chatbot",
+        config={"model": "gpt-4"}
     )
+    print(f"Created assistant: {assistant['assistant_id']}")
 
+    # Create a thread
     thread = await client.threads.create()
+    print(f"Created thread: {thread['thread_id']}")
 
+    # Start a run
     run = await client.runs.create(
         thread_id=thread["thread_id"],
         assistant_id=assistant["assistant_id"],
         input={"messages": [{"role": "user", "content": "Hello!"}]}
     )
 
-    # Stream events exactly the same way
+    # Stream events
     async for event in client.runs.stream(
         thread_id=thread["thread_id"],
         run_id=run["run_id"]
@@ -159,118 +166,236 @@ async def main():
 asyncio.run(main())
 ```
 
-### Multi-Agent Workflow
+### TypeScript
+
+```typescript
+import { Client } from "@langchain/langgraph-sdk";
+
+async function main() {
+  // Connect to DuraGraph
+  const client = new Client({
+    apiUrl: "http://localhost:8081",
+  });
+
+  // Create an assistant
+  const assistant = await client.assistants.create({
+    graphId: "chatbot",
+    name: "My Chatbot",
+    config: { model: "gpt-4" },
+  });
+  console.log(`Created assistant: ${assistant.assistant_id}`);
+
+  // Create a thread
+  const thread = await client.threads.create();
+  console.log(`Created thread: ${thread.thread_id}`);
+
+  // Start a run with streaming
+  const stream = client.runs.stream(thread.thread_id, assistant.assistant_id, {
+    input: { messages: [{ role: "user", content: "Hello!" }] },
+  });
+
+  for await (const event of stream) {
+    console.log("Event:", event);
+  }
+}
+
+main();
+```
+
+### Go
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "net/http"
+    "bytes"
+    "encoding/json"
+    "io"
+)
+
+const baseURL = "http://localhost:8081/api/v1"
+
+func main() {
+    ctx := context.Background()
+
+    // Create an assistant
+    assistantPayload := map[string]interface{}{
+        "name":  "My Chatbot",
+        "model": "gpt-4",
+    }
+    assistant, _ := post(ctx, "/assistants", assistantPayload)
+    fmt.Printf("Created assistant: %s\n", assistant["assistant_id"])
+
+    // Create a thread
+    thread, _ := post(ctx, "/threads", map[string]interface{}{})
+    fmt.Printf("Created thread: %s\n", thread["thread_id"])
+
+    // Start a run
+    runPayload := map[string]interface{}{
+        "assistant_id": assistant["assistant_id"],
+        "input": map[string]interface{}{
+            "messages": []map[string]string{
+                {"role": "user", "content": "Hello!"},
+            },
+        },
+    }
+    threadID := thread["thread_id"].(string)
+    run, _ := post(ctx, fmt.Sprintf("/threads/%s/runs", threadID), runPayload)
+    fmt.Printf("Created run: %s\n", run["run_id"])
+}
+
+func post(ctx context.Context, path string, payload map[string]interface{}) (map[string]interface{}, error) {
+    body, _ := json.Marshal(payload)
+    req, _ := http.NewRequestWithContext(ctx, "POST", baseURL+path, bytes.NewReader(body))
+    req.Header.Set("Content-Type", "application/json")
+
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+
+    data, _ := io.ReadAll(resp.Body)
+    var result map[string]interface{}
+    json.Unmarshal(data, &result)
+    return result, nil
+}
+```
+
+## Human-in-the-Loop Migration
+
+DuraGraph fully supports LangGraph's Command pattern for human-in-the-loop workflows:
 
 ```python
-# Your complex multi-agent setups work too
-from langgraph import StateGraph
-from typing import TypedDict, Literal
-
-class AgentState(TypedDict):
-    messages: list
-    next_agent: Literal["researcher", "writer", "reviewer"]
-
-def researcher(state: AgentState):
-    # Your existing agent logic
-    return {
-        "messages": state["messages"] + ["Research completed"],
-        "next_agent": "writer"
+# Resume a run that's waiting for human input
+await client.runs.resume(
+    thread_id=thread_id,
+    run_id=run_id,
+    command={
+        "resume": "approved",  # Or any value to pass to the graph
+        "update": {"key": "value"},  # Optional state updates
     }
-
-def writer(state: AgentState):
-    return {
-        "messages": state["messages"] + ["Article written"],
-        "next_agent": "reviewer"
-    }
-
-def reviewer(state: AgentState):
-    return {
-        "messages": state["messages"] + ["Review completed"],
-        "next_agent": "END"
-    }
-
-# Build graph (unchanged from LangGraph)
-graph = StateGraph(AgentState)
-graph.add_node("researcher", researcher)
-graph.add_node("writer", writer)
-graph.add_node("reviewer", reviewer)
-
-# Conditional routing (works the same)
-def route_agent(state: AgentState):
-    return state["next_agent"]
-
-graph.add_conditional_edges(
-    "researcher",
-    route_agent,
-    {"writer": "writer", "END": END}
 )
-# ... continue building as normal
 ```
+
+### Interrupt Patterns
+
+```python
+# Create run with interrupt points
+run = await client.runs.create(
+    thread_id=thread_id,
+    assistant_id=assistant_id,
+    input={"message": "Process this"},
+    interrupt_before=["approval_node"],  # Pause before this node
+    interrupt_after=["review_node"],     # Pause after this node
+)
+```
+
+## Configuration Differences
+
+| Setting | LangGraph Cloud | DuraGraph |
+|---------|-----------------|-----------|
+| Base URL | `https://api.smith.langchain.com` | `http://your-instance:8081` |
+| API Prefix | `/` | `/api/v1/` |
+| Auth Header | `X-API-Key` or `Authorization` | `Authorization: Bearer <token>` |
+| Streaming | SSE | SSE (compatible) |
+| Checkpoints | Managed | PostgreSQL-backed |
 
 ## Testing Your Migration
 
-### 1. Local Testing
+### 1. Run Conformance Tests
 
 ```bash
-# Start Duragraph locally
+# Clone DuraGraph
+git clone https://github.com/duragraph/duragraph.git
+cd duragraph
+
+# Start DuraGraph
 docker compose up -d
 
-# Run your existing tests
-pytest tests/ --base-url=http://localhost:8080
+# Run conformance tests against your instance
+API_BASE_URL=http://localhost:8081/api/v1 pytest tests/conformance/
 ```
 
-### 2. Gradual Migration
+### 2. Parallel Testing
+
+Run both systems in parallel during migration:
 
 ```python
-# Use feature flags for gradual migration
 import os
 
-DURAGRAPH_URL = os.getenv("DURAGRAPH_URL", "https://api.langgraph.cloud")
-client = get_client(url=DURAGRAPH_URL)
+# Feature flag for gradual migration
+USE_DURAGRAPH = os.getenv("USE_DURAGRAPH", "false").lower() == "true"
 
-# Start with non-critical workflows
-if "duragraph" in DURAGRAPH_URL:
-    # Route to Duragraph
-    pass
+if USE_DURAGRAPH:
+    client = get_client(url="http://your-duragraph.com")
 else:
-    # Keep using LangGraph Cloud
-    pass
+    client = get_client(url="https://api.smith.langchain.com")
 ```
 
-## Performance Considerations
+## Troubleshooting
 
-### Latency
-- **Self-hosted**: Lower latency (no external API calls)
-- **Network**: Ensure workers are co-located with API
+### Common Issues
 
-### Throughput
-- **Scaling**: Add more worker instances
-- **Database**: Use read replicas for high query loads
+**Connection refused:**
+```bash
+# Check if DuraGraph is running
+curl http://localhost:8081/health
 
-### Monitoring
+# Check container status
+docker compose ps
+```
+
+**Authentication errors:**
+```bash
+# Verify your token
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:8081/api/v1/assistants
+```
+
+**Run stuck in queued:**
+```bash
+# Check server logs
+docker compose logs server
+
+# Verify NATS connection
+docker compose logs nats
+```
+
+**Streaming not working:**
+```bash
+# Test SSE endpoint directly
+curl -N http://localhost:8081/api/v1/stream?run_id=YOUR_RUN_ID
+```
+
+### Performance Comparison
+
+Monitor latency during migration:
 
 ```python
-# Add monitoring to compare performance
 import time
 
-start = time.time()
-run = await client.runs.create(...)
-latency = time.time() - start
-
-print(f"Duragraph latency: {latency:.2f}s")
+async def benchmark():
+    start = time.time()
+    run = await client.runs.create(...)
+    await client.runs.join(thread_id, run["run_id"])
+    latency = time.time() - start
+    print(f"End-to-end latency: {latency:.2f}s")
 ```
-
-## Getting Help
-
-- **Migration Issues**: [GitHub Discussions](https://github.com/adwiteeymauriya/duragraph/discussions)
-- **Feature Requests**: [GitHub Issues](https://github.com/adwiteeymauriya/duragraph/issues)
-- **Professional Support**: Contact us for Duragraph Cloud migration assistance
 
 ## Next Steps
 
-✅ Migrate a simple workflow first
-✅ Test in staging environment
-✅ Monitor performance metrics
-✅ Gradually migrate production workflows
-✅ [Set up monitoring](../concepts/observability.md)
-✅ [Configure production deployment](../installation/self-hosted.md)
+1. ✅ Start DuraGraph locally: `docker compose up -d`
+2. ✅ Update your SDK base URL
+3. ✅ Run your existing tests
+4. ✅ Compare performance metrics
+5. ✅ [Deploy to production](../installation/self-hosted.mdx)
+6. ✅ [Set up monitoring](../concepts/observability.mdx)
+
+## Getting Help
+
+- **GitHub Issues**: [github.com/duragraph/duragraph/issues](https://github.com/duragraph/duragraph/issues)
+- **Discussions**: [github.com/duragraph/duragraph/discussions](https://github.com/duragraph/duragraph/discussions)
+- **Documentation**: [docs.duragraph.ai](https://docs.duragraph.ai)
