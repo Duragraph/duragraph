@@ -3,6 +3,10 @@ package execution
 // MessageChunkCallback is called for each LLM token chunk during streaming
 type MessageChunkCallback func(content, role, id string) error
 
+// SubgraphCallback executes a subgraph and returns its output
+// Parameters: graphID (for loading) or nil, inlineGraph (for inline definition) or nil, input state
+type SubgraphCallback func(graphID string, inlineGraph map[string]interface{}, input map[string]interface{}) (map[string]interface{}, error)
+
 // ExecutionState represents the state of a graph execution
 type ExecutionState struct {
 	RunID          string
@@ -13,6 +17,9 @@ type ExecutionState struct {
 	Iteration      int                               // Current iteration for loops
 	StreamEnabled  bool                              // Whether streaming is enabled
 	MessageChunk   MessageChunkCallback              // Callback for LLM token streaming
+	SubgraphExec   SubgraphCallback                  // Callback for subgraph execution
+	ParentRunID    string                            // Parent run ID for nested subgraphs
+	SubgraphDepth  int                               // Current subgraph nesting depth
 }
 
 // NewExecutionState creates a new execution state
@@ -85,6 +92,19 @@ func (s *ExecutionState) EmitMessageChunk(content, role, id string) error {
 	return nil
 }
 
+// SetSubgraphCallback sets the callback for subgraph execution
+func (s *ExecutionState) SetSubgraphCallback(callback SubgraphCallback) {
+	s.SubgraphExec = callback
+}
+
+// ExecuteSubgraph executes a subgraph if the callback is set
+func (s *ExecutionState) ExecuteSubgraph(graphID string, inlineGraph map[string]interface{}, input map[string]interface{}) (map[string]interface{}, error) {
+	if s.SubgraphExec == nil {
+		return nil, nil
+	}
+	return s.SubgraphExec(graphID, inlineGraph, input)
+}
+
 // Clone creates a deep copy of the state (for subgraphs)
 func (s *ExecutionState) Clone() *ExecutionState {
 	clone := &ExecutionState{
@@ -93,23 +113,50 @@ func (s *ExecutionState) Clone() *ExecutionState {
 		CompletedNodes: make(map[string]bool),
 		NodeOutputs:    make(map[string]map[string]interface{}),
 		GlobalState:    make(map[string]interface{}),
-		Iteration:      s.Iteration,
+		Iteration:      0, // Reset iteration for subgraph
 		StreamEnabled:  s.StreamEnabled,
 		MessageChunk:   s.MessageChunk,
+		SubgraphExec:   s.SubgraphExec,
+		ParentRunID:    s.RunID,
+		SubgraphDepth:  s.SubgraphDepth + 1,
 	}
 
-	copy(clone.CurrentNodes, s.CurrentNodes)
-
-	for k, v := range s.CompletedNodes {
-		clone.CompletedNodes[k] = v
-	}
-
-	for k, v := range s.NodeOutputs {
-		clone.NodeOutputs[k] = v
-	}
-
+	// Don't copy completed nodes or node outputs - subgraph starts fresh
+	// But do copy global state as input to subgraph
 	for k, v := range s.GlobalState {
 		clone.GlobalState[k] = v
+	}
+
+	return clone
+}
+
+// CloneForSubgraph creates a state for subgraph execution with selective input
+func (s *ExecutionState) CloneForSubgraph(inputKeys []string) *ExecutionState {
+	clone := &ExecutionState{
+		RunID:          s.RunID,
+		CurrentNodes:   make([]string, 0),
+		CompletedNodes: make(map[string]bool),
+		NodeOutputs:    make(map[string]map[string]interface{}),
+		GlobalState:    make(map[string]interface{}),
+		Iteration:      0,
+		StreamEnabled:  s.StreamEnabled,
+		MessageChunk:   s.MessageChunk,
+		SubgraphExec:   s.SubgraphExec,
+		ParentRunID:    s.RunID,
+		SubgraphDepth:  s.SubgraphDepth + 1,
+	}
+
+	// Copy only specified keys to subgraph state, or all if no keys specified
+	if len(inputKeys) == 0 {
+		for k, v := range s.GlobalState {
+			clone.GlobalState[k] = v
+		}
+	} else {
+		for _, key := range inputKeys {
+			if v, ok := s.GlobalState[key]; ok {
+				clone.GlobalState[key] = v
+			}
+		}
 	}
 
 	return clone
