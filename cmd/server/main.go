@@ -278,6 +278,7 @@ func main() {
 	api.GET("/threads/:thread_id/runs", runHandler.ListRuns)
 	api.GET("/threads/:thread_id/runs/:run_id", runHandler.GetRun)
 	api.POST("/threads/:thread_id/runs/:run_id/cancel", runHandler.CancelRun)
+	api.POST("/threads/:thread_id/runs/:run_id/resume", runHandler.ResumeRun)
 	api.GET("/threads/:thread_id/runs/:run_id/join", runHandler.JoinRun)
 	api.DELETE("/threads/:thread_id/runs/:run_id", runHandler.DeleteRun)
 

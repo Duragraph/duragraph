@@ -790,6 +790,44 @@ paths:
                     type: string
                     example: cancelled
 
+  /api/v1/threads/{thread_id}/runs/{run_id}/resume:
+    post:
+      tags: [Runs]
+      summary: Resume interrupted run
+      description: |
+        Resume a run that is in requires_action state. Supports LangGraph Command pattern
+        for human-in-the-loop workflows including state updates, resume values, and goto.
+      operationId: resumeRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeRunRequest'
+      responses:
+        '200':
+          description: Run resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+                    example: resumed
+        '400':
+          description: Run is not in requires_action state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/v1/threads/{thread_id}/runs/{run_id}/join:
     get:
       tags: [Runs]
@@ -1535,3 +1573,72 @@ components:
         data:
           type: object
           additionalProperties: true
+
+    ResumeRunRequest:
+      type: object
+      description: Request to resume an interrupted run with LangGraph Command support
+      properties:
+        input:
+          type: object
+          additionalProperties: true
+          description: Input to resume with
+        command:
+          $ref: '#/components/schemas/Command'
+        config:
+          type: object
+          additionalProperties: true
+          description: Config overrides for the resumed run
+
+    Command:
+      type: object
+      description: LangGraph Command object for resuming with specific actions
+      properties:
+        resume:
+          description: Value to resume with (for interrupt_before/after)
+        update:
+          type: object
+          additionalProperties: true
+          description: State values to update before resuming
+        send:
+          type: array
+          items:
+            $ref: '#/components/schemas/SendMessage'
+          description: Messages to send to specific nodes
+        goto:
+          type: string
+          description: Node to jump to (skip current)
+
+    SendMessage:
+      type: object
+      required: [node, message]
+      properties:
+        node:
+          type: string
+          description: Target node ID
+        message:
+          description: Message to send
+
+    InterruptResponse:
+      type: object
+      description: Response when a run is interrupted
+      properties:
+        run_id:
+          type: string
+        thread_id:
+          type: string
+        status:
+          type: string
+        interrupt_type:
+          type: string
+          enum: [before, after]
+        node_id:
+          type: string
+        reason:
+          type: string
+        state:
+          type: object
+          additionalProperties: true
+        tool_calls:
+          type: array
+          items:
+            type: object
