@@ -588,6 +588,96 @@ func (h *RunHandler) SubmitToolOutputs(c echo.Context) error {
 	})
 }
 
+// ResumeRun handles POST /threads/:thread_id/runs/:run_id/resume
+// This is a LangGraph-compatible endpoint for resuming interrupted runs with Command support
+func (h *RunHandler) ResumeRun(c echo.Context) error {
+	runID := c.Param("run_id")
+	if runID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "run_id is required",
+		})
+	}
+
+	var req dto.ResumeRunRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	// If command with update is provided, apply state updates first
+	if req.Command != nil && req.Command.Update != nil {
+		// Get thread_id from path
+		threadID := c.Param("thread_id")
+		if threadID != "" {
+			// Update thread state with command updates
+			// This is simplified - full implementation would use the checkpoint system
+			if err := h.runService.UpdateStateBeforeResume(c.Request().Context(), runID, threadID, req.Command.Update); err != nil {
+				// Check for domain errors and return appropriate status codes
+				if domainErr, ok := err.(*errors.DomainError); ok {
+					switch domainErr.Code {
+					case "INVALID_STATE", "INVALID_INPUT":
+						return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+							Error:   "invalid_request",
+							Message: err.Error(),
+						})
+					case "NOT_FOUND":
+						return c.JSON(http.StatusNotFound, dto.ErrorResponse{
+							Error:   "not_found",
+							Message: err.Error(),
+						})
+					}
+				}
+				return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+					Error:   "internal_error",
+					Message: "failed to update state: " + err.Error(),
+				})
+			}
+		}
+	}
+
+	// Build resume input from command or direct input
+	resumeInput := req.Input
+	if resumeInput == nil {
+		resumeInput = make(map[string]interface{})
+	}
+
+	// Add command resume value if provided
+	if req.Command != nil {
+		if req.Command.Resume != nil {
+			resumeInput["resume"] = req.Command.Resume
+		}
+		if req.Command.Goto != "" {
+			resumeInput["goto"] = req.Command.Goto
+		}
+		if len(req.Command.Send) > 0 {
+			sends := make([]map[string]interface{}, len(req.Command.Send))
+			for i, s := range req.Command.Send {
+				sends[i] = map[string]interface{}{
+					"node":    s.Node,
+					"message": s.Message,
+				}
+			}
+			resumeInput["send"] = sends
+		}
+	}
+
+	// Resume with the input
+	if err := h.runService.ResumeRunWithInput(c.Request().Context(), runID, resumeInput); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"run_id": runID,
+		"status": "resumed",
+	})
+}
+
 // CreateStatelessRunWithStream handles POST /runs/stream
 func (h *RunHandler) CreateStatelessRunWithStream(c echo.Context) error {
 	var req dto.CreateRunRequest

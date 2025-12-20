@@ -238,3 +238,107 @@ func (s *RunService) CreateAndWaitForRun(ctx context.Context, threadID, assistan
 	// Wait for completion
 	return s.WaitForRun(ctx, runAgg.ID(), timeout)
 }
+
+// UpdateStateBeforeResume updates the thread state before resuming a run
+// This is used for Command.Update in LangGraph-compatible human-in-the-loop
+func (s *RunService) UpdateStateBeforeResume(ctx context.Context, runID, threadID string, updates map[string]interface{}) error {
+	// Load the run to verify it's in requires_action state
+	runAgg, err := s.runRepo.FindByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+
+	if runAgg.Status() != run.StatusRequiresAction {
+		return errors.InvalidState(runAgg.Status().String(), "update_state_before_resume")
+	}
+
+	// Store the updates to be applied when the run resumes
+	// These will be merged into the execution state
+	if runAgg.Input() == nil {
+		return nil
+	}
+
+	// Add updates to the run's input for when it resumes
+	input := runAgg.Input()
+
+	// Safely get or create state_updates map
+	var stateUpdates map[string]interface{}
+	if existing, ok := input["state_updates"].(map[string]interface{}); ok {
+		stateUpdates = existing
+	} else {
+		stateUpdates = make(map[string]interface{})
+	}
+
+	for k, v := range updates {
+		stateUpdates[k] = v
+	}
+	input["state_updates"] = stateUpdates
+
+	return nil
+}
+
+// ResumeRunWithInput resumes a run with specific input/command
+// This supports LangGraph Command pattern for human-in-the-loop
+func (s *RunService) ResumeRunWithInput(ctx context.Context, runID string, resumeInput map[string]interface{}) error {
+	// Load run
+	runAgg, err := s.runRepo.FindByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+
+	// Verify run is in requires_action state
+	if runAgg.Status() != run.StatusRequiresAction {
+		return errors.InvalidState(runAgg.Status().String(), "resume_with_input")
+	}
+
+	// Find and resolve any unresolved interrupts
+	interrupts, err := s.interruptRepo.FindUnresolvedByRunID(ctx, runID)
+	if err != nil {
+		return err
+	}
+
+	if len(interrupts) > 0 {
+		// Resolve the interrupt with the resume input
+		interrupt := interrupts[0]
+		toolOutputs := []map[string]interface{}{
+			{"resume_input": resumeInput},
+		}
+		if err := interrupt.Resolve(toolOutputs); err != nil {
+			return err
+		}
+		if err := s.interruptRepo.Update(ctx, interrupt); err != nil {
+			return err
+		}
+
+		// Resume the run
+		if err := runAgg.Resume(interrupt.ID(), toolOutputs); err != nil {
+			return err
+		}
+	} else {
+		// No interrupt, just update status directly
+		if err := runAgg.Resume("", nil); err != nil {
+			return err
+		}
+	}
+
+	// Merge resume input into run input
+	input := runAgg.Input()
+	if input == nil {
+		input = make(map[string]interface{})
+	}
+	for k, v := range resumeInput {
+		input[k] = v
+	}
+
+	// Save run
+	if err := s.runRepo.Update(ctx, runAgg); err != nil {
+		return err
+	}
+
+	// Continue execution asynchronously
+	go func() {
+		s.ExecuteRun(context.Background(), runID)
+	}()
+
+	return nil
+}

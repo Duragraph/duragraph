@@ -1,191 +1,1024 @@
 openapi: 3.1.0
 info:
   title: DuraGraph API
-  version: 0.1.0
+  version: 1.0.0
   description: |
-    Placeholder OpenAPI specification for DuraGraph, compatible with LangGraph Cloud.
-    All endpoints and schemas here should be extended in future iterations.
+    DuraGraph is a LangGraph Cloud-compatible API for AI workflow orchestration.
+    This specification documents all Phase 1 endpoints for assistant, thread, and run management.
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: DuraGraph
+    url: https://duragraph.ai
+
 servers:
-  - url: https://api.duragraph.local
+  - url: http://localhost:8081
+    description: Local development server
+  - url: https://api.duragraph.ai
+    description: Production server
+
+tags:
+  - name: System
+    description: Health and system information endpoints
+  - name: Assistants
+    description: Assistant management endpoints
+  - name: Threads
+    description: Thread management endpoints
+  - name: Runs
+    description: Run execution endpoints
+  - name: State
+    description: Thread state and checkpoint management
+  - name: Streaming
+    description: Server-Sent Events streaming endpoints
+
 paths:
-  /assistants:
+  # System Endpoints
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+
+  /ok:
+    get:
+      tags: [System]
+      summary: Simple health check
+      operationId: ok
+      responses:
+        '200':
+          description: Service is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+
+  /info:
+    get:
+      tags: [System]
+      summary: Server information
+      operationId: info
+      responses:
+        '200':
+          description: Server version and capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerInfo'
+
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      operationId: metrics
+      responses:
+        '200':
+          description: Prometheus metrics in text format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # Assistant Endpoints
+  /api/v1/assistants:
     post:
+      tags: [Assistants]
       summary: Create assistant
       operationId: createAssistant
       security:
         - bearerAuth: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Assistant'
+              $ref: '#/components/schemas/CreateAssistantRequest'
+            example:
+              name: my-assistant
+              model: gpt-4
+              instructions: You are a helpful assistant.
       responses:
         '201':
           description: Assistant created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assistant'
+                $ref: '#/components/schemas/AssistantResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
-  /assistants/{id}:
     get:
-      summary: Get assistant by ID
-      operationId: getAssistant
+      tags: [Assistants]
+      summary: List assistants
+      operationId: listAssistants
+      security:
+        - bearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
+        - name: limit
+          in: query
           schema:
-            type: string
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of assistants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAssistantsResponse'
+
+  /api/v1/assistants/search:
+    post:
+      tags: [Assistants]
+      summary: Search assistants
+      operationId: searchAssistants
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAssistantsRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAssistantsResponse'
+
+  /api/v1/assistants/count:
+    post:
+      tags: [Assistants]
+      summary: Count assistants
+      operationId: countAssistants
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CountAssistantsRequest'
+      responses:
+        '200':
+          description: Count result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountResponse'
+
+  /api/v1/assistants/{assistant_id}:
+    get:
+      tags: [Assistants]
+      summary: Get assistant
+      operationId: getAssistant
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AssistantId'
       responses:
         '200':
           description: Assistant found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assistant'
+                $ref: '#/components/schemas/AssistantResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
-  /threads:
+    patch:
+      tags: [Assistants]
+      summary: Update assistant
+      operationId: updateAssistant
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AssistantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAssistantRequest'
+      responses:
+        '200':
+          description: Assistant updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Assistants]
+      summary: Delete assistant
+      operationId: deleteAssistant
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AssistantId'
+      responses:
+        '204':
+          description: Assistant deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/assistants/{assistant_id}/versions:
+    get:
+      tags: [Assistants]
+      summary: List assistant versions
+      operationId: listAssistantVersions
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AssistantId'
+      responses:
+        '200':
+          description: List of versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AssistantVersionResponse'
+
     post:
+      tags: [Assistants]
+      summary: Create assistant version
+      operationId: createAssistantVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AssistantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAssistantVersionRequest'
+      responses:
+        '201':
+          description: Version created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantVersionResponse'
+
+  /api/v1/assistants/{assistant_id}/latest:
+    post:
+      tags: [Assistants]
+      summary: Set latest version
+      operationId: setLatestVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AssistantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetLatestVersionRequest'
+      responses:
+        '200':
+          description: Latest version set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantResponse'
+
+  /api/v1/assistants/{assistant_id}/schemas:
+    get:
+      tags: [Assistants]
+      summary: Get assistant schemas
+      operationId: getAssistantSchemas
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AssistantId'
+      responses:
+        '200':
+          description: Assistant schemas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantSchemaResponse'
+
+  # Thread Endpoints
+  /api/v1/threads:
+    post:
+      tags: [Threads]
       summary: Create thread
       operationId: createThread
+      security:
+        - bearerAuth: []
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Thread'
+              $ref: '#/components/schemas/CreateThreadRequest'
       responses:
         '201':
           description: Thread created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Thread'
+                $ref: '#/components/schemas/CreateThreadResponse'
 
-  /threads/{id}:
     get:
+      tags: [Threads]
+      summary: List threads
+      operationId: listThreads
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of threads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListThreadsResponse'
+
+  /api/v1/threads/search:
+    post:
+      tags: [Threads]
+      summary: Search threads
+      operationId: searchThreads
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchThreadsRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListThreadsResponse'
+
+  /api/v1/threads/count:
+    post:
+      tags: [Threads]
+      summary: Count threads
+      operationId: countThreads
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CountThreadsRequest'
+      responses:
+        '200':
+          description: Count result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountResponse'
+
+  /api/v1/threads/{thread_id}:
+    get:
+      tags: [Threads]
       summary: Get thread
       operationId: getThread
+      security:
+        - bearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/ThreadId'
       responses:
         '200':
           description: Thread found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Thread'
+                $ref: '#/components/schemas/ThreadResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
-  /messages:
-    post:
-      summary: Post message to thread
-      operationId: postMessage
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Message'
-      responses:
-        '201':
-          description: Message posted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Message'
-
-  /runs:
-    post:
-      summary: Create run
-      operationId: createRun
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Run'
-      responses:
-        '201':
-          description: Run created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Run'
-
-    get:
-      summary: Query runs by thread_id
-      operationId: queryRuns
+    patch:
+      tags: [Threads]
+      summary: Update thread
+      operationId: updateThread
+      security:
+        - bearerAuth: []
       parameters:
-        - name: thread_id
-          in: query
-          schema:
-            type: string
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateThreadRequest'
       responses:
         '200':
-          description: Runs found
+          description: Thread updated
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Run'
+                $ref: '#/components/schemas/ThreadResponse'
 
-  /runs/{id}:
-    get:
-      summary: Get run by ID
-      operationId: getRun
+    delete:
+      tags: [Threads]
+      summary: Delete thread
+      operationId: deleteThread
+      security:
+        - bearerAuth: []
       parameters:
-        - name: id
+        - $ref: '#/components/parameters/ThreadId'
+      responses:
+        '204':
+          description: Thread deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/threads/{thread_id}/messages:
+    post:
+      tags: [Threads]
+      summary: Add message to thread
+      operationId: addMessage
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMessageRequest'
+      responses:
+        '201':
+          description: Message added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /api/v1/threads/{thread_id}/copy:
+    post:
+      tags: [Threads]
+      summary: Copy (fork) thread
+      operationId: copyThread
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopyThreadRequest'
+      responses:
+        '201':
+          description: Thread copied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CopyThreadResponse'
+
+  # Thread State Endpoints
+  /api/v1/threads/{thread_id}/state:
+    get:
+      tags: [State]
+      summary: Get thread state
+      operationId: getThreadState
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+      responses:
+        '200':
+          description: Thread state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreadStateResponse'
+
+    post:
+      tags: [State]
+      summary: Update thread state
+      operationId: updateThreadState
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateThreadStateRequest'
+      responses:
+        '200':
+          description: State updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreadStateResponse'
+
+  /api/v1/threads/{thread_id}/state/{checkpoint_id}:
+    get:
+      tags: [State]
+      summary: Get state at checkpoint
+      operationId: getStateAtCheckpoint
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - name: checkpoint_id
           in: path
           required: true
           schema:
             type: string
       responses:
         '200':
+          description: State at checkpoint
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreadStateResponse'
+
+  /api/v1/threads/{thread_id}/state/checkpoint:
+    post:
+      tags: [State]
+      summary: Create checkpoint
+      operationId: createCheckpoint
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+      responses:
+        '201':
+          description: Checkpoint created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkpoint_id:
+                    type: string
+
+  /api/v1/threads/{thread_id}/history:
+    get:
+      tags: [State]
+      summary: Get thread history
+      operationId: getThreadHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: before
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Thread history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ThreadHistoryEntry'
+
+    post:
+      tags: [State]
+      summary: Query thread history
+      operationId: queryThreadHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetThreadHistoryRequest'
+      responses:
+        '200':
+          description: Thread history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ThreadHistoryEntry'
+
+  # Run Endpoints
+  /api/v1/threads/{thread_id}/runs:
+    post:
+      tags: [Runs]
+      summary: Create run
+      operationId: createRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+            example:
+              assistant_id: asst_123
+              input:
+                message: Hello, world!
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRunResponse'
+
+    get:
+      tags: [Runs]
+      summary: List runs for thread
+      operationId: listRuns
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GetRunResponse'
+
+  /api/v1/threads/{thread_id}/runs/stream:
+    post:
+      tags: [Streaming]
+      summary: Create run with streaming
+      operationId: createRunWithStream
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/StreamEvent'
+
+  /api/v1/threads/{thread_id}/runs/{run_id}:
+    get:
+      tags: [Runs]
+      summary: Get run
+      operationId: getRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
           description: Run found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Run'
+                $ref: '#/components/schemas/GetRunResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
-  /stream:
-    get:
-      summary: Stream run events (SSE)
-      operationId: streamEvents
+    delete:
+      tags: [Runs]
+      summary: Delete run
+      operationId: deleteRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/RunId'
       responses:
         '200':
-          description: Server-Sent Event stream
+          description: Run deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Run is still in progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/threads/{thread_id}/runs/{run_id}/cancel:
+    post:
+      tags: [Runs]
+      summary: Cancel run
+      operationId: cancelRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Run cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+                    example: cancelled
+
+  /api/v1/threads/{thread_id}/runs/{run_id}/resume:
+    post:
+      tags: [Runs]
+      summary: Resume interrupted run
+      description: |
+        Resume a run that is in requires_action state. Supports LangGraph Command pattern
+        for human-in-the-loop workflows including state updates, resume values, and goto.
+      operationId: resumeRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeRunRequest'
+      responses:
+        '200':
+          description: Run resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+                    example: resumed
+        '400':
+          description: Run is not in requires_action state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/threads/{thread_id}/runs/{run_id}/join:
+    get:
+      tags: [Runs]
+      summary: Wait for run completion
+      operationId: joinRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/RunId'
+        - name: timeout
+          in: query
+          schema:
+            type: string
+            default: 5m
+          description: Timeout duration (e.g., 5m, 30s)
+      responses:
+        '200':
+          description: Run completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetRunResponse'
+
+  /api/v1/threads/{thread_id}/runs/{run_id}/stream:
+    get:
+      tags: [Streaming]
+      summary: Stream existing run events
+      operationId: streamRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ThreadId'
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Server-Sent Events stream
           content:
             text/event-stream:
               schema:
-                $ref: '#/components/schemas/Event'
+                $ref: '#/components/schemas/StreamEvent'
 
-  /webhooks:
+  # Stateless Run Endpoints
+  /api/v1/runs:
     post:
-      summary: Create webhook
-      operationId: createWebhook
+      tags: [Runs]
+      summary: Create stateless run
+      operationId: createStatelessRun
+      security:
+        - bearerAuth: []
       requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRunResponse'
+
+  /api/v1/runs/wait:
+    post:
+      tags: [Runs]
+      summary: Create run and wait for completion
+      operationId: createRunAndWait
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: timeout
+          in: query
+          schema:
+            type: string
+            default: 5m
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '200':
+          description: Run completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetRunResponse'
+
+  /api/v1/runs/stream:
+    post:
+      tags: [Streaming]
+      summary: Create stateless run with streaming
+      operationId: createStatelessRunWithStream
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/StreamEvent'
+
+  /api/v1/runs/batch:
+    post:
+      tags: [Runs]
+      summary: Create batch runs
+      operationId: createBatchRuns
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '201':
+          description: Runs created
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CreateRunResponse'
+
+  /api/v1/runs/cancel:
+    post:
+      tags: [Runs]
+      summary: Cancel multiple runs
+      operationId: cancelStatelessRuns
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
         content:
           application/json:
             schema:
               type: object
               properties:
-                url:
-                  type: string
-                  format: uri
-      responses:
-        '201':
-          description: Webhook created
-
-  /webhooks/test:
-    post:
-      summary: Test webhook delivery
-      operationId: testWebhook
+                run_ids:
+                  type: array
+                  items:
+                    type: string
       responses:
         '200':
-          description: Webhook test successful
+          description: Cancellation results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    run_id:
+                      type: string
+                    status:
+                      type: string
+
+  # Legacy Streaming
+  /api/v1/stream:
+    get:
+      tags: [Streaming]
+      summary: Stream events (legacy)
+      operationId: streamEvents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/StreamEvent'
 
 components:
   securitySchemes:
@@ -194,54 +1027,618 @@ components:
       scheme: bearer
       bearerFormat: JWT
 
-  schemas:
-    Assistant:
-      type: object
-      properties:
-        id: { type: string }
-        name: { type: string }
-        description: { type: string }
-    Thread:
-      type: object
-      properties:
-        id: { type: string }
-        created_at: { type: string, format: date-time }
-    Message:
-      type: object
-      properties:
-        id: { type: string }
-        thread_id: { type: string }
-        role: { type: string, enum: [user, assistant] }
-        content: { type: string }
-    Run:
-      type: object
-      properties:
-        id: { type: string }
-        thread_id: { type: string }
-        status: { type: string, enum: [pending, running, completed, failed] }
-    Step:
-      type: object
-      properties:
-        id: { type: string }
-        run_id: { type: string }
-        type: { type: string }
-        status: { type: string }
-    Event:
-      type: object
-      properties:
-        type: { type: string }
-        run_id: { type: string }
-        step: { $ref: '#/components/schemas/Step' }
+  parameters:
+    AssistantId:
+      name: assistant_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The assistant ID
+
+    ThreadId:
+      name: thread_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The thread ID
+
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: The run ID
 
   responses:
-    Error:
-      description: Standard error payload
+    BadRequest:
+      description: Bad request
       content:
-        application/problem+json:
+        application/json:
           schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ServerInfo:
+      type: object
+      properties:
+        version:
+          type: string
+          example: "1.0.0"
+        name:
+          type: string
+          example: DuraGraph
+        features:
+          type: array
+          items:
+            type: string
+          example: ["streaming", "checkpoints", "versioning"]
+
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          example: invalid_request
+        message:
+          type: string
+          example: The request was invalid
+        code:
+          type: string
+
+    CreateAssistantRequest:
+      type: object
+      required: [name]
+      properties:
+        graph_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        model:
+          type: string
+        instructions:
+          type: string
+        tools:
+          type: array
+          items:
             type: object
-            properties:
-              type: { type: string }
-              title: { type: string }
-              status: { type: integer }
-              detail: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+        config:
+          type: object
+          additionalProperties: true
+        context:
+          type: array
+          items:
+            type: object
+
+    UpdateAssistantRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        model:
+          type: string
+        instructions:
+          type: string
+        tools:
+          type: array
+          items:
+            type: object
+
+    AssistantResponse:
+      type: object
+      properties:
+        assistant_id:
+          type: string
+        graph_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        model:
+          type: string
+        instructions:
+          type: string
+        tools:
+          type: array
+          items:
+            type: object
+        metadata:
+          type: object
+        config:
+          type: object
+        context:
+          type: array
+          items:
+            type: object
+        version:
+          type: integer
+        created_at:
+          type: integer
+          format: int64
+        updated_at:
+          type: integer
+          format: int64
+
+    ListAssistantsResponse:
+      type: object
+      properties:
+        assistants:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantResponse'
+        total:
+          type: integer
+
+    SearchAssistantsRequest:
+      type: object
+      properties:
+        graph_id:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        limit:
+          type: integer
+          default: 20
+        offset:
+          type: integer
+          default: 0
+
+    CountAssistantsRequest:
+      type: object
+      properties:
+        graph_id:
+          type: string
+        metadata:
+          type: object
+
+    CountResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+
+    AssistantVersionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        assistant_id:
+          type: string
+        version:
+          type: integer
+        graph_id:
+          type: string
+        config:
+          type: object
+        context:
+          type: array
+          items:
+            type: object
+        created_at:
+          type: integer
+          format: int64
+
+    CreateAssistantVersionRequest:
+      type: object
+      properties:
+        graph_id:
+          type: string
+        config:
+          type: object
+        context:
+          type: array
+          items:
+            type: object
+
+    SetLatestVersionRequest:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: integer
+
+    AssistantSchemaResponse:
+      type: object
+      properties:
+        graph_id:
+          type: string
+        input_schema:
+          type: object
+        output_schema:
+          type: object
+        state_schema:
+          type: object
+        config_schema:
+          type: object
+
+    CreateThreadRequest:
+      type: object
+      properties:
+        metadata:
+          type: object
+          additionalProperties: true
+
+    CreateThreadResponse:
+      type: object
+      properties:
+        thread_id:
+          type: string
+        metadata:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    UpdateThreadRequest:
+      type: object
+      properties:
+        metadata:
+          type: object
+
+    ThreadResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageResponse'
+        metadata:
+          type: object
+        created_at:
+          type: integer
+          format: int64
+        updated_at:
+          type: integer
+          format: int64
+
+    ListThreadsResponse:
+      type: object
+      properties:
+        threads:
+          type: array
+          items:
+            $ref: '#/components/schemas/ThreadResponse'
+        total:
+          type: integer
+
+    SearchThreadsRequest:
+      type: object
+      properties:
+        status:
+          type: string
+        metadata:
+          type: object
+        limit:
+          type: integer
+          default: 20
+        offset:
+          type: integer
+          default: 0
+
+    CountThreadsRequest:
+      type: object
+      properties:
+        status:
+          type: string
+        metadata:
+          type: object
+
+    AddMessageRequest:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        metadata:
+          type: object
+
+    MessageResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+        content:
+          type: string
+        metadata:
+          type: object
+        created_at:
+          type: integer
+          format: int64
+
+    CopyThreadRequest:
+      type: object
+      properties:
+        checkpoint_id:
+          type: string
+
+    CopyThreadResponse:
+      type: object
+      properties:
+        thread_id:
+          type: string
+
+    ThreadStateResponse:
+      type: object
+      properties:
+        values:
+          type: object
+          additionalProperties: true
+        next:
+          type: array
+          items:
+            type: string
+        tasks:
+          type: array
+          items:
+            type: object
+        metadata:
+          type: object
+        created_at:
+          type: integer
+          format: int64
+        checkpoint_id:
+          type: string
+        checkpoint_ns:
+          type: string
+        parent_config:
+          type: object
+
+    UpdateThreadStateRequest:
+      type: object
+      required: [values]
+      properties:
+        values:
+          type: object
+          additionalProperties: true
+        as_node:
+          type: string
+        checkpoint_ns:
+          type: string
+
+    ThreadHistoryEntry:
+      type: object
+      properties:
+        checkpoint_id:
+          type: string
+        parent_checkpoint_id:
+          type: string
+        values:
+          type: object
+        metadata:
+          type: object
+        created_at:
+          type: integer
+          format: int64
+
+    GetThreadHistoryRequest:
+      type: object
+      properties:
+        checkpoint_ns:
+          type: string
+        limit:
+          type: integer
+        before:
+          type: string
+
+    CreateRunRequest:
+      type: object
+      required: [assistant_id]
+      properties:
+        assistant_id:
+          type: string
+        thread_id:
+          type: string
+        input:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+        config:
+          type: object
+        kwargs:
+          type: object
+        stream_mode:
+          type: array
+          items:
+            type: string
+            enum: [values, updates, messages, messages-tuple, debug, events, custom]
+        on_completion:
+          type: string
+        interrupt_before:
+          type: array
+          items:
+            type: string
+          description: Node IDs to interrupt before execution
+        interrupt_after:
+          type: array
+          items:
+            type: string
+          description: Node IDs to interrupt after execution
+        webhook:
+          type: string
+          format: uri
+
+    CreateRunResponse:
+      type: object
+      properties:
+        run_id:
+          type: string
+        thread_id:
+          type: string
+        assistant_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, pending, running, success, error, cancelled, interrupted, timeout]
+        metadata:
+          type: object
+        kwargs:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    GetRunResponse:
+      type: object
+      properties:
+        run_id:
+          type: string
+        thread_id:
+          type: string
+        assistant_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, pending, running, success, error, cancelled, interrupted, timeout]
+        input:
+          type: object
+        output:
+          type: object
+        error:
+          type: string
+        metadata:
+          type: object
+        kwargs:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SubmitToolOutputsRequest:
+      type: object
+      required: [tool_outputs]
+      properties:
+        tool_outputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolOutput'
+
+    ToolOutput:
+      type: object
+      required: [tool_call_id, output]
+      properties:
+        tool_call_id:
+          type: string
+        output:
+          type: string
+
+    StreamEvent:
+      type: object
+      properties:
+        event:
+          type: string
+          enum: [metadata, values, updates, messages, debug, error, end]
+        data:
+          type: object
+          additionalProperties: true
+
+    ResumeRunRequest:
+      type: object
+      description: Request to resume an interrupted run with LangGraph Command support
+      properties:
+        input:
+          type: object
+          additionalProperties: true
+          description: Input to resume with
+        command:
+          $ref: '#/components/schemas/Command'
+        config:
+          type: object
+          additionalProperties: true
+          description: Config overrides for the resumed run
+
+    Command:
+      type: object
+      description: LangGraph Command object for resuming with specific actions
+      properties:
+        resume:
+          description: Value to resume with (for interrupt_before/after)
+        update:
+          type: object
+          additionalProperties: true
+          description: State values to update before resuming
+        send:
+          type: array
+          items:
+            $ref: '#/components/schemas/SendMessage'
+          description: Messages to send to specific nodes
+        goto:
+          type: string
+          description: Node to jump to (skip current)
+
+    SendMessage:
+      type: object
+      required: [node, message]
+      properties:
+        node:
+          type: string
+          description: Target node ID
+        message:
+          description: Message to send
+
+    InterruptResponse:
+      type: object
+      description: Response when a run is interrupted
+      properties:
+        run_id:
+          type: string
+        thread_id:
+          type: string
+        status:
+          type: string
+        interrupt_type:
+          type: string
+          enum: [before, after]
+        node_id:
+          type: string
+        reason:
+          type: string
+        state:
+          type: object
+          additionalProperties: true
+        tool_calls:
+          type: array
+          items:
+            type: object

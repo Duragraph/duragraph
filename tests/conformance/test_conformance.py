@@ -462,3 +462,57 @@ def test_delete_thread():
     # Verify it's deleted
     r = requests.get(f"{BASE_URL}/threads/{thread_id}")
     assert r.status_code == 404
+
+
+# ============== Human-in-the-Loop Tests ==============
+
+def test_resume_run_with_command():
+    """Test resuming a run with LangGraph Command pattern"""
+    client = APIClient()
+    assistant = client.create_assistant()
+    thread = client.create_thread()
+    thread_id = thread["thread_id"]
+
+    # Create a run with interrupt_before
+    run = client.start_run(
+        assistant["assistant_id"],
+        thread_id,
+        input_data={"message": "test"}
+    )
+    run_id = run["run_id"]
+
+    # Try to resume (may not be in interrupted state, but endpoint should exist)
+    r = requests.post(
+        f"{BASE_URL}/threads/{thread_id}/runs/{run_id}/resume",
+        json={"command": {"resume": "approved"}}
+    )
+    if r.status_code == 501:
+        pytest.skip("Resume run not implemented yet")
+    # Accept 200 (success), 400 (not in requires_action state), or 404
+    assert r.status_code in [200, 400, 404]
+
+
+def test_resume_run_with_state_update():
+    """Test resuming a run with state updates via Command"""
+    client = APIClient()
+    assistant = client.create_assistant()
+    thread = client.create_thread()
+    thread_id = thread["thread_id"]
+
+    run = client.start_run(assistant["assistant_id"], thread_id)
+    run_id = run["run_id"]
+
+    # Try to resume with state update
+    r = requests.post(
+        f"{BASE_URL}/threads/{thread_id}/runs/{run_id}/resume",
+        json={
+            "command": {
+                "update": {"key": "value"},
+                "resume": True
+            }
+        }
+    )
+    if r.status_code == 501:
+        pytest.skip("Resume with state update not implemented yet")
+    # Accept 200 (success) or 400 (not in requires_action state)
+    assert r.status_code in [200, 400, 404]

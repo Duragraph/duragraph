@@ -15,9 +15,17 @@
       "Bash(pnpm build:*)",
       "Bash(tree:*)",
       "Bash(pnpm remove:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh project list:*)",
+      "Bash(cat:*)",
+      "Bash(gh issue create:*)"
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "task-master-ai"
+  ]
 }

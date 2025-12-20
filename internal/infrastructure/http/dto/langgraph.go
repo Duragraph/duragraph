@@ -278,3 +278,49 @@ type AssistantSchemaResponse struct {
 	StateSchema  map[string]interface{} `json:"state_schema"`
 	ConfigSchema map[string]interface{} `json:"config_schema"`
 }
+
+// ResumeRunRequest represents a LangGraph-compatible resume request
+// This supports the Command pattern for human-in-the-loop workflows
+type ResumeRunRequest struct {
+	// Input to resume with (replaces pending task input)
+	Input map[string]interface{} `json:"input,omitempty"`
+
+	// Command to execute when resuming
+	Command *Command `json:"command,omitempty"`
+
+	// Config overrides for the resumed run
+	Config map[string]interface{} `json:"config,omitempty"`
+}
+
+// Command represents a LangGraph Command object for resuming with specific actions
+type Command struct {
+	// Resume value - the value to resume with (for interrupt_before/after)
+	Resume interface{} `json:"resume,omitempty"`
+
+	// Update state values before resuming
+	Update map[string]interface{} `json:"update,omitempty"`
+
+	// Send messages/values to specific nodes
+	Send []SendMessage `json:"send,omitempty"`
+
+	// Goto a specific node (skip current)
+	Goto string `json:"goto,omitempty"`
+}
+
+// SendMessage represents a message to send to a specific node
+type SendMessage struct {
+	Node    string      `json:"node"`
+	Message interface{} `json:"message"`
+}
+
+// InterruptResponse represents the response when a run is interrupted
+type InterruptResponse struct {
+	RunID         string                   `json:"run_id"`
+	ThreadID      string                   `json:"thread_id"`
+	Status        string                   `json:"status"`
+	InterruptType string                   `json:"interrupt_type,omitempty"` // "before" or "after"
+	NodeID        string                   `json:"node_id,omitempty"`
+	Reason        string                   `json:"reason,omitempty"`
+	State         map[string]interface{}   `json:"state,omitempty"`
+	ToolCalls     []map[string]interface{} `json:"tool_calls,omitempty"`
+}
