@@ -260,11 +260,15 @@ func (s *RunService) UpdateStateBeforeResume(ctx context.Context, runID, threadI
 
 	// Add updates to the run's input for when it resumes
 	input := runAgg.Input()
-	if input["state_updates"] == nil {
-		input["state_updates"] = make(map[string]interface{})
+
+	// Safely get or create state_updates map
+	var stateUpdates map[string]interface{}
+	if existing, ok := input["state_updates"].(map[string]interface{}); ok {
+		stateUpdates = existing
+	} else {
+		stateUpdates = make(map[string]interface{})
 	}
 
-	stateUpdates := input["state_updates"].(map[string]interface{})
 	for k, v := range updates {
 		stateUpdates[k] = v
 	}

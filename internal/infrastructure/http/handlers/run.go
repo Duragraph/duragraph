@@ -615,6 +615,21 @@ func (h *RunHandler) ResumeRun(c echo.Context) error {
 			// Update thread state with command updates
 			// This is simplified - full implementation would use the checkpoint system
 			if err := h.runService.UpdateStateBeforeResume(c.Request().Context(), runID, threadID, req.Command.Update); err != nil {
+				// Check for domain errors and return appropriate status codes
+				if domainErr, ok := err.(*errors.DomainError); ok {
+					switch domainErr.Code {
+					case "INVALID_STATE", "INVALID_INPUT":
+						return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+							Error:   "invalid_request",
+							Message: err.Error(),
+						})
+					case "NOT_FOUND":
+						return c.JSON(http.StatusNotFound, dto.ErrorResponse{
+							Error:   "not_found",
+							Message: err.Error(),
+						})
+					}
+				}
 				return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
 					Error:   "internal_error",
 					Message: "failed to update state: " + err.Error(),
