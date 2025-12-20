@@ -71,6 +71,29 @@ func (h *RunHandler) CreateRun(c echo.Context) error {
 		})
 	}
 
+	// Check multitask strategy before creating run
+	proceed, err := h.runService.ApplyMultitaskStrategy(c.Request().Context(), threadID, req.MultitaskStrategy)
+	if err != nil {
+		if domainErr, ok := err.(*errors.DomainError); ok && domainErr.Code == "INVALID_STATE" {
+			return c.JSON(http.StatusConflict, dto.ErrorResponse{
+				Error:   "conflict",
+				Message: "another run is already in progress for this thread",
+				Code:    "run_in_progress",
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+	if !proceed {
+		return c.JSON(http.StatusConflict, dto.ErrorResponse{
+			Error:   "conflict",
+			Message: "another run is already in progress for this thread",
+			Code:    "run_in_progress",
+		})
+	}
+
 	// Merge interrupt and stream configuration into input
 	input := req.Input
 	if input == nil {
@@ -86,11 +109,14 @@ func (h *RunHandler) CreateRun(c echo.Context) error {
 		input["stream_mode"] = req.StreamMode
 	}
 
-	// Create run
+	// Create run with config and multitask_strategy
 	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
-		ThreadID:    threadID,
-		AssistantID: req.AssistantID,
-		Input:       input,
+		ThreadID:          threadID,
+		AssistantID:       req.AssistantID,
+		Input:             input,
+		Config:            req.Config,
+		Metadata:          req.Metadata,
+		MultitaskStrategy: req.MultitaskStrategy,
 	})
 
 	if err != nil {
@@ -167,9 +193,12 @@ func (h *RunHandler) CreateStatelessRun(c echo.Context) error {
 	}
 
 	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
-		ThreadID:    threadID,
-		AssistantID: req.AssistantID,
-		Input:       input,
+		ThreadID:          threadID,
+		AssistantID:       req.AssistantID,
+		Input:             input,
+		Config:            req.Config,
+		Metadata:          req.Metadata,
+		MultitaskStrategy: req.MultitaskStrategy,
 	})
 
 	if err != nil {
@@ -281,6 +310,29 @@ func (h *RunHandler) CreateRunWithStream(c echo.Context) error {
 		})
 	}
 
+	// Check multitask strategy before creating run
+	proceed, err := h.runService.ApplyMultitaskStrategy(c.Request().Context(), threadID, req.MultitaskStrategy)
+	if err != nil {
+		if domainErr, ok := err.(*errors.DomainError); ok && domainErr.Code == "INVALID_STATE" {
+			return c.JSON(http.StatusConflict, dto.ErrorResponse{
+				Error:   "conflict",
+				Message: "another run is already in progress for this thread",
+				Code:    "run_in_progress",
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+	if !proceed {
+		return c.JSON(http.StatusConflict, dto.ErrorResponse{
+			Error:   "conflict",
+			Message: "another run is already in progress for this thread",
+			Code:    "run_in_progress",
+		})
+	}
+
 	// Merge interrupt and stream configuration into input
 	input := req.Input
 	if input == nil {
@@ -296,11 +348,14 @@ func (h *RunHandler) CreateRunWithStream(c echo.Context) error {
 		input["stream_mode"] = req.StreamMode
 	}
 
-	// Create run
+	// Create run with config and multitask_strategy
 	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
-		ThreadID:    threadID,
-		AssistantID: req.AssistantID,
-		Input:       input,
+		ThreadID:          threadID,
+		AssistantID:       req.AssistantID,
+		Input:             input,
+		Config:            req.Config,
+		Metadata:          req.Metadata,
+		MultitaskStrategy: req.MultitaskStrategy,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
@@ -496,18 +551,20 @@ func (h *RunHandler) GetRun(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, dto.GetRunResponse{
-		RunID:       runDTO.ID,
-		ThreadID:    runDTO.ThreadID,
-		AssistantID: runDTO.AssistantID,
-		Status:      runDTO.Status,
-		Input:       runDTO.Input,
-		Output:      runDTO.Output,
-		Error:       runDTO.Error,
-		Metadata:    runDTO.Metadata,
-		CreatedAt:   runDTO.CreatedAt,
-		StartedAt:   runDTO.StartedAt,
-		CompletedAt: runDTO.CompletedAt,
-		UpdatedAt:   runDTO.UpdatedAt,
+		RunID:             runDTO.ID,
+		ThreadID:          runDTO.ThreadID,
+		AssistantID:       runDTO.AssistantID,
+		Status:            runDTO.Status,
+		Input:             runDTO.Input,
+		Output:            runDTO.Output,
+		Error:             runDTO.Error,
+		Metadata:          runDTO.Metadata,
+		Config:            runDTO.Config,
+		MultitaskStrategy: runDTO.MultitaskStrategy,
+		CreatedAt:         runDTO.CreatedAt,
+		StartedAt:         runDTO.StartedAt,
+		CompletedAt:       runDTO.CompletedAt,
+		UpdatedAt:         runDTO.UpdatedAt,
 	})
 }
 
@@ -704,11 +761,14 @@ func (h *RunHandler) CreateStatelessRunWithStream(c echo.Context) error {
 		}
 	}
 
-	// Create run
+	// Create run with config and multitask_strategy
 	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
-		ThreadID:    threadID,
-		AssistantID: req.AssistantID,
-		Input:       req.Input,
+		ThreadID:          threadID,
+		AssistantID:       req.AssistantID,
+		Input:             req.Input,
+		Config:            req.Config,
+		Metadata:          req.Metadata,
+		MultitaskStrategy: req.MultitaskStrategy,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
@@ -805,9 +865,12 @@ func (h *RunHandler) CreateBatchRuns(c echo.Context) error {
 		}
 
 		runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
-			ThreadID:    threadID,
-			AssistantID: req.AssistantID,
-			Input:       req.Input,
+			ThreadID:          threadID,
+			AssistantID:       req.AssistantID,
+			Input:             req.Input,
+			Config:            req.Config,
+			Metadata:          req.Metadata,
+			MultitaskStrategy: req.MultitaskStrategy,
 		})
 		if err != nil {
 			responses = append(responses, dto.CreateRunResponse{

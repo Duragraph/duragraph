@@ -19,8 +19,9 @@ const (
 
 // Engine is the graph execution engine
 type Engine struct {
-	eventBus *eventbus.EventBus
-	mu       sync.RWMutex
+	eventBus  *eventbus.EventBus
+	graphRepo workflow.GraphRepository
+	mu        sync.RWMutex
 }
 
 // NewEngine creates a new graph execution engine
@@ -28,6 +29,21 @@ func NewEngine(eventBus *eventbus.EventBus) *Engine {
 	return &Engine{
 		eventBus: eventBus,
 	}
+}
+
+// NewEngineWithGraphRepo creates a new graph execution engine with graph repository for subgraph support
+func NewEngineWithGraphRepo(eventBus *eventbus.EventBus, graphRepo workflow.GraphRepository) *Engine {
+	return &Engine{
+		eventBus:  eventBus,
+		graphRepo: graphRepo,
+	}
+}
+
+// SetGraphRepository sets the graph repository for subgraph execution
+func (e *Engine) SetGraphRepository(graphRepo workflow.GraphRepository) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.graphRepo = graphRepo
 }
 
 // Execute executes a graph and returns the final output
@@ -39,6 +55,9 @@ func (e *Engine) Execute(ctx context.Context, runID string, graph *workflow.Grap
 	for k, v := range input {
 		state.UpdateGlobalState(k, v)
 	}
+
+	// Set up subgraph callback for nested execution
+	state.SetSubgraphCallback(e.createSubgraphCallback(ctx, runID, eventBus))
 
 	// Set up streaming callback if "messages" stream mode is requested
 	// This allows LLM nodes to emit token-by-token streaming events
@@ -509,4 +528,128 @@ func containsString(slice []string, str string) bool {
 		}
 	}
 	return false
+}
+
+// createSubgraphCallback creates a callback for executing subgraphs
+func (e *Engine) createSubgraphCallback(ctx context.Context, runID string, eventBus *eventbus.EventBus) execution.SubgraphCallback {
+	return func(graphID string, inlineGraph map[string]interface{}, input map[string]interface{}) (map[string]interface{}, error) {
+		var subgraph *workflow.Graph
+		var err error
+
+		if graphID != "" {
+			// Load subgraph from repository
+			e.mu.RLock()
+			graphRepo := e.graphRepo
+			e.mu.RUnlock()
+
+			if graphRepo == nil {
+				return nil, errors.InvalidInput("subgraph", "graph repository not configured for subgraph execution")
+			}
+
+			subgraph, err = graphRepo.FindByID(ctx, graphID)
+			if err != nil {
+				return nil, errors.NotFound("graph", graphID)
+			}
+		} else if inlineGraph != nil {
+			// Build subgraph from inline definition
+			subgraph, err = e.buildGraphFromInline(inlineGraph)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, errors.InvalidInput("subgraph", "either graph_id or inline graph is required")
+		}
+
+		// Emit debug event for subgraph start
+		streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+			fmt.Sprintf("Starting subgraph execution: %s", subgraph.Name()),
+			map[string]interface{}{
+				"subgraph_id":   subgraph.ID(),
+				"subgraph_name": subgraph.Name(),
+			})
+
+		// Execute subgraph recursively
+		output, err := e.Execute(ctx, runID, subgraph, input, eventBus)
+		if err != nil {
+			streaming.EmitDebugEvent(eventBus, ctx, runID, "error",
+				fmt.Sprintf("Subgraph execution failed: %s", err.Error()),
+				map[string]interface{}{
+					"subgraph_id": subgraph.ID(),
+					"error":       err.Error(),
+				})
+			return nil, err
+		}
+
+		// Emit debug event for subgraph completion
+		streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+			fmt.Sprintf("Completed subgraph execution: %s", subgraph.Name()),
+			map[string]interface{}{
+				"subgraph_id": subgraph.ID(),
+				"output_keys": getMapKeys(output),
+			})
+
+		return output, nil
+	}
+}
+
+// buildGraphFromInline builds a Graph from an inline definition
+func (e *Engine) buildGraphFromInline(inlineGraph map[string]interface{}) (*workflow.Graph, error) {
+	// Extract nodes
+	var nodes []workflow.Node
+	if nodesRaw, ok := inlineGraph["nodes"].([]interface{}); ok {
+		for _, nodeRaw := range nodesRaw {
+			if nodeMap, ok := nodeRaw.(map[string]interface{}); ok {
+				node := workflow.Node{
+					ID:   getString(nodeMap, "id"),
+					Type: workflow.NodeType(getString(nodeMap, "type")),
+				}
+				if config, ok := nodeMap["config"].(map[string]interface{}); ok {
+					node.Config = config
+				}
+				nodes = append(nodes, node)
+			}
+		}
+	}
+
+	// Extract edges
+	var edges []workflow.Edge
+	if edgesRaw, ok := inlineGraph["edges"].([]interface{}); ok {
+		for _, edgeRaw := range edgesRaw {
+			if edgeMap, ok := edgeRaw.(map[string]interface{}); ok {
+				edge := workflow.Edge{
+					ID:     getString(edgeMap, "id"),
+					Source: getString(edgeMap, "source"),
+					Target: getString(edgeMap, "target"),
+				}
+				if condition, ok := edgeMap["condition"].(map[string]interface{}); ok {
+					edge.Condition = condition
+				}
+				edges = append(edges, edge)
+			}
+		}
+	}
+
+	// Create graph with a generated assistant ID for inline graphs
+	name := getString(inlineGraph, "name")
+	if name == "" {
+		name = "inline-subgraph"
+	}
+
+	return workflow.NewGraph(
+		"inline",
+		name,
+		getString(inlineGraph, "version"),
+		getString(inlineGraph, "description"),
+		nodes,
+		edges,
+		nil,
+	)
+}
+
+// getString safely extracts a string from a map
+func getString(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
 }

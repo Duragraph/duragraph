@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"fmt"
 )
 
 // NodeExecutor is the interface for executing different node types
@@ -100,18 +101,113 @@ func (e *HumanNodeExecutor) Execute(ctx context.Context, nodeID string, nodeType
 }
 
 // SubgraphNodeExecutor executes subgraph nodes
-type SubgraphNodeExecutor struct {
-	// Would have reference to executor for recursive execution
-}
+type SubgraphNodeExecutor struct{}
+
+const maxSubgraphDepth = 10 // Maximum nesting depth for subgraphs
 
 func (e *SubgraphNodeExecutor) Execute(ctx context.Context, nodeID string, nodeType string, config map[string]interface{}, state *ExecutionState) (map[string]interface{}, error) {
-	// TODO: Implement subgraph execution
-	// For now, return a placeholder
-	output := map[string]interface{}{
-		"subgraph_result": "Subgraph execution placeholder",
+	// Check subgraph depth to prevent infinite recursion
+	if state.SubgraphDepth >= maxSubgraphDepth {
+		return nil, &SubgraphDepthError{Depth: state.SubgraphDepth, MaxDepth: maxSubgraphDepth}
 	}
 
-	return output, nil
+	// Check if subgraph callback is set
+	if state.SubgraphExec == nil {
+		return nil, &SubgraphConfigError{Message: "subgraph execution not configured"}
+	}
+
+	// Extract subgraph configuration
+	graphID, _ := config["graph_id"].(string)
+	inlineGraph, _ := config["graph"].(map[string]interface{})
+
+	if graphID == "" && inlineGraph == nil {
+		return nil, &SubgraphConfigError{Message: "subgraph node requires 'graph_id' or 'graph' in config"}
+	}
+
+	// Extract input mapping - which keys to pass to subgraph
+	var inputKeys []string
+	if inputs, ok := config["inputs"].([]interface{}); ok {
+		for _, input := range inputs {
+			if key, ok := input.(string); ok {
+				inputKeys = append(inputKeys, key)
+			}
+		}
+	}
+
+	// Prepare input for subgraph
+	subgraphInput := make(map[string]interface{})
+	if len(inputKeys) == 0 {
+		// Pass all state to subgraph
+		for k, v := range state.GlobalState {
+			subgraphInput[k] = v
+		}
+	} else {
+		// Pass only specified keys
+		for _, key := range inputKeys {
+			if v, ok := state.GlobalState[key]; ok {
+				subgraphInput[key] = v
+			}
+		}
+	}
+
+	// Execute subgraph
+	output, err := state.ExecuteSubgraph(graphID, inlineGraph, subgraphInput)
+	if err != nil {
+		return nil, err
+	}
+
+	// Handle interrupt from subgraph
+	if requiresAction, ok := output["requires_action"].(bool); ok && requiresAction {
+		// Propagate interrupt to parent
+		return output, nil
+	}
+
+	// Extract output mapping - which keys to return from subgraph
+	var outputKeys []string
+	if outputs, ok := config["outputs"].([]interface{}); ok {
+		for _, out := range outputs {
+			if key, ok := out.(string); ok {
+				outputKeys = append(outputKeys, key)
+			}
+		}
+	}
+
+	// Apply output mapping
+	result := make(map[string]interface{})
+	if len(outputKeys) == 0 {
+		// Return all output from subgraph
+		for k, v := range output {
+			result[k] = v
+		}
+	} else {
+		// Return only specified keys
+		for _, key := range outputKeys {
+			if v, ok := output[key]; ok {
+				result[key] = v
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// SubgraphDepthError indicates the subgraph nesting depth was exceeded
+type SubgraphDepthError struct {
+	Depth    int
+	MaxDepth int
+}
+
+func (e *SubgraphDepthError) Error() string {
+	return fmt.Sprintf("subgraph depth exceeded: %d > %d", e.Depth, e.MaxDepth)
+}
+
+// SubgraphConfigError indicates a configuration error in the subgraph node
+type SubgraphConfigError struct {
+	Message string
+}
+
+func (e *SubgraphConfigError) Error() string {
+	return e.Message
 }
 
 // GetExecutorForNodeType returns the appropriate executor for a node type

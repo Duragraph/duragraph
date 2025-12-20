@@ -17,12 +17,14 @@ const (
 
 // RunCreated event
 type RunCreated struct {
-	RunID       string                 `json:"run_id"`
-	ThreadID    string                 `json:"thread_id"`
-	AssistantID string                 `json:"assistant_id"`
-	Input       map[string]interface{} `json:"input,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	OccurredAt  time.Time              `json:"occurred_at"`
+	RunID             string                 `json:"run_id"`
+	ThreadID          string                 `json:"thread_id"`
+	AssistantID       string                 `json:"assistant_id"`
+	Input             map[string]interface{} `json:"input,omitempty"`
+	Config            map[string]interface{} `json:"config,omitempty"`
+	Metadata          map[string]interface{} `json:"metadata,omitempty"`
+	MultitaskStrategy string                 `json:"multitask_strategy,omitempty"`
+	OccurredAt        time.Time              `json:"occurred_at"`
 }
 
 func (e RunCreated) EventType() string     { return EventTypeRunCreated }
