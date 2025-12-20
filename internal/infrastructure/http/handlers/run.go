@@ -70,11 +70,26 @@ func (h *RunHandler) CreateRun(c echo.Context) error {
 		})
 	}
 
+	// Merge interrupt and stream configuration into input
+	input := req.Input
+	if input == nil {
+		input = make(map[string]interface{})
+	}
+	if len(req.InterruptBefore) > 0 {
+		input["interrupt_before"] = req.InterruptBefore
+	}
+	if len(req.InterruptAfter) > 0 {
+		input["interrupt_after"] = req.InterruptAfter
+	}
+	if len(req.StreamMode) > 0 {
+		input["stream_mode"] = req.StreamMode
+	}
+
 	// Create run
 	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
 		ThreadID:    threadID,
 		AssistantID: req.AssistantID,
-		Input:       req.Input,
+		Input:       input,
 	})
 
 	if err != nil {
@@ -135,10 +150,25 @@ func (h *RunHandler) CreateStatelessRun(c echo.Context) error {
 		}
 	}
 
+	// Merge interrupt and stream configuration into input
+	input := req.Input
+	if input == nil {
+		input = make(map[string]interface{})
+	}
+	if len(req.InterruptBefore) > 0 {
+		input["interrupt_before"] = req.InterruptBefore
+	}
+	if len(req.InterruptAfter) > 0 {
+		input["interrupt_after"] = req.InterruptAfter
+	}
+	if len(req.StreamMode) > 0 {
+		input["stream_mode"] = req.StreamMode
+	}
+
 	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
 		ThreadID:    threadID,
 		AssistantID: req.AssistantID,
-		Input:       req.Input,
+		Input:       input,
 	})
 
 	if err != nil {
@@ -250,11 +280,26 @@ func (h *RunHandler) CreateRunWithStream(c echo.Context) error {
 		})
 	}
 
+	// Merge interrupt and stream configuration into input
+	input := req.Input
+	if input == nil {
+		input = make(map[string]interface{})
+	}
+	if len(req.InterruptBefore) > 0 {
+		input["interrupt_before"] = req.InterruptBefore
+	}
+	if len(req.InterruptAfter) > 0 {
+		input["interrupt_after"] = req.InterruptAfter
+	}
+	if len(req.StreamMode) > 0 {
+		input["stream_mode"] = req.StreamMode
+	}
+
 	// Create run
 	runID, err := h.createRunHandler.Handle(c.Request().Context(), command.CreateRun{
 		ThreadID:    threadID,
 		AssistantID: req.AssistantID,
-		Input:       req.Input,
+		Input:       input,
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{

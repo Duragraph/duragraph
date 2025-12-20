@@ -8,6 +8,7 @@ import (
 
 	"github.com/duragraph/duragraph/internal/domain/execution"
 	"github.com/duragraph/duragraph/internal/domain/workflow"
+	"github.com/duragraph/duragraph/internal/infrastructure/streaming"
 	"github.com/duragraph/duragraph/internal/pkg/errors"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 )
@@ -37,6 +38,24 @@ func (e *Engine) Execute(ctx context.Context, runID string, graph *workflow.Grap
 	// Set initial input in global state
 	for k, v := range input {
 		state.UpdateGlobalState(k, v)
+	}
+
+	// Set up streaming callback if "messages" stream mode is requested
+	// This allows LLM nodes to emit token-by-token streaming events
+	if streamMode, ok := input["stream_mode"].(string); ok && (streamMode == "messages" || streamMode == "messages-tuple") {
+		state.SetStreamingCallback(func(content, role, id string) error {
+			return streaming.EmitMessageChunk(eventBus, ctx, runID, content, role, id)
+		})
+	} else if streamModes, ok := input["stream_mode"].([]interface{}); ok {
+		// Check if "messages" is in the list of modes
+		for _, mode := range streamModes {
+			if modeStr, ok := mode.(string); ok && (modeStr == "messages" || modeStr == "messages-tuple") {
+				state.SetStreamingCallback(func(content, role, id string) error {
+					return streaming.EmitMessageChunk(eventBus, ctx, runID, content, role, id)
+				})
+				break
+			}
+		}
 	}
 
 	// Build execution plan
@@ -113,6 +132,10 @@ func (e *Engine) executePlan(ctx context.Context, runID string, plan *ExecutionP
 
 	visited := make(map[string]int) // Track visit count for cycle detection
 
+	// Extract interrupt configuration from global state (set from input)
+	interruptBefore := extractStringList(state.GlobalState, "interrupt_before")
+	interruptAfter := extractStringList(state.GlobalState, "interrupt_after")
+
 	for len(queue) > 0 {
 		// Check context cancellation
 		select {
@@ -149,6 +172,25 @@ func (e *Engine) executePlan(ctx context.Context, runID string, plan *ExecutionP
 			continue
 		}
 
+		// Check for interrupt_before
+		if containsString(interruptBefore, nodeID) && !state.IsNodeCompleted(nodeID) {
+			// Emit debug event for interrupt
+			streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+				fmt.Sprintf("Interrupt before node %s", nodeID),
+				map[string]interface{}{
+					"node_id":        nodeID,
+					"interrupt_type": "before",
+				})
+
+			// Return with interrupt signal
+			return map[string]interface{}{
+				"requires_action": true,
+				"node_id":         nodeID,
+				"reason":          fmt.Sprintf("interrupt_before: %s", nodeID),
+				"interrupt_type":  "before",
+			}, nil
+		}
+
 		// Execute node
 		output, err := e.executeNode(ctx, runID, nodeID, node, state, eventBus)
 		if err != nil {
@@ -167,6 +209,27 @@ func (e *Engine) executePlan(ctx context.Context, runID string, plan *ExecutionP
 
 		// Mark node as completed
 		state.MarkNodeCompleted(nodeID, output)
+
+		// Check for interrupt_after
+		if containsString(interruptAfter, nodeID) {
+			// Emit debug event for interrupt
+			streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+				fmt.Sprintf("Interrupt after node %s", nodeID),
+				map[string]interface{}{
+					"node_id":        nodeID,
+					"interrupt_type": "after",
+					"output":         output,
+				})
+
+			// Return with interrupt signal
+			return map[string]interface{}{
+				"requires_action": true,
+				"node_id":         nodeID,
+				"reason":          fmt.Sprintf("interrupt_after: %s", nodeID),
+				"interrupt_type":  "after",
+				"output":          output,
+			}, nil
+		}
 
 		// Check if this is an end node
 		if node.Type == workflow.NodeTypeEnd {
@@ -203,6 +266,15 @@ func (e *Engine) executePlan(ctx context.Context, runID string, plan *ExecutionP
 func (e *Engine) executeNode(ctx context.Context, runID, nodeID string, node workflow.Node, state *execution.ExecutionState, eventBus *eventbus.EventBus) (map[string]interface{}, error) {
 	startTime := time.Now()
 
+	// Emit debug event for node start
+	streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+		fmt.Sprintf("Starting node %s (%s)", nodeID, node.Type),
+		map[string]interface{}{
+			"node_id":   nodeID,
+			"node_type": string(node.Type),
+			"config":    node.Config,
+		})
+
 	// Publish node started event
 	eventBus.Publish(ctx, execution.NodeStarted{
 		RunID:      runID,
@@ -215,9 +287,22 @@ func (e *Engine) executeNode(ctx context.Context, runID, nodeID string, node wor
 	// Get executor for node type
 	executor := execution.GetExecutorForNodeType(string(node.Type))
 
+	// Emit debug event for executor selection
+	streaming.EmitDebugEvent(eventBus, ctx, runID, "debug",
+		fmt.Sprintf("Using executor for node type: %s", node.Type),
+		nil)
+
 	// Execute node
 	output, err := executor.Execute(ctx, nodeID, string(node.Type), node.Config, state)
 	if err != nil {
+		// Emit debug event for failure
+		streaming.EmitDebugEvent(eventBus, ctx, runID, "error",
+			fmt.Sprintf("Node %s failed: %s", nodeID, err.Error()),
+			map[string]interface{}{
+				"node_id": nodeID,
+				"error":   err.Error(),
+			})
+
 		// Publish node failed event
 		eventBus.Publish(ctx, execution.NodeFailed{
 			RunID:      runID,
@@ -232,10 +317,37 @@ func (e *Engine) executeNode(ctx context.Context, runID, nodeID string, node wor
 
 	duration := time.Since(startTime)
 
+	// Calculate state delta for updates streaming mode
+	previousState := make(map[string]interface{})
+	for k, v := range state.GlobalState {
+		previousState[k] = v
+	}
+
 	// Update global state with output
 	for k, v := range output {
 		state.UpdateGlobalState(k, v)
 	}
+
+	// Emit updates event with delta (only changed keys)
+	delta := make(map[string]interface{})
+	for k, v := range output {
+		delta[k] = v
+	}
+	if len(delta) > 0 {
+		streaming.EmitUpdatesEvent(eventBus, ctx, runID, nodeID, delta)
+	}
+
+	// Emit values event with full state
+	streaming.EmitValuesEvent(eventBus, ctx, runID, state.GlobalState)
+
+	// Emit debug event for completion
+	streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+		fmt.Sprintf("Completed node %s in %dms", nodeID, duration.Milliseconds()),
+		map[string]interface{}{
+			"node_id":     nodeID,
+			"duration_ms": duration.Milliseconds(),
+			"output_keys": getMapKeys(output),
+		})
 
 	// Publish node completed event
 	eventBus.Publish(ctx, execution.NodeCompleted{
@@ -248,6 +360,15 @@ func (e *Engine) executeNode(ctx context.Context, runID, nodeID string, node wor
 	})
 
 	return output, nil
+}
+
+// getMapKeys returns the keys of a map
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // areDependenciesSatisfied checks if all dependencies for a node are satisfied
@@ -358,4 +479,34 @@ func evaluateCondition(condition map[string]interface{}, output map[string]inter
 		}
 	}
 	return true
+}
+
+// extractStringList extracts a list of strings from a map value
+func extractStringList(m map[string]interface{}, key string) []string {
+	result := make([]string, 0)
+
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case []string:
+			return v
+		case []interface{}:
+			for _, item := range v {
+				if str, ok := item.(string); ok {
+					result = append(result, str)
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// containsString checks if a string slice contains a specific string
+func containsString(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

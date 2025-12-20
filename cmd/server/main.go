@@ -22,6 +22,7 @@ import (
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
 	"github.com/duragraph/duragraph/internal/infrastructure/monitoring"
 	"github.com/duragraph/duragraph/internal/infrastructure/persistence/postgres"
+	"github.com/duragraph/duragraph/internal/infrastructure/streaming"
 	"github.com/duragraph/duragraph/internal/infrastructure/tools"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 	"github.com/labstack/echo/v4"
@@ -112,6 +113,12 @@ func main() {
 	}()
 
 	fmt.Println("✅ Cleanup worker started")
+
+	// Initialize streaming bridge (connects eventBus to NATS for real-time streaming)
+	streamingBridge := streaming.NewStreamingBridge(eventBus, publisher)
+	streamingBridge.Start()
+
+	fmt.Println("✅ Streaming bridge started")
 
 	// Initialize Prometheus metrics
 	metrics := monitoring.NewMetrics("duragraph")
@@ -355,4 +362,5 @@ func main() {
 	// Suppress unused variable warnings for optional components
 	_ = llmExecutor
 	_ = toolExecutor
+	_ = streamingBridge
 }
