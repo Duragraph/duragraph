@@ -9,6 +9,7 @@ import (
 	"github.com/duragraph/duragraph/internal/application/query"
 	"github.com/duragraph/duragraph/internal/application/service"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/dto"
+	"github.com/duragraph/duragraph/internal/pkg/errors"
 	"github.com/labstack/echo/v4"
 )
 
@@ -443,6 +444,21 @@ func (h *RunHandler) DeleteRun(c echo.Context) error {
 		RunID: runID,
 	})
 	if err != nil {
+		// Check for not found error
+		if domainErr, ok := err.(*errors.DomainError); ok {
+			if domainErr.Code == "NOT_FOUND" {
+				return c.JSON(http.StatusNotFound, dto.ErrorResponse{
+					Error:   "not_found",
+					Message: "run not found",
+				})
+			}
+			if domainErr.Code == "INVALID_STATE" {
+				return c.JSON(http.StatusConflict, dto.ErrorResponse{
+					Error:   "invalid_state",
+					Message: err.Error(),
+				})
+			}
+		}
 		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
 			Error:   "invalid_request",
 			Message: err.Error(),
