@@ -6,14 +6,17 @@ import "time"
 
 // CreateRunRequest represents the request to create a run
 type CreateRunRequest struct {
-	AssistantID  string                 `json:"assistant_id"`
-	ThreadID     string                 `json:"thread_id,omitempty"`
-	Input        map[string]interface{} `json:"input,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	Config       map[string]interface{} `json:"config,omitempty"`
-	Kwargs       map[string]interface{} `json:"kwargs,omitempty"`
-	StreamMode   []string               `json:"stream_mode,omitempty"`
-	OnCompletion string                 `json:"on_completion,omitempty"`
+	AssistantID     string                 `json:"assistant_id"`
+	ThreadID        string                 `json:"thread_id,omitempty"`
+	Input           map[string]interface{} `json:"input,omitempty"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	Config          map[string]interface{} `json:"config,omitempty"`
+	Kwargs          map[string]interface{} `json:"kwargs,omitempty"`
+	StreamMode      []string               `json:"stream_mode,omitempty"`
+	OnCompletion    string                 `json:"on_completion,omitempty"`
+	InterruptBefore []string               `json:"interrupt_before,omitempty"` // Node IDs to interrupt before execution
+	InterruptAfter  []string               `json:"interrupt_after,omitempty"`  // Node IDs to interrupt after execution
+	Webhook         string                 `json:"webhook,omitempty"`          // Webhook URL for completion notification
 }
 
 // CreateRunResponse represents the response from creating a run

@@ -65,6 +65,12 @@ func (e *LLMExecutor) Execute(ctx context.Context, nodeID string, nodeType strin
 	// Extract tools if provided
 	tools := e.extractTools(config)
 
+	// Check if streaming is enabled
+	streamEnabled := state.StreamEnabled
+	if streamFlag, ok := config["stream"].(bool); ok {
+		streamEnabled = streamFlag && state.StreamEnabled
+	}
+
 	// Build request
 	req := llm.CompletionRequest{
 		Model:       model,
@@ -72,10 +78,22 @@ func (e *LLMExecutor) Execute(ctx context.Context, nodeID string, nodeType strin
 		Temperature: temperature,
 		MaxTokens:   maxTokens,
 		Tools:       tools,
+		Stream:      streamEnabled,
 	}
 
-	// Call LLM
-	resp, err := client.Complete(ctx, req)
+	var resp *llm.CompletionResponse
+	var err error
+
+	// Call LLM with or without streaming
+	if streamEnabled && state.MessageChunk != nil {
+		// Use streaming - emit chunks via callback
+		resp, err = client.CompleteStream(ctx, req, func(chunk llm.StreamChunk) error {
+			return state.EmitMessageChunk(chunk.Content, chunk.Role, chunk.ID)
+		})
+	} else {
+		// Non-streaming call
+		resp, err = client.Complete(ctx, req)
+	}
 	if err != nil {
 		return nil, errors.Internal("LLM call failed", err)
 	}

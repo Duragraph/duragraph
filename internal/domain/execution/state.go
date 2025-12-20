@@ -1,5 +1,8 @@
 package execution
 
+// MessageChunkCallback is called for each LLM token chunk during streaming
+type MessageChunkCallback func(content, role, id string) error
+
 // ExecutionState represents the state of a graph execution
 type ExecutionState struct {
 	RunID          string
@@ -8,6 +11,8 @@ type ExecutionState struct {
 	NodeOutputs    map[string]map[string]interface{} // Node ID -> Output
 	GlobalState    map[string]interface{}            // Shared state across nodes
 	Iteration      int                               // Current iteration for loops
+	StreamEnabled  bool                              // Whether streaming is enabled
+	MessageChunk   MessageChunkCallback              // Callback for LLM token streaming
 }
 
 // NewExecutionState creates a new execution state
@@ -66,6 +71,20 @@ func (s *ExecutionState) IncrementIteration() {
 	s.Iteration++
 }
 
+// SetStreamingCallback sets the streaming callback for LLM token streaming
+func (s *ExecutionState) SetStreamingCallback(callback MessageChunkCallback) {
+	s.StreamEnabled = true
+	s.MessageChunk = callback
+}
+
+// EmitMessageChunk emits a message chunk if streaming is enabled
+func (s *ExecutionState) EmitMessageChunk(content, role, id string) error {
+	if s.StreamEnabled && s.MessageChunk != nil {
+		return s.MessageChunk(content, role, id)
+	}
+	return nil
+}
+
 // Clone creates a deep copy of the state (for subgraphs)
 func (s *ExecutionState) Clone() *ExecutionState {
 	clone := &ExecutionState{
@@ -75,6 +94,8 @@ func (s *ExecutionState) Clone() *ExecutionState {
 		NodeOutputs:    make(map[string]map[string]interface{}),
 		GlobalState:    make(map[string]interface{}),
 		Iteration:      s.Iteration,
+		StreamEnabled:  s.StreamEnabled,
+		MessageChunk:   s.MessageChunk,
 	}
 
 	copy(clone.CurrentNodes, s.CurrentNodes)

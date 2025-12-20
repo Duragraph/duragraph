@@ -19,17 +19,17 @@ Enable reliable, observable, and maintainable AI pipelines that feel natural for
 
 Get started with DuraGraph in minutes:
 
-**📖 [View Documentation](https://duragraph.dev/docs)** | **🎓 [Quick Start Guide](https://duragraph.dev/docs/getting-started)**
+**📖 [View Documentation](https://docs.duragraph.ai)** | **🎓 [Quick Start Guide](https://docs.duragraph.ai/getting-started)**
 
 ### One-Click Deploy
 
 Deploy DuraGraph to your preferred cloud platform:
 
-[![Deploy on Fly.io](https://fly.io/static/images/fly-logo.svg)](https://fly.io/docs)
+[![Deploy on Fly.io](https://img.shields.io/badge/Deploy%20on-Fly.io-7B3FE4?style=for-the-badge&logo=fly.io&logoColor=white)](https://fly.io/docs/getting-started/)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template)
 [![Deploy on DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new)
-[![Deploy on Scaleway](https://www.scaleway.com/en/docs/_astro/logo-scaleway.svg)](https://www.scaleway.com/en/docs/)
+[![Deploy on Scaleway](https://img.shields.io/badge/Deploy%20on-Scaleway-4F0599?style=for-the-badge&logo=scaleway&logoColor=white)](https://www.scaleway.com/en/docs/)
 
 ### Local Development
 
@@ -48,7 +48,7 @@ task up
 
 Visit **http://localhost:8080** for the API and **http://localhost:5173** for the dashboard.
 
-**👉 [Full Setup Guide](https://duragraph.dev/docs/getting-started)**
+**👉 [Full Setup Guide](https://docs.duragraph.ai/getting-started)**
 
 ## 🏗️ Architecture
 
@@ -69,7 +69,7 @@ flowchart LR
   engine --> eventstore
 ```
 
-**🔧 [Architecture Details](https://duragraph.dev/docs/architecture)**
+**🔧 [Architecture Details](https://docs.duragraph.ai/architecture)**
 
 ## ⚡ Key Features
 
@@ -83,12 +83,12 @@ flowchart LR
 
 ## 📚 Documentation
 
-- **[Getting Started](https://duragraph.dev/docs/getting-started)** - Installation and basic usage
-- **[API Reference](https://duragraph.dev/docs/api)** - Complete API documentation
-- **[Architecture](https://duragraph.dev/docs/architecture)** - System design and components
-- **[Development Guide](https://duragraph.dev/docs/development)** - Contributing and development
-- **[Deployment](https://duragraph.dev/docs/deployment)** - Production deployment guides
-- **[Operations](https://duragraph.dev/docs/ops)** - Monitoring and maintenance
+- **[Getting Started](https://docs.duragraph.ai/getting-started)** - Installation and basic usage
+- **[API Reference](https://docs.duragraph.ai/api)** - Complete API documentation
+- **[Architecture](https://docs.duragraph.ai/architecture)** - System design and components
+- **[Development Guide](https://docs.duragraph.ai/development)** - Contributing and development
+- **[Deployment](https://docs.duragraph.ai/deployment)** - Production deployment guides
+- **[Operations](https://docs.duragraph.ai/ops)** - Monitoring and maintenance
 
 ## 🔧 Basic Usage
 
@@ -107,7 +107,7 @@ run = await client.runs.create(
 )
 ```
 
-**📖 [Full API Documentation](https://duragraph.dev/docs/api)**
+**📖 [Full API Documentation](https://docs.duragraph.ai/api)**
 
 ## 🔌 LangGraph-Compatible API Endpoints
 
@@ -194,7 +194,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 4. Run tests: `task test`
 5. Open a Pull Request
 
-**🛠️ [Development Guide](https://duragraph.dev/docs/development)**
+**🛠️ [Development Guide](https://docs.duragraph.ai/development)**
 
 ## 📄 License
 
@@ -202,7 +202,7 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 ## 🙋 Support
 
-- **Documentation**: [duragraph.dev/docs](https://duragraph.dev/docs)
+- **Documentation**: [docs.duragraph.ai](https://docs.duragraph.ai)
 - **Issues**: [GitHub Issues](https://github.com/Duragraph/duragraph/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/Duragraph/duragraph/discussions)
 
@@ -222,10 +222,10 @@ Licensed under the [Apache License 2.0](LICENSE).
 - [ ] Multi-tenant support
 - [ ] Workflow versioning and migration tools
 
-**📋 [Full Roadmap](https://duragraph.dev/docs/roadmap)**
+**📋 [Full Roadmap](https://docs.duragraph.ai/roadmap)**
 
 ---
 
 **DuraGraph** - Bringing enterprise-grade AI workflow orchestration to everyone.
 
-**[Get Started](https://duragraph.dev/docs/getting-started)** · **[Documentation](https://duragraph.dev/docs)** · **[Community](https://github.com/Duragraph/duragraph/discussions)**
+**[Get Started](https://docs.duragraph.ai/getting-started)** · **[Documentation](https://docs.duragraph.ai)** · **[Community](https://github.com/Duragraph/duragraph/discussions)**

@@ -3,6 +3,8 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -92,6 +94,105 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 	}
 
 	return response, nil
+}
+
+// CompleteStream sends a streaming chat completion request to OpenAI
+func (c *OpenAIClient) CompleteStream(ctx context.Context, req CompletionRequest, callback StreamCallback) (*CompletionResponse, error) {
+	// Convert messages
+	messages := make([]openai.ChatCompletionMessage, len(req.Messages))
+	for i, msg := range req.Messages {
+		messages[i] = openai.ChatCompletionMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		}
+	}
+
+	// Build request with streaming enabled
+	chatReq := openai.ChatCompletionRequest{
+		Model:       req.Model,
+		Messages:    messages,
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
+		Stream:      true,
+	}
+
+	// Add tools if provided
+	if len(req.Tools) > 0 {
+		tools := make([]openai.Tool, len(req.Tools))
+		for i, tool := range req.Tools {
+			tools[i] = openai.Tool{
+				Type: openai.ToolTypeFunction,
+				Function: &openai.FunctionDefinition{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Parameters:  tool.Parameters,
+				},
+			}
+		}
+		chatReq.Tools = tools
+	}
+
+	// Create stream
+	stream, err := c.client.CreateChatCompletionStream(ctx, chatReq)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+
+	// Accumulate full response
+	var fullContent string
+	var responseID string
+	var finishReason string
+
+	// Process stream chunks
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		// Update response ID
+		if responseID == "" {
+			responseID = chunk.ID
+		}
+
+		// Process choices
+		if len(chunk.Choices) > 0 {
+			choice := chunk.Choices[0]
+			content := choice.Delta.Content
+
+			// Check for finish reason
+			if choice.FinishReason != "" {
+				finishReason = string(choice.FinishReason)
+			}
+
+			// Accumulate content
+			fullContent += content
+
+			// Call callback with chunk
+			if content != "" || finishReason != "" {
+				streamChunk := StreamChunk{
+					Content:      content,
+					Role:         "assistant",
+					FinishReason: finishReason,
+					ID:           responseID,
+				}
+
+				if err := callback(streamChunk); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	// Return final aggregated response
+	return &CompletionResponse{
+		Content: fullContent,
+		Model:   req.Model,
+	}, nil
 }
 
 // Name returns the provider name

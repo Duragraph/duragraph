@@ -40,6 +40,24 @@ func (e *Engine) Execute(ctx context.Context, runID string, graph *workflow.Grap
 		state.UpdateGlobalState(k, v)
 	}
 
+	// Set up streaming callback if "messages" stream mode is requested
+	// This allows LLM nodes to emit token-by-token streaming events
+	if streamMode, ok := input["stream_mode"].(string); ok && (streamMode == "messages" || streamMode == "messages-tuple") {
+		state.SetStreamingCallback(func(content, role, id string) error {
+			return streaming.EmitMessageChunk(eventBus, ctx, runID, content, role, id)
+		})
+	} else if streamModes, ok := input["stream_mode"].([]interface{}); ok {
+		// Check if "messages" is in the list of modes
+		for _, mode := range streamModes {
+			if modeStr, ok := mode.(string); ok && (modeStr == "messages" || modeStr == "messages-tuple") {
+				state.SetStreamingCallback(func(content, role, id string) error {
+					return streaming.EmitMessageChunk(eventBus, ctx, runID, content, role, id)
+				})
+				break
+			}
+		}
+	}
+
 	// Build execution plan
 	plan, err := e.buildExecutionPlan(graph)
 	if err != nil {
@@ -114,6 +132,10 @@ func (e *Engine) executePlan(ctx context.Context, runID string, plan *ExecutionP
 
 	visited := make(map[string]int) // Track visit count for cycle detection
 
+	// Extract interrupt configuration from global state (set from input)
+	interruptBefore := extractStringList(state.GlobalState, "interrupt_before")
+	interruptAfter := extractStringList(state.GlobalState, "interrupt_after")
+
 	for len(queue) > 0 {
 		// Check context cancellation
 		select {
@@ -150,6 +172,25 @@ func (e *Engine) executePlan(ctx context.Context, runID string, plan *ExecutionP
 			continue
 		}
 
+		// Check for interrupt_before
+		if containsString(interruptBefore, nodeID) && !state.IsNodeCompleted(nodeID) {
+			// Emit debug event for interrupt
+			streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+				fmt.Sprintf("Interrupt before node %s", nodeID),
+				map[string]interface{}{
+					"node_id":        nodeID,
+					"interrupt_type": "before",
+				})
+
+			// Return with interrupt signal
+			return map[string]interface{}{
+				"requires_action": true,
+				"node_id":         nodeID,
+				"reason":          fmt.Sprintf("interrupt_before: %s", nodeID),
+				"interrupt_type":  "before",
+			}, nil
+		}
+
 		// Execute node
 		output, err := e.executeNode(ctx, runID, nodeID, node, state, eventBus)
 		if err != nil {
@@ -168,6 +209,27 @@ func (e *Engine) executePlan(ctx context.Context, runID string, plan *ExecutionP
 
 		// Mark node as completed
 		state.MarkNodeCompleted(nodeID, output)
+
+		// Check for interrupt_after
+		if containsString(interruptAfter, nodeID) {
+			// Emit debug event for interrupt
+			streaming.EmitDebugEvent(eventBus, ctx, runID, "info",
+				fmt.Sprintf("Interrupt after node %s", nodeID),
+				map[string]interface{}{
+					"node_id":        nodeID,
+					"interrupt_type": "after",
+					"output":         output,
+				})
+
+			// Return with interrupt signal
+			return map[string]interface{}{
+				"requires_action": true,
+				"node_id":         nodeID,
+				"reason":          fmt.Sprintf("interrupt_after: %s", nodeID),
+				"interrupt_type":  "after",
+				"output":          output,
+			}, nil
+		}
 
 		// Check if this is an end node
 		if node.Type == workflow.NodeTypeEnd {
@@ -417,4 +479,34 @@ func evaluateCondition(condition map[string]interface{}, output map[string]inter
 		}
 	}
 	return true
+}
+
+// extractStringList extracts a list of strings from a map value
+func extractStringList(m map[string]interface{}, key string) []string {
+	result := make([]string, 0)
+
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case []string:
+			return v
+		case []interface{}:
+			for _, item := range v {
+				if str, ok := item.(string); ok {
+					result = append(result, str)
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// containsString checks if a string slice contains a specific string
+func containsString(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

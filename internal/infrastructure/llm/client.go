@@ -17,6 +17,7 @@ type CompletionRequest struct {
 	Temperature float32
 	MaxTokens   int
 	Tools       []Tool
+	Stream      bool // Enable streaming response
 }
 
 // Tool represents a function tool that can be called by the LLM
@@ -48,10 +49,24 @@ type Usage struct {
 	TotalTokens      int
 }
 
+// StreamChunk represents a streaming chunk from an LLM
+type StreamChunk struct {
+	Content      string // The text content of this chunk
+	Role         string // Role (usually "assistant")
+	FinishReason string // Empty until the last chunk
+	ID           string // Unique ID for this response
+}
+
+// StreamCallback is called for each chunk during streaming
+type StreamCallback func(chunk StreamChunk) error
+
 // Client is the interface for LLM providers
 type Client interface {
 	// Complete sends a chat completion request
 	Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error)
+
+	// CompleteStream sends a streaming chat completion request
+	CompleteStream(ctx context.Context, req CompletionRequest, callback StreamCallback) (*CompletionResponse, error)
 
 	// Name returns the provider name
 	Name() string
