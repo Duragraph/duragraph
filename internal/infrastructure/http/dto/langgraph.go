@@ -327,3 +327,32 @@ type InterruptResponse struct {
 	State         map[string]interface{}   `json:"state,omitempty"`
 	ToolCalls     []map[string]interface{} `json:"tool_calls,omitempty"`
 }
+
+// GraphNodeResponse represents a node in a graph
+type GraphNodeResponse struct {
+	ID       string                 `json:"id"`
+	Type     string                 `json:"type"`
+	Config   map[string]interface{} `json:"data,omitempty"`
+	Position map[string]float64     `json:"metadata,omitempty"`
+}
+
+// GraphEdgeResponse represents an edge in a graph
+type GraphEdgeResponse struct {
+	ID        string                 `json:"id,omitempty"`
+	Source    string                 `json:"source"`
+	Target    string                 `json:"target"`
+	Condition map[string]interface{} `json:"data,omitempty"`
+}
+
+// GraphResponse represents the graph structure for an assistant
+type GraphResponse struct {
+	Nodes  []GraphNodeResponse    `json:"nodes"`
+	Edges  []GraphEdgeResponse    `json:"edges"`
+	Config map[string]interface{} `json:"config,omitempty"`
+}
+
+// SubgraphInfoResponse represents information about a subgraph
+type SubgraphInfoResponse struct {
+	Namespace string `json:"namespace"`
+	GraphID   string `json:"graph_id,omitempty"`
+}

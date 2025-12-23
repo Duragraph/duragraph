@@ -180,6 +180,10 @@ func main() {
 	getAssistantVersionsHandler := query.NewGetAssistantVersionsHandler(assistantRepo)
 	getAssistantSchemaHandler := query.NewGetAssistantSchemaHandler(assistantRepo, graphRepo)
 
+	// Initialize graph query handlers
+	getAssistantGraphHandler := query.NewGetAssistantGraphHandler(assistantRepo, graphRepo)
+	getSubgraphsHandler := query.NewGetSubgraphsHandler(assistantRepo, graphRepo)
+
 	// Initialize application services
 	runService := service.NewRunService(
 		runRepo,
@@ -212,6 +216,8 @@ func main() {
 		countAssistantsHandler,
 		getAssistantVersionsHandler,
 		getAssistantSchemaHandler,
+		getAssistantGraphHandler,
+		getSubgraphsHandler,
 	)
 	threadHandler := handlers.NewThreadHandler(
 		createThreadHandler,
@@ -292,7 +298,11 @@ func main() {
 	// Stream routes (LangGraph compatible)
 	api.POST("/threads/:thread_id/runs/stream", runHandler.CreateRunWithStream)
 	api.GET("/threads/:thread_id/runs/:run_id/stream", streamHandler.StreamRun)
+	api.GET("/threads/:thread_id/stream", streamHandler.JoinThreadStream)
 	api.GET("/stream", streamHandler.Stream) // Legacy SSE endpoint
+
+	// Thread run wait route (LangGraph compatible)
+	api.POST("/threads/:thread_id/runs/wait", runHandler.CreateThreadRunAndWait)
 
 	// Human-in-the-loop (state update)
 	api.POST("/threads/:thread_id/state", runHandler.UpdateState)
@@ -311,6 +321,11 @@ func main() {
 	api.GET("/assistants/:assistant_id/versions", assistantHandler.GetVersions)
 	api.POST("/assistants/:assistant_id/latest", assistantHandler.SetLatestVersion)
 	api.GET("/assistants/:assistant_id/schemas", assistantHandler.GetSchemas)
+
+	// Assistant graph routes (LangGraph compatible)
+	api.GET("/assistants/:assistant_id/graph", assistantHandler.GetGraph)
+	api.GET("/assistants/:assistant_id/subgraphs", assistantHandler.GetSubgraphs)
+	api.GET("/assistants/:assistant_id/subgraphs/:namespace", assistantHandler.GetSubgraph)
 
 	// Thread routes
 	api.POST("/threads", threadHandler.Create)
