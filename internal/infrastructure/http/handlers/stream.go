@@ -141,6 +141,93 @@ func (h *StreamHandler) streamByRunID(c echo.Context, runID string) error {
 	}
 }
 
+// JoinThreadStream handles GET /threads/:thread_id/stream (LangGraph compatible)
+// This streams output from all runs on a thread in real-time
+func (h *StreamHandler) JoinThreadStream(c echo.Context) error {
+	threadID := c.Param("thread_id")
+	if threadID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "thread_id is required in path",
+		})
+	}
+
+	return h.streamByThreadID(c, threadID)
+}
+
+// streamByThreadID streams all run events for a thread
+func (h *StreamHandler) streamByThreadID(c echo.Context, threadID string) error {
+	// Parse stream modes
+	modes := parseStreamModes(c)
+	formatter := streaming.NewEventFormatter(modes)
+
+	// Set SSE headers
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+
+	// Subscribe to all run events
+	topic := fmt.Sprintf("duragraph.runs.run.>")
+	messages, err := h.subscriber.Subscribe(topic)
+	if err != nil {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+
+		case <-ticker.C:
+			// Send keepalive
+			fmt.Fprintf(c.Response(), ": keepalive\n\n")
+			c.Response().Flush()
+
+		case msg := <-messages:
+			// Parse message
+			var event map[string]interface{}
+			if err := json.Unmarshal(msg.Payload, &event); err != nil {
+				continue
+			}
+
+			// Filter by thread ID from payload
+			payload, _ := event["payload"].(map[string]interface{})
+			eventThreadID, _ := payload["thread_id"].(string)
+			if eventThreadID != threadID {
+				msg.Ack()
+				continue
+			}
+
+			// Get event type
+			eventType, _ := event["event_type"].(string)
+
+			// Map internal event types to stream mode compatible types
+			mappedType := mapEventType(eventType)
+
+			// Check if event should be sent based on stream mode
+			if !formatter.ShouldSend(mappedType) {
+				msg.Ack()
+				continue
+			}
+
+			// Format and send event
+			data, _ := formatter.FormatSSE(mappedType, payload)
+			c.Response().Write(data)
+			c.Response().Flush()
+
+			// Acknowledge message
+			msg.Ack()
+
+			// Note: Thread streams remain open indefinitely, client must close
+		}
+	}
+}
+
 // mapEventType maps internal event types to streaming mode compatible types
 func mapEventType(eventType string) string {
 	switch eventType {

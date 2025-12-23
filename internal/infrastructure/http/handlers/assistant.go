@@ -23,6 +23,8 @@ type AssistantHandler struct {
 	countHandler         *query.CountAssistantsHandler
 	getVersionsHandler   *query.GetAssistantVersionsHandler
 	getSchemaHandler     *query.GetAssistantSchemaHandler
+	getGraphHandler      *query.GetAssistantGraphHandler
+	getSubgraphsHandler  *query.GetSubgraphsHandler
 }
 
 // NewAssistantHandler creates a new AssistantHandler
@@ -38,6 +40,8 @@ func NewAssistantHandler(
 	countHandler *query.CountAssistantsHandler,
 	getVersionsHandler *query.GetAssistantVersionsHandler,
 	getSchemaHandler *query.GetAssistantSchemaHandler,
+	getGraphHandler *query.GetAssistantGraphHandler,
+	getSubgraphsHandler *query.GetSubgraphsHandler,
 ) *AssistantHandler {
 	return &AssistantHandler{
 		createHandler:        createHandler,
@@ -51,6 +55,8 @@ func NewAssistantHandler(
 		countHandler:         countHandler,
 		getVersionsHandler:   getVersionsHandler,
 		getSchemaHandler:     getSchemaHandler,
+		getGraphHandler:      getGraphHandler,
+		getSubgraphsHandler:  getSubgraphsHandler,
 	}
 }
 
@@ -424,5 +430,112 @@ func (h *AssistantHandler) GetSchemas(c echo.Context) error {
 		OutputSchema: schema.OutputSchema,
 		StateSchema:  schema.StateSchema,
 		ConfigSchema: schema.ConfigSchema,
+	})
+}
+
+// GetGraph handles GET /assistants/:assistant_id/graph
+func (h *AssistantHandler) GetGraph(c echo.Context) error {
+	assistantID := c.Param("assistant_id")
+
+	result, err := h.getGraphHandler.Handle(c.Request().Context(), assistantID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, dto.ErrorResponse{
+			Error:   "not_found",
+			Message: "Assistant not found",
+		})
+	}
+
+	// Convert domain nodes to response format
+	nodes := make([]dto.GraphNodeResponse, len(result.Nodes))
+	for i, node := range result.Nodes {
+		nodes[i] = dto.GraphNodeResponse{
+			ID:       node.ID,
+			Type:     string(node.Type),
+			Config:   node.Config,
+			Position: node.Position,
+		}
+	}
+
+	// Convert domain edges to response format
+	edges := make([]dto.GraphEdgeResponse, len(result.Edges))
+	for i, edge := range result.Edges {
+		edges[i] = dto.GraphEdgeResponse{
+			ID:        edge.ID,
+			Source:    edge.Source,
+			Target:    edge.Target,
+			Condition: edge.Condition,
+		}
+	}
+
+	return c.JSON(http.StatusOK, dto.GraphResponse{
+		Nodes:  nodes,
+		Edges:  edges,
+		Config: result.Config,
+	})
+}
+
+// GetSubgraphs handles GET /assistants/:assistant_id/subgraphs
+func (h *AssistantHandler) GetSubgraphs(c echo.Context) error {
+	assistantID := c.Param("assistant_id")
+
+	subgraphs, err := h.getSubgraphsHandler.Handle(c.Request().Context(), assistantID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, dto.ErrorResponse{
+			Error:   "not_found",
+			Message: "Assistant not found",
+		})
+	}
+
+	// Convert to response format
+	response := make([]dto.SubgraphInfoResponse, len(subgraphs))
+	for i, sg := range subgraphs {
+		response[i] = dto.SubgraphInfoResponse{
+			Namespace: sg.Namespace,
+			GraphID:   sg.GraphID,
+		}
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// GetSubgraph handles GET /assistants/:assistant_id/subgraphs/:namespace
+func (h *AssistantHandler) GetSubgraph(c echo.Context) error {
+	assistantID := c.Param("assistant_id")
+	namespace := c.Param("namespace")
+
+	result, err := h.getSubgraphsHandler.HandleByNamespace(c.Request().Context(), assistantID, namespace)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, dto.ErrorResponse{
+			Error:   "not_found",
+			Message: "Subgraph not found",
+		})
+	}
+
+	// Convert domain nodes to response format
+	nodes := make([]dto.GraphNodeResponse, len(result.Nodes))
+	for i, node := range result.Nodes {
+		nodes[i] = dto.GraphNodeResponse{
+			ID:       node.ID,
+			Type:     string(node.Type),
+			Config:   node.Config,
+			Position: node.Position,
+		}
+	}
+
+	// Convert domain edges to response format
+	edges := make([]dto.GraphEdgeResponse, len(result.Edges))
+	for i, edge := range result.Edges {
+		edges[i] = dto.GraphEdgeResponse{
+			ID:        edge.ID,
+			Source:    edge.Source,
+			Target:    edge.Target,
+			Condition: edge.Condition,
+		}
+	}
+
+	return c.JSON(http.StatusOK, dto.GraphResponse{
+		Nodes:  nodes,
+		Edges:  edges,
+		Config: result.Config,
 	})
 }

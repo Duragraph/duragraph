@@ -285,6 +285,94 @@ func (h *RunHandler) CreateRunAndWait(c echo.Context) error {
 	})
 }
 
+// CreateThreadRunAndWait handles POST /threads/:thread_id/runs/wait
+// Creates a run in the specified thread and waits for completion
+func (h *RunHandler) CreateThreadRunAndWait(c echo.Context) error {
+	threadID := c.Param("thread_id")
+	if threadID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "thread_id is required in path",
+		})
+	}
+
+	var req dto.CreateRunRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: err.Error(),
+		})
+	}
+
+	if req.AssistantID == "" {
+		return c.JSON(http.StatusBadRequest, dto.ErrorResponse{
+			Error:   "invalid_request",
+			Message: "assistant_id is required",
+		})
+	}
+
+	// Check multitask strategy before creating run
+	proceed, err := h.runService.ApplyMultitaskStrategy(c.Request().Context(), threadID, req.MultitaskStrategy)
+	if err != nil {
+		if domainErr, ok := err.(*errors.DomainError); ok && domainErr.Code == "INVALID_STATE" {
+			return c.JSON(http.StatusConflict, dto.ErrorResponse{
+				Error:   "conflict",
+				Message: "another run is already in progress for this thread",
+				Code:    "run_in_progress",
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+	if !proceed {
+		return c.JSON(http.StatusConflict, dto.ErrorResponse{
+			Error:   "conflict",
+			Message: "another run is already in progress for this thread",
+			Code:    "run_in_progress",
+		})
+	}
+
+	// Parse timeout from query param (default 5 minutes)
+	timeout := 5 * time.Minute
+	if timeoutStr := c.QueryParam("timeout"); timeoutStr != "" {
+		if parsed, err := time.ParseDuration(timeoutStr); err == nil {
+			timeout = parsed
+		}
+	}
+
+	// Create and wait for run
+	runAgg, err := h.runService.CreateAndWaitForRun(
+		c.Request().Context(),
+		threadID,
+		req.AssistantID,
+		req.Input,
+		timeout,
+	)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, dto.GetRunResponse{
+		RunID:       runAgg.ID(),
+		ThreadID:    runAgg.ThreadID(),
+		AssistantID: runAgg.AssistantID(),
+		Status:      runAgg.Status().Normalize().String(),
+		Input:       runAgg.Input(),
+		Output:      runAgg.Output(),
+		Error:       runAgg.Error(),
+		Metadata:    runAgg.Metadata(),
+		CreatedAt:   runAgg.CreatedAt(),
+		StartedAt:   runAgg.StartedAt(),
+		CompletedAt: runAgg.CompletedAt(),
+		UpdatedAt:   runAgg.UpdatedAt(),
+	})
+}
+
 // CreateRunWithStream handles POST /threads/:thread_id/runs/stream
 func (h *RunHandler) CreateRunWithStream(c echo.Context) error {
 	threadID := c.Param("thread_id")
