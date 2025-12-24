@@ -62,27 +62,16 @@ jobs:
         with:
           version: 9
 
-      - name: Install website dependencies
-        working-directory: website
-        run: pnpm install
-
-      - name: Install docs dependencies
+      - name: Install dependencies
         working-directory: docs
         run: pnpm install
-
-      - name: Build website
-        working-directory: website
-        run: pnpm build
 
       - name: Build docs
         working-directory: docs
         run: pnpm build
 
-      - name: Copy website to docs
-        run: cp -r website/dist/* docs/out/
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: docs-site
-          path: docs/out/
+          path: docs/dist/
