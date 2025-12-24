@@ -1,31 +1,25 @@
 {
-  "name": ".",
-  "version": "0.0.0",
-  "private": true,
+  "name": "docs",
+  "type": "module",
+  "version": "0.0.1",
   "scripts": {
-    "build": "next build",
-    "dev": "next dev",
-    "start": "next start",
-    "types:check": "fumadocs-mdx && tsc --noEmit",
-    "postinstall": "fumadocs-mdx"
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
   },
   "dependencies": {
-    "@orama/orama": "^3.1.16",
-    "fumadocs-core": "16.0.14",
-    "fumadocs-mdx": "14.0.2",
-    "fumadocs-ui": "16.0.14",
-    "next": "16.0.1",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.16",
-    "@types/mdx": "^2.0.13",
-    "@types/node": "^24.10.0",
-    "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.16",
-    "typescript": "^5.9.3"
+    "@astrojs/react": "^4.4.2",
+    "@astrojs/starlight": "^0.37.1",
+    "@tailwindcss/vite": "^4.1.18",
+    "astro": "^5.6.1",
+    "astro-mermaid": "^1.2.0",
+    "lucide-react": "^0.562.0",
+    "mermaid": "^11.12.2",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "sharp": "^0.34.2",
+    "tailwindcss": "^4.1.18"
   }
 }

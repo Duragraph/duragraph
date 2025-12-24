@@ -1,0 +1,126 @@
+---
+import '../styles/landing.css';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy - DuraGraph</title>
+    <meta name="description" content="DuraGraph Privacy Policy" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body class="min-h-screen bg-background">
+    <!-- Header -->
+    <header class="fixed top-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-sm border-b border-border">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-14">
+          <a href="/" class="flex items-center gap-2">
+            <img src="/logo.svg" alt="DuraGraph" class="w-7 h-7" />
+            <span class="font-semibold text-foreground">DuraGraph</span>
+          </a>
+          <a href="/" class="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            &larr; Back to Home
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main class="pt-24 pb-16">
+      <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        <h1 class="text-3xl font-bold text-foreground mb-8">Privacy Policy</h1>
+
+        <div class="prose prose-sm text-muted-foreground space-y-6">
+          <p class="text-sm text-muted-foreground/70">Last updated: December 2024</p>
+
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-foreground">1. Introduction</h2>
+            <p>DuraGraph ("we", "our", or "us") respects your privacy and is committed to protecting your personal data. This privacy policy explains how we collect, use, and safeguard your information when you use our website and services.</p>
+          </section>
+
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-foreground">2. Information We Collect</h2>
+            <p>We may collect the following types of information:</p>
+            <ul class="list-disc list-inside space-y-1 ml-4">
+              <li><strong class="text-foreground">Usage Data:</strong> Information about how you use our website, including pages visited, time spent, and navigation patterns.</li>
+              <li><strong class="text-foreground">Technical Data:</strong> IP address, browser type, device information, and operating system.</li>
+              <li><strong class="text-foreground">Contact Data:</strong> Email address and other information you provide when contacting us.</li>
+            </ul>
+          </section>
+
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-foreground">3. How We Use Your Information</h2>
+            <p>We use collected information to:</p>
+            <ul class="list-disc list-inside space-y-1 ml-4">
+              <li>Provide and maintain our services</li>
+              <li>Improve and optimize our website</li>
+              <li>Analyze usage patterns and trends</li>
+              <li>Communicate with you about updates and changes</li>
+              <li>Ensure security and prevent fraud</li>
+            </ul>
+          </section>
+
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-foreground">4. Cookies and Tracking</h2>
+            <p>We use cookies and similar tracking technologies to enhance your experience. For detailed information about our cookie practices, please see our <a href="/cookies" class="text-primary hover:underline">Cookie Policy</a>.</p>
+          </section>
+
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-foreground">5. Data Sharing</h2>
+            <p>We do not sell your personal data. We may share information with:</p>
+            <ul class="list-disc list-inside space-y-1 ml-4">
+              <li>Service providers who assist in operating our website</li>
+              <li>Analytics partners to understand usage patterns</li>
+              <li>Legal authorities when required by law</li>
+            </ul>
+          </section>
+
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-foreground">6. Data Security</h2>
+            <p>We implement appropriate technical and organizational measures to protect your personal data against unauthorized access, alteration, disclosure, or destruction.</p>
+          </section>
+
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-foreground">7. Your Rights</h2>
+            <p>Depending on your location, you may have rights to:</p>
+            <ul class="list-disc list-inside space-y-1 ml-4">
+              <li>Access your personal data</li>
+              <li>Correct inaccurate data</li>
+              <li>Delete your data</li>
+              <li>Object to processing</li>
+              <li>Data portability</li>
+            </ul>
+          </section>
+
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-foreground">8. Contact Us</h2>
+            <p>If you have questions about this Privacy Policy, please contact us at:</p>
+            <p class="text-foreground">privacy@duragraph.io</p>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="py-8 border-t border-border">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <p class="text-xs text-muted-foreground font-mono">
+            &copy; 2025 DuraGraph. All rights reserved.
+          </p>
+          <div class="flex items-center gap-4">
+            <a href="/privacy" class="text-xs text-muted-foreground hover:text-foreground transition-colors">Privacy Policy</a>
+            <a href="/cookies" class="text-xs text-muted-foreground hover:text-foreground transition-colors">Cookie Policy</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      if (localStorage.getItem('theme') === 'dark' ||
+          (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      }
+    </script>
+  </body>
+</html>

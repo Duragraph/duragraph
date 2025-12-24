@@ -1,0 +1,71 @@
+---
+title: Architecture Overview
+description: High-level overview of DuraGraph components and data flows
+---
+
+This document provides a high-level overview of the components and data flows in DuraGraph.
+
+---
+
+## Components
+
+- **API Server (`cmd/server`)**
+  Exposes REST + SSE endpoints. Implements LangGraph Cloud-compatible API. Handles request validation and error responses.
+
+- **Command Handlers (`internal/application/command`)**
+  Process write operations following CQRS. Create and modify domain aggregates, emitting domain events.
+
+- **Query Handlers (`internal/application/query`)**
+  Process read operations. Query projections directly for optimized reads.
+
+- **Graph Engine (`internal/infrastructure/graph`)**
+  Executes workflow graphs with support for conditionals, loops, subgraphs, and human-in-the-loop interrupts.
+
+- **Event Store (`internal/infrastructure/persistence`)**
+  PostgreSQL-based event sourcing. Stores all domain events for audit and state reconstruction.
+
+- **NATS JetStream (`internal/infrastructure/messaging`)**
+  Reliable event streaming via the outbox pattern. Publishes domain events for real-time updates.
+
+- **Projections**
+  Read-optimized views of domain state. Updated from events for fast queries.
+
+---
+
+## Data Flows
+
+1. **Client** calls API (e.g., `POST /runs`).
+2. **API** validates request and invokes command handler.
+3. **Command Handler** creates/modifies aggregate, emitting domain events.
+4. **Repository** saves events to event store + outbox in single transaction.
+5. **Outbox Relay** publishes events to NATS JetStream.
+6. **Graph Engine** executes workflow nodes (LLM, tools, conditions).
+7. **Client** receives real-time updates via SSE stream.
+
+---
+
+## Sequence Diagram
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#fff7ed', 'primaryTextColor': '#9a3412', 'primaryBorderColor': '#f97316', 'lineColor': '#fb923c', 'secondaryColor': '#fef3c7', 'actorBkg': '#fff7ed', 'actorBorder': '#f97316', 'actorTextColor': '#9a3412', 'signalColor': '#fb923c', 'signalTextColor': '#fdba74', 'noteBkgColor': '#fff7ed', 'noteTextColor': '#9a3412', 'noteBorderColor': '#f97316', 'activationBkgColor': '#fed7aa', 'activationBorderColor': '#f97316'}}}%%
+sequenceDiagram
+    participant Client
+    participant API
+    participant CommandHandler
+    participant Repository
+    participant EventStore
+    participant GraphEngine
+    participant NATS
+
+    Client->>API: POST /runs
+    API->>CommandHandler: CreateRun
+    CommandHandler->>Repository: Save(run)
+    Repository->>EventStore: Append Events
+    Repository->>NATS: Publish via Outbox
+    API-->>Client: 201 Created
+    GraphEngine->>EventStore: Execute Graph
+    GraphEngine-->>NATS: Emit Events
+    NATS-->>Client: SSE Stream
+```
+
+---

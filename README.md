@@ -1,6 +1,6 @@
 # DuraGraph
 
-![DuraGraph Logo](docs/public/duragraph_logo.png)
+![DuraGraph Logo](docs/public/logo.svg)
 
 **An open, extensible orchestration layer for AI and workflow automation**
 
