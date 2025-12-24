@@ -26,8 +26,6 @@ TODO.md
 */out
 .aider*
 init_structure.sh
-docs_old
-website_old
 gh_token.txt
 
 # GitHub Pages build output
@@ -86,7 +84,6 @@ bin/duragraph
 
 # npm lockfile (we use pnpm)
 package-lock.json
-website/package-lock.json
 dashboard/package-lock.json
 commit-remaining.sh
 

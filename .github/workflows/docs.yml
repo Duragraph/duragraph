@@ -43,7 +43,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy out --project-name=duragraph-docs
+          command: pages deploy dist --project-name=duragraph-docs
           workingDirectory: docs
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 

@@ -1,0 +1,466 @@
+---
+// Landing page for DuraGraph
+import '../styles/landing.css';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DuraGraph - Durable Workflows. Open Source. Cloud Ready.</title>
+    <meta name="description" content="DuraGraph is an open-core orchestration platform for AI and data workflows — self-host or run on DuraGraph Cloud." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body class="min-h-screen bg-background">
+    <!-- Header -->
+    <header class="fixed top-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-sm border-b border-border">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between h-14">
+          <!-- Logo -->
+          <a href="/" class="flex items-center gap-2">
+            <img src="/logo.svg" alt="DuraGraph" class="w-7 h-7" />
+            <span class="font-semibold text-foreground">DuraGraph</span>
+          </a>
+
+          <!-- Desktop Navigation -->
+          <nav class="hidden md:flex items-center gap-8">
+            <a href="#why" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Why DuraGraph</a>
+            <a href="#how" class="text-sm text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
+            <span class="relative inline-block">
+              <span class="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-primary text-primary-foreground text-[8px] font-semibold uppercase tracking-wide whitespace-nowrap">Soon</span>
+              <span class="text-sm text-muted-foreground/60 cursor-not-allowed select-none">Cloud</span>
+            </span>
+            <a href="#use-cases" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Use Cases</a>
+            <a href="/docs/introduction" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Docs</a>
+          </nav>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-2">
+            <a
+              href="https://github.com/duragraph/duragraph"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              aria-label="GitHub"
+            >
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            </a>
+
+            <a
+              href="/docs/introduction"
+              class="hidden sm:inline-flex items-center px-4 py-2 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 transition-colors"
+            >
+              Get Started
+            </a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- Hero Section -->
+      <section class="pt-28 pb-20 lg:pt-36 lg:pb-28 relative">
+        <div class="absolute inset-0 bg-grid-subtle pointer-events-none"></div>
+
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
+          <div class="max-w-5xl mx-auto text-center">
+            <!-- Badge -->
+            <div class="inline-flex items-center gap-2 px-3 py-1 bg-accent text-accent-foreground text-sm font-medium mb-8">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <span>Open Source & Cloud Ready</span>
+            </div>
+
+            <!-- Title -->
+            <h1 class="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold text-foreground mb-8 leading-[1.1] tracking-tight sm:tracking-normal">
+              Durable Workflows.<br class="hidden xl:block" />
+              <span class="text-primary">Open Source.</span><br class="hidden xl:block" />
+              Cloud Ready.
+            </h1>
+
+            <!-- Subtitle -->
+            <p class="text-lg text-muted-foreground mb-10 max-w-2xl mx-auto">
+              DuraGraph is an open-core orchestration platform for AI and data workflows — self-host or run on DuraGraph Cloud.
+            </p>
+
+            <!-- CTAs -->
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <a
+                href="https://github.com/duragraph/duragraph"
+                class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 transition-colors"
+              >
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                Get Started (OSS)
+              </a>
+              <span class="relative inline-block">
+                <span class="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-primary text-primary-foreground text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap shadow-sm z-10">Coming Soon</span>
+                <span
+                  class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-muted-foreground bg-secondary/60 border border-border cursor-not-allowed select-none"
+                >
+                  Try DuraGraph Cloud
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+                </span>
+              </span>
+            </div>
+
+            <!-- Stats -->
+            <div class="mt-16 grid grid-cols-3 gap-8 max-w-xl mx-auto">
+              <div>
+                <div class="text-2xl font-bold text-foreground font-mono">100%</div>
+                <div class="text-xs text-muted-foreground mt-1 uppercase tracking-wide">LangGraph Compatible</div>
+              </div>
+              <div>
+                <div class="text-2xl font-bold text-foreground font-mono">&lt;10ms</div>
+                <div class="text-xs text-muted-foreground mt-1 uppercase tracking-wide">P99 Latency</div>
+              </div>
+              <div>
+                <div class="text-2xl font-bold text-foreground font-mono">99.9%</div>
+                <div class="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Uptime SLA</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Why DuraGraph -->
+      <section id="why" class="py-20 lg:py-28">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h2 class="text-2xl sm:text-3xl font-bold text-center text-foreground mb-4">
+            Why DuraGraph
+          </h2>
+          <p class="text-center text-muted-foreground mb-16 max-w-2xl mx-auto">
+            Built for reliability, designed for developers
+          </p>
+
+          <div class="grid md:grid-cols-3 gap-6">
+            <!-- Resilient -->
+            <div class="p-6 bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow">
+              <div class="inline-flex items-center justify-center w-10 h-10 bg-primary/10 text-primary mb-4">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+              </div>
+              <h3 class="text-lg font-semibold text-foreground mb-2">Resilient</h3>
+              <p class="text-sm text-muted-foreground">Fault-tolerant, stateful workflows that recover gracefully from failures</p>
+            </div>
+
+            <!-- Developer-Friendly -->
+            <div class="p-6 bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow">
+              <div class="inline-flex items-center justify-center w-10 h-10 bg-primary/10 text-primary mb-4">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+              </div>
+              <h3 class="text-lg font-semibold text-foreground mb-2">Developer-Friendly</h3>
+              <p class="text-sm text-muted-foreground">Graph APIs, LangGraph compatible, multi-language SDKs</p>
+            </div>
+
+            <!-- Cloud-Scale -->
+            <div class="p-6 bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow">
+              <div class="inline-flex items-center justify-center w-10 h-10 bg-primary/10 text-primary mb-4">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+              </div>
+              <h3 class="text-lg font-semibold text-foreground mb-2">Cloud-Scale</h3>
+              <p class="text-sm text-muted-foreground">Managed hosting, real-time monitoring, OpenTelemetry tracing</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- How It Works -->
+      <section id="how" class="py-20 lg:py-28 bg-muted/30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h2 class="text-2xl sm:text-3xl font-bold text-center text-foreground mb-4">
+            How It Works
+          </h2>
+          <p class="text-center text-muted-foreground mb-16 max-w-2xl mx-auto">
+            From design to production in four steps
+          </p>
+
+          <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-px bg-border">
+            <div class="bg-background p-6">
+              <div class="text-3xl font-bold text-primary font-mono mb-3">01</div>
+              <h3 class="text-base font-semibold text-foreground mb-2">Define Graph</h3>
+              <p class="text-sm text-muted-foreground">Design your workflow as a graph with nodes and edges</p>
+            </div>
+            <div class="bg-background p-6">
+              <div class="text-3xl font-bold text-primary font-mono mb-3">02</div>
+              <h3 class="text-base font-semibold text-foreground mb-2">Generate Code</h3>
+              <p class="text-sm text-muted-foreground">Auto-generate type-safe workflow code from your graph</p>
+            </div>
+            <div class="bg-background p-6">
+              <div class="text-3xl font-bold text-primary font-mono mb-3">03</div>
+              <h3 class="text-base font-semibold text-foreground mb-2">Run Workflows</h3>
+              <p class="text-sm text-muted-foreground">Execute workflows with full observability and fault tolerance</p>
+            </div>
+            <div class="bg-background p-6">
+              <div class="text-3xl font-bold text-primary font-mono mb-3">04</div>
+              <h3 class="text-base font-semibold text-foreground mb-2">Monitor</h3>
+              <p class="text-sm text-muted-foreground">Track execution with real-time metrics and OpenTelemetry</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- OSS vs Cloud -->
+      <section id="cloud" class="py-20 lg:py-28">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h2 class="text-2xl sm:text-3xl font-bold text-center text-foreground mb-4">
+            Open-Source Core + Cloud Upgrade
+          </h2>
+          <p class="text-center text-muted-foreground mb-16 max-w-2xl mx-auto">
+            Start free, scale with confidence
+          </p>
+
+          <div class="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+            <!-- OSS Card -->
+            <div class="bg-card shadow-[var(--shadow-card)] p-8">
+              <div class="mb-6">
+                <h3 class="text-lg font-semibold text-foreground mb-1">DuraGraph OSS</h3>
+                <div class="h-px w-12 bg-muted-foreground/30"></div>
+              </div>
+              <ul class="space-y-3">
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-muted-foreground">Apache-licensed, self-host</span>
+                </li>
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-muted-foreground">Core orchestration engine</span>
+                </li>
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-muted-foreground">Multi-language SDKs</span>
+                </li>
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-muted-foreground">LangGraph compatibility</span>
+                </li>
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-muted-foreground">Community support</span>
+                </li>
+              </ul>
+            </div>
+
+            <!-- Cloud Card -->
+            <div class="bg-card shadow-[var(--shadow-elevated)] p-8 relative border-l-2 border-l-primary">
+              <div class="absolute -top-px -right-px px-2 py-0.5 bg-primary text-primary-foreground text-xs font-medium">
+                Coming Soon
+              </div>
+              <div class="mb-6">
+                <h3 class="text-lg font-semibold text-foreground mb-1">DuraGraph Cloud</h3>
+                <div class="h-px w-12 bg-primary"></div>
+              </div>
+              <ul class="space-y-3">
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-foreground">Managed hosting & scaling</span>
+                </li>
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-foreground">Enterprise security & RBAC</span>
+                </li>
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-foreground">Advanced monitoring & alerts</span>
+                </li>
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-foreground">SLA-backed uptime</span>
+                </li>
+                <li class="flex items-start gap-3 text-sm">
+                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-foreground">Priority support</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Use Cases -->
+      <section id="use-cases" class="py-20 lg:py-28 bg-muted/30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h2 class="text-2xl sm:text-3xl font-bold text-center text-foreground mb-4">
+            Use Cases
+          </h2>
+          <p class="text-center text-muted-foreground mb-16 max-w-2xl mx-auto">
+            From AI agents to enterprise workflows
+          </p>
+
+          <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- AI Agents -->
+            <div class="group p-5 bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all">
+              <div class="w-9 h-9 bg-primary/10 text-primary flex items-center justify-center mb-3 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+              </div>
+              <h3 class="text-base font-semibold text-foreground mb-1">AI Agents</h3>
+              <p class="text-sm text-muted-foreground">Build autonomous agents with memory, tool use, and complex reasoning</p>
+            </div>
+
+            <!-- Data Pipelines -->
+            <div class="group p-5 bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all">
+              <div class="w-9 h-9 bg-primary/10 text-primary flex items-center justify-center mb-3 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/></svg>
+              </div>
+              <h3 class="text-base font-semibold text-foreground mb-1">Data Pipelines</h3>
+              <p class="text-sm text-muted-foreground">Orchestrate ETL workflows with retries, monitoring, and fault tolerance</p>
+            </div>
+
+            <!-- Research Labs -->
+            <div class="group p-5 bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all">
+              <div class="w-9 h-9 bg-primary/10 text-primary flex items-center justify-center mb-3 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+              </div>
+              <h3 class="text-base font-semibold text-foreground mb-1">Research Labs</h3>
+              <p class="text-sm text-muted-foreground">Run reproducible experiments with full observability and lineage tracking</p>
+            </div>
+
+            <!-- Enterprise Apps -->
+            <div class="group p-5 bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-all">
+              <div class="w-9 h-9 bg-primary/10 text-primary flex items-center justify-center mb-3 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+              </div>
+              <h3 class="text-base font-semibold text-foreground mb-1">Enterprise Apps</h3>
+              <p class="text-sm text-muted-foreground">Power mission-critical workflows with SLA-backed reliability</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Community -->
+      <section id="community" class="py-20 lg:py-28">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <h2 class="text-2xl sm:text-3xl font-bold text-foreground mb-4">
+            Community + Docs
+          </h2>
+          <p class="text-muted-foreground mb-10 max-w-xl mx-auto">
+            Join our community, contribute to the project, and explore the documentation
+          </p>
+
+          <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <a
+              href="https://github.com/duragraph/duragraph"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-foreground bg-secondary hover:bg-secondary/80 transition-colors"
+            >
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              Star on GitHub
+            </a>
+            <a
+              href="/docs/introduction"
+              class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-foreground bg-secondary hover:bg-secondary/80 transition-colors"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+              Documentation
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="py-12 border-t border-border">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="grid md:grid-cols-3 gap-8 mb-8">
+          <!-- Brand -->
+          <div>
+            <div class="flex items-center gap-2 mb-3">
+              <img src="/logo.svg" alt="DuraGraph" class="w-6 h-6" />
+              <span class="font-semibold text-foreground">DuraGraph</span>
+            </div>
+            <p class="text-sm text-muted-foreground">
+              Durable Workflows. Open Source. Cloud Ready.
+            </p>
+          </div>
+
+          <!-- License -->
+          <div>
+            <h4 class="text-sm font-medium text-foreground mb-3 uppercase tracking-wide">License</h4>
+            <p class="text-sm text-muted-foreground">
+              <span class="text-foreground">DuraGraph Core</span> is Apache 2.0 licensed.
+              <span class="text-foreground">DuraGraph Cloud</span> is enterprise-ready hosting.
+            </p>
+          </div>
+
+          <!-- Links -->
+          <div>
+            <h4 class="text-sm font-medium text-foreground mb-3 uppercase tracking-wide">Links</h4>
+            <div class="flex flex-wrap gap-4">
+              <a href="/docs/introduction" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Docs</a>
+              <a href="https://github.com/duragraph/duragraph" target="_blank" rel="noopener noreferrer" class="text-sm text-muted-foreground hover:text-foreground transition-colors">GitHub</a>
+              <a href="#cloud" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Cloud</a>
+              <a href="/blog" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Blog</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-8 border-t border-border">
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p class="text-xs text-muted-foreground font-mono">
+              &copy; 2025 DuraGraph. All rights reserved.
+            </p>
+            <div class="flex items-center gap-4">
+              <a href="/privacy" class="text-xs text-muted-foreground hover:text-foreground transition-colors">Privacy Policy</a>
+              <a href="/cookies" class="text-xs text-muted-foreground hover:text-foreground transition-colors">Cookie Policy</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Cookie Consent Modal -->
+    <div id="cookie-modal" class="fixed bottom-0 left-0 right-0 z-50 p-4 hidden">
+      <div class="max-w-4xl mx-auto bg-card border border-border shadow-lg p-4 sm:p-6">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div class="flex-1">
+            <p class="text-sm text-foreground font-medium mb-1">We use cookies</p>
+            <p class="text-xs text-muted-foreground">
+              We use cookies to enhance your experience and analyze site traffic. By clicking "Accept", you consent to our use of cookies.
+              <a href="/cookies" class="text-primary hover:underline">Learn more</a>
+            </p>
+          </div>
+          <div class="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              id="cookie-decline"
+              class="flex-1 sm:flex-none px-4 py-2 text-xs font-medium text-muted-foreground bg-secondary hover:bg-secondary/80 transition-colors"
+            >
+              Decline
+            </button>
+            <button
+              id="cookie-accept"
+              class="flex-1 sm:flex-none px-4 py-2 text-xs font-medium text-primary-foreground bg-primary hover:bg-primary/90 transition-colors"
+            >
+              Accept
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Theme detection
+      if (localStorage.getItem('theme') === 'dark' ||
+          (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      }
+
+      // Cookie consent
+      const cookieModal = document.getElementById('cookie-modal');
+      const cookieAccept = document.getElementById('cookie-accept');
+      const cookieDecline = document.getElementById('cookie-decline');
+
+      // Show modal if consent not given
+      if (!localStorage.getItem('cookie-consent')) {
+        cookieModal?.classList.remove('hidden');
+      }
+
+      cookieAccept?.addEventListener('click', () => {
+        localStorage.setItem('cookie-consent', 'accepted');
+        cookieModal?.classList.add('hidden');
+      });
+
+      cookieDecline?.addEventListener('click', () => {
+        localStorage.setItem('cookie-consent', 'declined');
+        cookieModal?.classList.add('hidden');
+      });
+    </script>
+  </body>
+</html>
