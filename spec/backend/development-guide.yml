@@ -408,6 +408,135 @@ git_conventions:
       - refactor/event-store
 
 # ============================================
+# Git Workflow
+# ============================================
+git_workflow:
+  description: |
+    DuraGraph uses a branch-based workflow with protected main and develop branches.
+    All changes must go through pull requests.
+
+  branch_strategy:
+    main:
+      description: Production-ready code
+      protection: true
+      direct_push: false
+    develop:
+      description: Integration branch for features
+      protection: true
+      direct_push: false
+    feature:
+      prefix: "feature/"
+      description: New feature development
+      base: develop
+      examples:
+        - feature/graph-config
+        - feature/subgraph-support
+    fix:
+      prefix: "fix/"
+      description: Bug fixes
+      base: develop
+      examples:
+        - fix/run-status-error
+        - fix/stream-disconnect
+    docs:
+      prefix: "docs/"
+      description: Documentation changes
+      base: develop
+      examples:
+        - docs/api-migration-guide
+    refactor:
+      prefix: "refactor/"
+      description: Code refactoring
+      base: develop
+      examples:
+        - refactor/run-service
+    test:
+      prefix: "test/"
+      description: Test additions
+      base: develop
+      examples:
+        - test/conformance-streaming
+
+  pr_workflow:
+    steps:
+      - step: 1
+        name: Create feature branch
+        commands:
+          - git checkout develop
+          - git pull origin develop
+          - git checkout -b feature/your-feature-name
+
+      - step: 2
+        name: Make changes and commit
+        description: Follow conventional commits format
+        commands:
+          - git add <files>
+          - "git commit -m \"type(scope): description\""
+
+      - step: 3
+        name: Push feature branch
+        commands:
+          - git push origin feature/your-feature-name
+
+      - step: 4
+        name: Create pull request
+        description: Create PR from feature branch to develop
+        command: |
+          gh pr create --base develop --title "feat(scope): description" --body "## Summary
+          - Change 1
+          - Change 2
+
+          ## Test plan
+          - [ ] Unit tests pass
+          - [ ] Integration tests pass
+
+          Closes #XX"
+
+      - step: 5
+        name: Review and merge
+        requirements:
+          - PR review required
+          - All CI checks must pass
+          - Squash merge preferred
+
+      - step: 6
+        name: Clean up
+        commands:
+          - git checkout develop
+          - git pull origin develop
+          - git branch -d feature/your-feature-name
+
+  protected_branches:
+    main:
+      - Direct pushes blocked
+      - Changes through PR only
+      - Verified commit signatures
+      - CI checks must pass
+    develop:
+      - Direct pushes blocked
+      - Changes through PR only
+      - CI checks must pass
+
+  claude_code_instructions:
+    description: |
+      When using Claude Code for development, always follow
+      the PR workflow. Never commit directly to protected branches.
+    rules:
+      - Always create a feature branch before making changes
+      - Never commit directly to develop or main
+      - Create PR and wait for user approval before merging
+      - Reference issue numbers in commits when applicable
+      - Use conventional commit format
+
+  quick_reference:
+    start_feature: "git checkout develop && git pull && git checkout -b feature/name"
+    commit_changes: "git add . && git commit -m \"feat(scope): message\""
+    push_and_pr: |
+      git push origin feature/name
+      gh pr create --base develop
+    after_merge: "git checkout develop && git pull && git branch -d feature/name"
+
+# ============================================
 # Observability
 # ============================================
 observability:
