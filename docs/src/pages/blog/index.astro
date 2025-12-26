@@ -1,0 +1,98 @@
+---
+import { getCollection } from 'astro:content';
+import BlogLayout from '../../components/BlogLayout.astro';
+
+// Get all blog posts, sorted by date (newest first)
+const posts = (await getCollection('blog'))
+  .filter(post => !post.data.draft)
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+
+// Group posts by year
+const postsByYear = posts.reduce((acc, post) => {
+  const year = post.data.date.getFullYear();
+  if (!acc[year]) acc[year] = [];
+  acc[year].push(post);
+  return acc;
+}, {} as Record<number, typeof posts>);
+
+const years = Object.keys(postsByYear).sort((a, b) => Number(b) - Number(a));
+
+// Get all unique tags
+const allTags = [...new Set(posts.flatMap(post => post.data.tags))].sort();
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric'
+  });
+}
+---
+
+<BlogLayout title="Blog">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <!-- Header -->
+    <header class="mb-12">
+      <h1 class="text-4xl font-bold text-foreground mb-4">Blog</h1>
+      <p class="text-lg text-muted-foreground">
+        Insights on AI orchestration, agent frameworks, memory systems, and the evolving LLM ecosystem.
+      </p>
+    </header>
+
+    <!-- Tags filter -->
+    {allTags.length > 0 && (
+      <div class="mb-10 flex flex-wrap gap-2">
+        {allTags.map(tag => (
+          <span class="px-3 py-1 text-sm bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer">
+            {tag}
+          </span>
+        ))}
+      </div>
+    )}
+
+    <!-- Posts grouped by year -->
+    {years.map(year => (
+      <section class="mb-12">
+        <h2 class="text-sm font-medium text-muted-foreground mb-6 uppercase tracking-wider">{year}</h2>
+        <div class="space-y-1">
+          {postsByYear[Number(year)].map(post => (
+            <a
+              href={`/blog/${post.id}`}
+              class="group flex items-start gap-4 py-4 -mx-4 px-4 hover:bg-secondary/50 transition-colors"
+            >
+              <time class="text-sm text-muted-foreground w-16 shrink-0 font-mono">
+                {formatDate(post.data.date)}
+              </time>
+              <div class="flex-1 min-w-0">
+                <h3 class="text-foreground font-medium group-hover:text-primary transition-colors">
+                  {post.data.title}
+                </h3>
+                <p class="text-sm text-muted-foreground mt-1 line-clamp-2">
+                  {post.data.excerpt}
+                </p>
+                {post.data.tags.length > 0 && (
+                  <div class="flex flex-wrap gap-2 mt-2">
+                    {post.data.tags.slice(0, 3).map(tag => (
+                      <span class="text-xs text-muted-foreground bg-muted px-2 py-0.5">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <svg class="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+              </svg>
+            </a>
+          ))}
+        </div>
+      </section>
+    ))}
+
+    <!-- Empty state -->
+    {posts.length === 0 && (
+      <div class="text-center py-20">
+        <p class="text-muted-foreground">No posts yet. Check back soon!</p>
+      </div>
+    )}
+  </div>
+</BlogLayout>
