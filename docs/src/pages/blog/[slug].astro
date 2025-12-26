@@ -1,0 +1,250 @@
+---
+import { getCollection, render } from 'astro:content';
+import BlogLayout from '../../components/BlogLayout.astro';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts.map(post => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+}
+
+// Author data
+const authors: Record<string, { name: string; title: string; url: string }> = {
+  duragraph: {
+    name: 'DuraGraph Team',
+    title: 'Core Contributors',
+    url: 'https://github.com/duragraph',
+  },
+};
+---
+
+<BlogLayout title={post.data.title} description={post.data.excerpt}>
+  <article class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+    <!-- Back link -->
+    <a href="/blog" class="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-8">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+      </svg>
+      Back to Blog
+    </a>
+
+    <!-- Header -->
+    <header class="mb-10">
+      <div class="flex flex-wrap gap-2 mb-4">
+        {post.data.tags.map(tag => (
+          <span class="text-xs font-medium text-accent-foreground bg-accent px-2 py-1 uppercase tracking-wider">
+            {tag}
+          </span>
+        ))}
+      </div>
+
+      <h1 class="text-3xl sm:text-4xl font-bold text-foreground mb-4">
+        {post.data.title}
+      </h1>
+
+      <p class="text-lg text-muted-foreground mb-6">
+        {post.data.excerpt}
+      </p>
+
+      <div class="flex items-center gap-4 text-sm text-muted-foreground">
+        <time datetime={post.data.date.toISOString()}>
+          {formatDate(post.data.date)}
+        </time>
+        {post.data.authors.length > 0 && (
+          <>
+            <span>·</span>
+            <div class="flex items-center gap-2">
+              {post.data.authors.map(authorId => {
+                const author = authors[authorId];
+                return author ? (
+                  <a href={author.url} class="hover:text-foreground transition-colors" target="_blank" rel="noopener">
+                    {author.name}
+                  </a>
+                ) : (
+                  <span>{authorId}</span>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </header>
+
+    <!-- Content -->
+    <div class="blog-content prose prose-zinc dark:prose-invert max-w-none">
+      <Content />
+    </div>
+
+    <!-- Footer -->
+    <footer class="mt-16 pt-8 border-t border-border">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <a href="/blog" class="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Blog
+        </a>
+
+        <div class="flex items-center gap-4">
+          <a
+            href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(post.data.title)}&url=${encodeURIComponent(`https://duragraph.dev/blog/${post.id}`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Share on X
+          </a>
+          <a
+            href="https://github.com/duragraph/duragraph"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Star on GitHub
+          </a>
+        </div>
+      </div>
+    </footer>
+  </article>
+</BlogLayout>
+
+<style is:global>
+  /* Blog content styling */
+  .blog-content {
+    color: var(--foreground);
+    line-height: 1.75;
+  }
+
+  .blog-content h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    color: var(--foreground);
+    letter-spacing: -0.025em;
+  }
+
+  .blog-content h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+    color: var(--foreground);
+  }
+
+  .blog-content p {
+    margin-bottom: 1.25rem;
+    color: var(--muted-foreground);
+  }
+
+  .blog-content a {
+    color: var(--primary);
+    text-decoration: none;
+  }
+
+  .blog-content a:hover {
+    text-decoration: underline;
+  }
+
+  .blog-content strong {
+    color: var(--foreground);
+    font-weight: 600;
+  }
+
+  .blog-content ul, .blog-content ol {
+    margin-bottom: 1.25rem;
+    padding-left: 1.5rem;
+  }
+
+  .blog-content li {
+    margin-bottom: 0.5rem;
+    color: var(--muted-foreground);
+  }
+
+  .blog-content code {
+    font-size: 0.875rem;
+    background: var(--muted);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  .blog-content pre {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    padding: 1rem;
+    overflow-x: auto;
+    margin-bottom: 1.5rem;
+  }
+
+  .blog-content pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.875rem;
+  }
+
+  .blog-content blockquote {
+    border-left: 3px solid var(--primary);
+    background: var(--accent);
+    padding: 1rem 1.5rem;
+    margin: 1.5rem 0;
+    border-radius: 0 0.375rem 0.375rem 0;
+  }
+
+  .blog-content blockquote p {
+    margin: 0;
+    color: var(--accent-foreground);
+  }
+
+  .blog-content table {
+    width: 100%;
+    margin: 1.5rem 0;
+    font-size: 0.875rem;
+    border-collapse: collapse;
+  }
+
+  .blog-content th {
+    background: var(--muted);
+    color: var(--foreground);
+    font-weight: 500;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .blog-content td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted-foreground);
+  }
+
+  .blog-content hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+  }
+
+  /* Mermaid diagram styling */
+  .mermaid {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: var(--card);
+    border-radius: 0.375rem;
+    border: 1px solid var(--border);
+    overflow-x: auto;
+  }
+</style>

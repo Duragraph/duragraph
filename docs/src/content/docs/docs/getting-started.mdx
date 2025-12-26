@@ -3,33 +3,72 @@ title: Getting Started
 description: Set up DuraGraph and run your first workflow
 ---
 
-Welcome to DuraGraph! This guide will walk you through setting up your environment, running your first workflow, and exploring the system architecture.
+Welcome to DuraGraph! This guide will walk you through setting up your environment and running your first workflow.
 
 ---
 
-## 1. Installation
+## Quick Start with Docker Compose
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Duragraph/duragraph.git
-   cd duragraph
-   ```
+The fastest way to get DuraGraph running is with Docker Compose. No need to clone the entire repository.
 
-2. Start all services with Task:
-   ```bash
-   task up
-   ```
+### 1. Create a project directory
 
-   This starts PostgreSQL, NATS, the API server, and the dashboard.
+```bash
+mkdir duragraph && cd duragraph
+```
 
-3. Verify services are running:
-   ```bash
-   task health
-   ```
+### 2. Download the Docker Compose file
+
+```bash
+curl -O https://raw.githubusercontent.com/Duragraph/duragraph/main/docker-compose.yml
+```
+
+### 3. Download the database migrations
+
+```bash
+mkdir -p deploy/sql
+curl -o deploy/sql/001_init.sql https://raw.githubusercontent.com/Duragraph/duragraph/main/deploy/sql/001_init.sql
+curl -o deploy/sql/002_event_store.sql https://raw.githubusercontent.com/Duragraph/duragraph/main/deploy/sql/002_event_store.sql
+curl -o deploy/sql/003_outbox.sql https://raw.githubusercontent.com/Duragraph/duragraph/main/deploy/sql/003_outbox.sql
+curl -o deploy/sql/004_projections.sql https://raw.githubusercontent.com/Duragraph/duragraph/main/deploy/sql/004_projections.sql
+```
+
+### 4. Start DuraGraph
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **PostgreSQL** (port 5433) - Event store and projections
+- **NATS JetStream** (port 4223) - Message streaming
+- **API Server** (port 8081) - REST API endpoints
+- **Dashboard** (port 5173) - Web UI
+
+### 5. Verify services are running
+
+```bash
+curl http://localhost:8081/health
+```
+
+You should see: `{"status":"ok"}`
 
 ---
 
-## 2. Running a Hello World Workflow
+## Alternative: Full Development Setup
+
+For contributing or customizing DuraGraph, clone the full repository:
+
+```bash
+git clone https://github.com/Duragraph/duragraph.git
+cd duragraph
+task up        # Start all services
+task health    # Verify health
+```
+
+---
+
+## Running Your First Workflow
 
 1. Create an assistant:
    ```bash
@@ -54,20 +93,17 @@ Welcome to DuraGraph! This guide will walk you through setting up your environme
 
 ---
 
-## 3. Next Steps
+## Next Steps
 
-To better understand the system, explore the architecture documentation:
+Explore the documentation to learn more:
 
-- [Architecture Overview](architecture/overview) – components, data flows, sequence diagrams
+- [Architecture Overview](architecture/overview) – Components, data flows, sequence diagrams
 - [API Reference](api-reference/overview) – REST endpoints and schemas
-- [Quickstart Guide](user-guide/quickstart) – step-by-step tutorial
+- [Quickstart Tutorial](user-guide/quickstart) – Build your first AI workflow
+- [LangGraph Migration](user-guide/tutorials/langgraph-migration) – Migrate from LangGraph Cloud
 
 ---
 
-## 4. Contributing
+## Contributing
 
-Please read the [Contributing Guide](project/contributing) before contributing.
-
----
-
-You are now ready to dive deeper into the system!
+Want to contribute? Read the [Contributing Guide](project/contributing) to get started.

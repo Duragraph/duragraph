@@ -1,12 +1,230 @@
 ---
-title: ir format
-description: ir format
+title: IR Format
+description: Intermediate Representation format for defining workflow graphs
 ---
 
-# ir format
+The **IR (Intermediate Representation)** is DuraGraph's standardized JSON format for describing workflow graphs. It defines nodes, edges, inputs/outputs, and execution policies in a schema-validated structure.
 
-## Coming Soon
+## Why IR?
 
-This section is under development. Check back soon for detailed documentation.
+- **LangGraph Compatibility**: IR aligns with LangGraph's graph format for easy migration
+- **Schema-first Development**: Validate graphs before execution
+- **Interoperability**: Define once, execute anywhere
+- **Debuggability**: Human-readable graph definitions
 
-📚 **For now, see**: [Quickstart Guide](../quickstart.md)
+---
+
+## IR Structure
+
+```json
+{
+  "version": "0.1.0",
+  "graph": {
+    "nodes": [...],
+    "edges": [...]
+  },
+  "io": {
+    "inputs": {...},
+    "outputs": {...}
+  },
+  "policies": {...},
+  "metadata": {...}
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `version` | IR schema version (e.g., `"0.1.0"`) |
+| `graph` | Node and edge definitions |
+| `io` | Input/output parameter schemas |
+| `policies` | Execution policies (timeouts, retries, budgets) |
+| `metadata` | Arbitrary metadata for tooling |
+
+---
+
+## Node Types
+
+DuraGraph supports these node types:
+
+| Type | Description |
+|------|-------------|
+| `entry` / `start` | Graph entry point |
+| `llm_call` | LLM model invocation |
+| `tool` | Tool/function execution |
+| `decision` / `condition` | Conditional branching |
+| `subgraph` | Nested graph execution |
+| `human` | Human-in-the-loop interrupt |
+| `end` | Graph completion point |
+
+### Node Structure
+
+```json
+{
+  "id": "analyze_sentiment",
+  "type": "llm_call",
+  "config": {
+    "prompt": "Analyze the sentiment of: {{input.text}}",
+    "model": "gpt-4o"
+  }
+}
+```
+
+---
+
+## Edges
+
+Edges connect nodes and can include conditional routing:
+
+```json
+{
+  "from": "analyze_sentiment",
+  "to": "positive_response",
+  "condition": {
+    "field": "sentiment",
+    "operator": "eq",
+    "value": "positive"
+  }
+}
+```
+
+### Conditional Operators
+
+- `eq` - Equal
+- `neq` - Not equal
+- `gt`, `gte` - Greater than (or equal)
+- `lt`, `lte` - Less than (or equal)
+- `contains` - String/array contains
+- `exists` - Field exists
+
+---
+
+## Complete Example
+
+A customer support workflow that analyzes sentiment and routes accordingly:
+
+```json
+{
+  "version": "0.1.0",
+  "graph": {
+    "nodes": [
+      { "id": "start", "type": "entry" },
+      {
+        "id": "analyze",
+        "type": "llm_call",
+        "config": {
+          "prompt": "Analyze sentiment: {{input.message}}"
+        }
+      },
+      {
+        "id": "route",
+        "type": "decision",
+        "config": {
+          "field": "sentiment"
+        }
+      },
+      {
+        "id": "escalate",
+        "type": "human",
+        "config": {
+          "message": "Negative sentiment detected"
+        }
+      },
+      {
+        "id": "respond",
+        "type": "llm_call",
+        "config": {
+          "prompt": "Generate friendly response"
+        }
+      },
+      { "id": "end", "type": "end" }
+    ],
+    "edges": [
+      { "from": "start", "to": "analyze" },
+      { "from": "analyze", "to": "route" },
+      {
+        "from": "route",
+        "to": "escalate",
+        "condition": { "field": "sentiment", "operator": "eq", "value": "negative" }
+      },
+      {
+        "from": "route",
+        "to": "respond",
+        "condition": { "field": "sentiment", "operator": "neq", "value": "negative" }
+      },
+      { "from": "escalate", "to": "respond" },
+      { "from": "respond", "to": "end" }
+    ]
+  },
+  "io": {
+    "inputs": {
+      "message": { "type": "string", "description": "Customer message" }
+    },
+    "outputs": {
+      "response": { "type": "string", "description": "Agent response" }
+    }
+  },
+  "policies": {
+    "timeouts": "60s",
+    "retries": 3,
+    "budget_tokens": 2000
+  }
+}
+```
+
+---
+
+## Execution Policies
+
+Control how the graph executes:
+
+```json
+{
+  "policies": {
+    "timeouts": "30s",
+    "retries": 3,
+    "budget_tokens": 1000,
+    "redactions": ["user.email", "user.phone"]
+  }
+}
+```
+
+| Policy | Description |
+|--------|-------------|
+| `timeouts` | Maximum execution time (e.g., `"30s"`, `"5m"`) |
+| `retries` | Number of retry attempts on failure |
+| `budget_tokens` | Maximum tokens for LLM calls |
+| `redactions` | Fields to redact from logs/traces |
+
+---
+
+## Validation
+
+IR graphs are validated against the JSON Schema at runtime:
+
+1. **Structure validation**: Required fields, types
+2. **Graph validation**: Start/end nodes exist, edges reference valid nodes
+3. **Loop detection**: Maximum 100 iterations to prevent infinite loops
+
+---
+
+## Schema Reference
+
+The canonical IR schema is defined in:
+
+```
+schemas/ir/ir.schema.json
+```
+
+Example IR files are in:
+
+```
+schemas/ir/examples/
+```
+
+---
+
+## Next Steps
+
+- [Your First Workflow](../tutorials/first-workflow) – Build a workflow using IR
+- [Workflows Concept](./workflows) – Understand workflow execution
+- [API Reference](/docs/api-reference/overview) – Submit IR graphs via API
