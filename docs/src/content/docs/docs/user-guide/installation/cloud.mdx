@@ -1,318 +1,268 @@
 ---
-title: DuraGraph Cloud
-description: Managed DuraGraph cloud platform
+title: Cloud Deployment
+description: Deploy DuraGraph on any cloud provider
 ---
 
-**DuraGraph Cloud** provides a fully-managed, enterprise-ready orchestration platform with all the power of self-hosted Duragraph plus managed infrastructure, team collaboration, and enterprise security.
+# Cloud Deployment
 
+Deploy DuraGraph on any cloud provider with full control over your infrastructure. DuraGraph is designed to be cloud-agnostic and runs anywhere you can deploy containers.
 
-:::note[Availability]
-**Status**: Coming Soon (Q2 2024)
-**Early Access**: [Join the waitlist](https://duragraph.ai/cloud/waitlist)
-**Features**: All self-hosted features + managed infrastructure
-:::
+## Deployment Options
 
-## Why Duragraph Cloud?
+### ☁️ **Any Cloud Provider**
 
-### 🚀 **Zero Infrastructure Management**
-- Fully managed orchestration
-- Auto-scaling workers and API servers
-- Managed PostgreSQL with automated backups
-- 99.9% uptime SLA
+DuraGraph runs on any cloud that supports Docker containers:
 
-### 👥 **Team Collaboration**
-- Multi-user workspaces
-- Role-based access control (RBAC)
-- Shared workflows and assistants
-- Team activity dashboards
+- **AWS** - ECS, EKS, EC2
+- **Google Cloud** - Cloud Run, GKE, Compute Engine
+- **Azure** - Container Apps, AKS, VMs
+- **DigitalOcean** - App Platform, Kubernetes
+- **Fly.io** - Global edge deployment
+- **Railway** - Simple container hosting
+- **Render** - Managed infrastructure
 
-### 🔒 **Enterprise Security**
-- SOC 2 Type II compliance
-- End-to-end encryption
-- VPC peering and private networking
-- Audit logs and compliance reporting
+### 🏢 **On-Premises**
 
-### 📊 **Advanced Observability**
-- Real-time performance analytics
-- Custom metrics and alerting
-- Distributed tracing
-- Cost optimization insights
+Deploy in your own data center with:
+- Docker Compose for single-node deployments
+- Kubernetes for production clusters
+- Air-gapped environments supported
 
-## Getting Started
+### 🌐 **Hybrid**
 
-### 1. Sign Up
+Mix cloud and on-premises deployments:
+- Manage multiple environments from a single dashboard
+- Federated execution across regions
+- Data residency compliance
 
-```bash
-# Join the waitlist (available Q2 2024)
-curl -X POST https://api.duragraph.ai/waitlist \
-  -H "Content-Type: application/json" \
-  -d '{"email": "you@company.com", "company": "Your Company"}'
-```
+## Quick Deploy
 
-Or visit: [https://duragraph.ai/cloud/signup](https://duragraph.ai/cloud/signup)
+### One-Click Deploy Buttons
 
-### 2. Create Your First Workspace
+[![Deploy on Fly.io](https://img.shields.io/badge/Deploy%20on-Fly.io-7B3FE4?style=for-the-badge&logo=fly.io&logoColor=white)](https://fly.io/docs/getting-started/)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template)
+[![Deploy on DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new)
+
+### Docker Compose
 
 ```bash
-# Install Duragraph CLI
-npm install -g @duragraph/cli
-
-# Login to Duragraph Cloud
-duragraph auth login
-
-# Create workspace
-duragraph workspace create "My Company Workspace"
-
-# Set as default
-duragraph workspace use "My Company Workspace"
+# Clone and deploy
+git clone https://github.com/duragraph/duragraph.git
+cd duragraph
+docker-compose up -d
 ```
 
-### 3. Deploy Your First Workflow
+### Kubernetes
 
-```python
-from duragraph import DuragraphClient
-
-# Connect to Duragraph Cloud
-client = DuragraphClient(
-    base_url="https://api.duragraph.ai",
-    api_key="dg_live_...",  # From dashboard
-    workspace_id="ws_..."
-)
-
-# Create and run workflow
-workflow = client.create_workflow({
-    "name": "Customer Support Agent",
-    "steps": [
-        {
-            "type": "llm_call",
-            "model": "gpt-4",
-            "messages": [
-                {"role": "system", "content": "You are a helpful customer support agent."},
-                {"role": "user", "content": "{customer_query}"}
-            ]
-        }
-    ]
-})
-
-# Execute
-run = client.create_run(
-    workflow_id=workflow.id,
-    inputs={"customer_query": "How do I reset my password?"}
-)
-
-print(f"Run started: {run.id}")
-```
-
-## Features
-
-### **Managed Infrastructure**
-
-**Auto-scaling Workers**
-- Python, Go, and TypeScript workers
-- Automatic scaling based on queue depth
-- Resource optimization and cost control
-
-**Managed Event Store**
-- High-availability event storage
-- Automatic upgrades and maintenance
-- Tenant isolation
-
-**Database Management**
-- Managed PostgreSQL with automated backups
-- Point-in-time recovery
-- Read replicas for high-query workloads
-
-### **Team Management**
-
-**Workspaces**
-- Isolated environments for teams/projects
-- Resource quotas and billing controls
-- Cross-workspace collaboration
-
-**Role-Based Access Control**
 ```bash
-# Add team member
-duragraph team add user@company.com --role=developer
-
-# Create custom role
-duragraph role create "workflow-admin" \
-  --permissions="workflows:create,workflows:read,workflows:update"
-
-# Assign role to user
-duragraph user assign user@company.com --role="workflow-admin"
+# Using Helm
+helm repo add duragraph https://charts.duragraph.ai
+helm install duragraph duragraph/duragraph
 ```
 
-**Permissions Model**
-- `workspace:admin` - Full workspace control
-- `workflow:developer` - Create/edit workflows
-- `workflow:viewer` - Read-only access
-- `runtime:operator` - Manage runs and executions
+## Cloud-Specific Guides
 
-### **Enterprise Security**
+### AWS Deployment
 
-**Authentication**
-- SSO with SAML/OIDC
-- Multi-factor authentication (MFA)
-- API key management
+**ECS with Fargate**
 
-**Network Security**
-- VPC peering for private connectivity
-- IP allowlisting
-- mTLS for service-to-service communication
+```bash
+# Create ECS cluster
+aws ecs create-cluster --cluster-name duragraph
 
-**Data Protection**
-- Encryption at rest (AES-256)
-- Encryption in transit (TLS 1.3)
-- Key management via AWS KMS/Azure Key Vault
+# Deploy using CDK or CloudFormation
+cd deploy/aws
+cdk deploy
+```
 
-### **Advanced Observability**
+**Managed Database Options:**
+- Amazon RDS for PostgreSQL
+- Amazon ElastiCache for Redis (optional caching)
+- Amazon MSK or self-managed NATS
 
-**Real-time Dashboards**
-- Workflow execution metrics
-- Resource utilization tracking
-- Error rates and latency monitoring
+### Google Cloud Deployment
 
-**Custom Alerting**
+**Cloud Run**
+
+```bash
+# Build and push image
+gcloud builds submit --tag gcr.io/PROJECT_ID/duragraph
+
+# Deploy to Cloud Run
+gcloud run deploy duragraph \
+  --image gcr.io/PROJECT_ID/duragraph \
+  --platform managed \
+  --allow-unauthenticated
+```
+
+**Managed Database Options:**
+- Cloud SQL for PostgreSQL
+- Memorystore for Redis
+
+### Azure Deployment
+
+**Container Apps**
+
+```bash
+# Create container app
+az containerapp create \
+  --name duragraph \
+  --resource-group myResourceGroup \
+  --image duragraph/duragraph:latest \
+  --target-port 8080 \
+  --ingress external
+```
+
+**Managed Database Options:**
+- Azure Database for PostgreSQL
+- Azure Cache for Redis
+
+## Infrastructure Requirements
+
+### Minimum Requirements
+
+| Component | Requirement |
+|-----------|-------------|
+| CPU | 2 vCPUs |
+| Memory | 4GB RAM |
+| Storage | 20GB SSD |
+| Database | PostgreSQL 14+ |
+
+### Recommended Production
+
+| Component | Requirement |
+|-----------|-------------|
+| CPU | 4+ vCPUs |
+| Memory | 8GB+ RAM |
+| Storage | 100GB+ SSD |
+| Database | PostgreSQL 14+ with replicas |
+| NATS | JetStream enabled |
+
+## Environment Variables
+
+```bash
+# Required
+DATABASE_URL=postgresql://user:pass@host:5432/duragraph
+NATS_URL=nats://localhost:4222
+
+# Optional
+PORT=8080
+LOG_LEVEL=info
+AUTH_ENABLED=false
+```
+
+## Security Considerations
+
+### Network Security
+
+- Use private subnets for database and NATS
+- Enable TLS for all external connections
+- Configure firewall rules appropriately
+
+### Authentication
+
+DuraGraph supports multiple authentication methods:
+
+```bash
+# JWT Authentication
+AUTH_ENABLED=true
+JWT_SECRET=your-secret-key
+
+# OAuth/OIDC (coming soon)
+OAUTH_PROVIDER=google
+OAUTH_CLIENT_ID=...
+OAUTH_CLIENT_SECRET=...
+```
+
+### Encryption
+
+- **In Transit**: TLS 1.3 for all connections
+- **At Rest**: Use cloud provider's encryption (RDS encryption, etc.)
+
+## Monitoring
+
+### Prometheus Metrics
+
+DuraGraph exposes Prometheus metrics at `/metrics`:
+
 ```yaml
-# duragraph-alerts.yml
-alerts:
-  - name: "High Error Rate"
-    condition: "error_rate > 5%"
-    channels: ["slack", "pagerduty"]
-
-  - name: "Long Running Workflow"
-    condition: "workflow_duration > 30m"
-    channels: ["email"]
+# prometheus.yml
+scrape_configs:
+  - job_name: 'duragraph'
+    static_configs:
+      - targets: ['duragraph:8080']
 ```
 
-**Distributed Tracing**
-- OpenTelemetry integration
-- Cross-service trace correlation
-- Performance bottleneck identification
-
-## Pricing
-
-### **Developer Plan** - Free
-- 1 workspace
-- 10,000 workflow executions/month
-- Community support
-- Basic observability
-
-### **Team Plan** - $99/month
-- 5 workspaces
-- 100,000 executions/month
-- Team collaboration features
-- Email support
-- Advanced observability
-
-### **Enterprise Plan** - Custom
-- Unlimited workspaces
-- Custom execution limits
-- SSO and advanced security
-- 24/7 support with SLA
-- Dedicated infrastructure options
-
-## Migration from Self-Hosted
-
-### **Export from Self-Hosted**
+### Health Checks
 
 ```bash
-# Export workflows
-duragraph export workflows --output=workflows.json
+# Liveness probe
+curl http://localhost:8080/health
 
-# Export assistants
-duragraph export assistants --output=assistants.json
-
-# Export historical runs (optional)
-duragraph export runs --date-range="2024-01-01,2024-03-01"
+# Readiness probe
+curl http://localhost:8080/health
 ```
 
-### **Import to Cloud**
+## High Availability
+
+### Multi-Region Deployment
+
+```yaml
+# kubernetes/multi-region.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duragraph
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+  template:
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+```
+
+### Database Replication
+
+Configure PostgreSQL with read replicas for high availability:
 
 ```bash
-# Login to cloud
-duragraph auth login --cloud
+# Primary
+DATABASE_URL=postgresql://primary:5432/duragraph
 
-# Import workflows
-duragraph import workflows workflows.json
-
-# Import assistants
-duragraph import assistants assistants.json
-
-# Verify migration
-duragraph workflow list
+# Read replicas (for queries)
+DATABASE_READ_URL=postgresql://replica:5432/duragraph
 ```
 
-### **Gradual Migration**
+## Cost Optimization
 
-```python
-# Use feature flags for gradual migration
-import os
+### Right-Sizing
 
-if os.getenv("USE_DURAGRAPH_CLOUD") == "true":
-    client = DuragraphClient(
-        base_url="https://api.duragraph.ai",
-        api_key=os.getenv("DURAGRAPH_CLOUD_API_KEY")
-    )
-else:
-    client = DuragraphClient(
-        base_url="http://localhost:8080"
-    )
+Start small and scale based on actual usage:
+
+| Workload | Recommended Instance |
+|----------|---------------------|
+| Development | t3.small / e2-small |
+| Production (small) | t3.large / e2-standard-2 |
+| Production (large) | m5.xlarge / n2-standard-4 |
+
+### Spot/Preemptible Instances
+
+Use spot instances for non-critical workloads:
+
+```yaml
+# EKS spot instances
+nodeSelector:
+  lifecycle: Ec2Spot
 ```
-
-## Support
-
-### **Documentation**
-- [Cloud API Reference](https://docs.duragraph.ai/cloud/api)
-- [Team Management Guide](https://docs.duragraph.ai/cloud/teams)
-- [Security Best Practices](https://docs.duragraph.ai/cloud/security)
-
-### **Support Channels**
-- **Community**: [GitHub Discussions](https://github.com/Duragraph/duragraph/discussions)
-- **Email**: support@duragraph.ai
-- **Enterprise**: 24/7 support with SLA guarantees
-
-### **Status Page**
-Monitor Duragraph Cloud status: [https://status.duragraph.ai](https://status.duragraph.ai)
-
-## Enterprise Features
-
-### **Compliance**
-- SOC 2 Type II certification
-- GDPR compliance
-- HIPAA eligibility (Business Associate Agreement)
-- ISO 27001 alignment
-
-### **Advanced Deployment**
-- Private cloud deployments
-- Customer-managed encryption keys
-- Custom retention policies
-- Disaster recovery options
-
-### **Professional Services**
-- Migration assistance
-- Custom training programs
-- Architecture review and optimization
-- 24/7 dedicated support
-
-## Early Access
-
-**Join the Waitlist**: [https://duragraph.ai/cloud/waitlist](https://duragraph.ai/cloud/waitlist)
-
-**Beta Program**:
-- Priority access to new features
-- Direct feedback channel to engineering
-- No usage limits during beta
-- Migration assistance included
-
-**Timeline**:
-- **Q1 2024**: Private beta with select partners
-- **Q2 2024**: Public beta launch
-- **Q3 2024**: General availability
 
 ## Next Steps
 
-🔗 [Join the waitlist](https://duragraph.ai/cloud/waitlist)
-📚 [Compare with self-hosted](self-hosted.md)
-🛠️ [Start with local development](../quickstart.md)
-💬 [Join our community](https://github.com/Duragraph/duragraph/discussions)
+- [Self-Hosted Installation](self-hosted) — Detailed self-hosted setup
+- [Getting Started](/docs/getting-started) — Quick start guide
+- [Observability](/docs/user-guide/concepts/observability) — Set up monitoring
+- [Architecture Overview](/docs/architecture/overview) — System design

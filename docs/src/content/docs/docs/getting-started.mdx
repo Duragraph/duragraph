@@ -1,109 +1,111 @@
 ---
-title: Getting Started
-description: Set up DuraGraph and run your first workflow
+title: Quick Start
+description: Get up and running with DuraGraph in 5 minutes
 ---
 
-Welcome to DuraGraph! This guide will walk you through setting up your environment and running your first workflow.
+Get DuraGraph running locally and execute your first workflow.
 
----
+## Prerequisites
 
-## Quick Start with Docker Compose
+- Docker and Docker Compose
+- Git
+- [Task](https://taskfile.dev/) (optional, for convenience commands)
 
-The fastest way to get DuraGraph running is with Docker Compose. No need to clone the entire repository.
+## 1. Start DuraGraph
 
-### 1. Create a project directory
-
-```bash
-mkdir duragraph && cd duragraph
-```
-
-### 2. Download the Docker Compose file
-
-```bash
-curl -O https://raw.githubusercontent.com/Duragraph/duragraph/main/docker-compose.yml
-```
-
-### 3. Download the database migrations
-
-```bash
-mkdir -p deploy/sql
-curl -o deploy/sql/001_init.sql https://raw.githubusercontent.com/Duragraph/duragraph/main/deploy/sql/001_init.sql
-curl -o deploy/sql/002_event_store.sql https://raw.githubusercontent.com/Duragraph/duragraph/main/deploy/sql/002_event_store.sql
-curl -o deploy/sql/003_outbox.sql https://raw.githubusercontent.com/Duragraph/duragraph/main/deploy/sql/003_outbox.sql
-curl -o deploy/sql/004_projections.sql https://raw.githubusercontent.com/Duragraph/duragraph/main/deploy/sql/004_projections.sql
-```
-
-### 4. Start DuraGraph
-
-```bash
-docker compose up -d
-```
-
-This starts:
-- **PostgreSQL** (port 5433) - Event store and projections
-- **NATS JetStream** (port 4223) - Message streaming
-- **API Server** (port 8081) - REST API endpoints
-- **Dashboard** (port 5173) - Web UI
-
-### 5. Verify services are running
-
-```bash
-curl http://localhost:8081/health
-```
-
-You should see: `{"status":"ok"}`
-
----
-
-## Alternative: Full Development Setup
-
-For contributing or customizing DuraGraph, clone the full repository:
+Clone and start all services:
 
 ```bash
 git clone https://github.com/Duragraph/duragraph.git
 cd duragraph
-task up        # Start all services
-task health    # Verify health
+task up
 ```
 
----
+This starts:
+- **API Server** (port 8081) — REST API and SSE streaming
+- **PostgreSQL** — Event store and projections
+- **NATS JetStream** — Event streaming
+- **Dashboard** (port 3000) — Workflow monitoring UI
 
-## Running Your First Workflow
+Verify services are running:
 
-1. Create an assistant:
-   ```bash
-   curl -X POST http://localhost:8081/api/v1/assistants \
-     -H "Content-Type: application/json" \
-     -d '{"name": "hello-assistant", "graph_schema": {}}'
-   ```
+```bash
+task health
+```
 
-2. Create a thread:
-   ```bash
-   curl -X POST http://localhost:8081/api/v1/threads \
-     -H "Content-Type: application/json" \
-     -d '{}'
-   ```
+## 2. Create Your First Workflow
 
-3. Create a run:
-   ```bash
-   curl -X POST http://localhost:8081/api/v1/runs \
-     -H "Content-Type: application/json" \
-     -d '{"thread_id": "<thread_id>", "assistant_id": "<assistant_id>", "input": {"message": "Hello!"}}'
-   ```
+Create an assistant:
 
----
+```bash
+curl -X POST http://localhost:8081/api/v1/assistants \
+  -H "Content-Type: application/json" \
+  -d '{"name": "hello-assistant", "graph_schema": {}}'
+```
+
+Create a thread:
+
+```bash
+curl -X POST http://localhost:8081/api/v1/threads \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Create a run (replace `<thread_id>` and `<assistant_id>` with values from above):
+
+```bash
+curl -X POST http://localhost:8081/api/v1/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "thread_id": "<thread_id>",
+    "assistant_id": "<assistant_id>",
+    "input": {"message": "Hello!"}
+  }'
+```
+
+## 3. Monitor Your Workflow
+
+Open the Dashboard at [http://localhost:3000](http://localhost:3000) to:
+- View workflow execution logs
+- Monitor run status in real-time
+- Debug failed runs
+- Explore workflow graphs
+
+## 4. Stream Events
+
+Subscribe to real-time updates for a run:
+
+```bash
+curl -N "http://localhost:8081/api/v1/stream?run_id=<run_id>"
+```
 
 ## Next Steps
 
-Explore the documentation to learn more:
+- **[Self-Hosted Installation](/docs/user-guide/installation/self-hosted)** — Production deployment
+- **[First Workflow Tutorial](/docs/user-guide/tutorials/first-workflow)** — Build a complete workflow
+- **[LangGraph Migration](/docs/user-guide/tutorials/langgraph-migration)** — Migrate from LangGraph Cloud
+- **[Architecture Overview](/docs/architecture/overview)** — Understand the system design
 
-- [Architecture Overview](architecture/overview) – Components, data flows, sequence diagrams
-- [API Reference](api-reference/overview) – REST endpoints and schemas
-- [Quickstart Tutorial](user-guide/quickstart) – Build your first AI workflow
-- [LangGraph Migration](user-guide/tutorials/langgraph-migration) – Migrate from LangGraph Cloud
+## Troubleshooting
 
----
+**Services won't start?**
 
-## Contributing
+```bash
+# Check service status
+docker compose ps
 
-Want to contribute? Read the [Contributing Guide](project/contributing) to get started.
+# View logs
+docker compose logs api
+```
+
+**Port already in use?**
+
+```bash
+# Find what's using the port
+lsof -i :8081
+
+# Stop all services and restart
+task down && task up
+```
+
+Need help? [Join our community](https://github.com/Duragraph/duragraph/discussions) or [report an issue](https://github.com/Duragraph/duragraph/issues).

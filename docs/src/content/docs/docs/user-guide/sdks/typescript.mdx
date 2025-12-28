@@ -1,15 +1,83 @@
 ---
 title: TypeScript SDK
-description: DuraGraph TypeScript SDK documentation
+description: Build AI workflows with the DuraGraph TypeScript SDK
 ---
 
 :::note[Development Status]
-**Status**: Planned for Q3 2024
-**Current**: Use REST API directly or existing TypeScript client libraries
+**Status**: Planned
+**Current**: Use REST API directly or the LangGraph TypeScript SDK
 :::
 
-## Coming Soon
+The TypeScript SDK is currently in development. For now, you can interact with DuraGraph using the REST API or the LangGraph SDK.
 
-The TypeScript SDK is planned for Q3 2024.
+## Using the LangGraph SDK
 
-📚 **For now**: [REST API Documentation](../../api-reference/overview.md)
+DuraGraph is compatible with the LangGraph TypeScript SDK:
+
+```typescript
+import { Client } from "@langchain/langgraph-sdk";
+
+// Point to your DuraGraph instance
+const client = new Client({
+  apiUrl: "http://localhost:8081",
+});
+
+// Create an assistant
+const assistant = await client.assistants.create({
+  graphId: "my-graph",
+  config: {},
+});
+
+// Create a thread
+const thread = await client.threads.create();
+
+// Run a workflow
+const run = await client.runs.create(thread.thread_id, assistant.assistant_id, {
+  input: { message: "Hello!" },
+});
+
+console.log("Run created:", run);
+```
+
+## Using the REST API
+
+```typescript
+const baseUrl = "http://localhost:8081/api/v1";
+
+// Create an assistant
+const response = await fetch(`${baseUrl}/assistants`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    name: "my-assistant",
+    graph_schema: {},
+  }),
+});
+
+const assistant = await response.json();
+console.log("Created assistant:", assistant);
+```
+
+## Streaming with SSE
+
+```typescript
+const runId = "your-run-id";
+const eventSource = new EventSource(
+  `http://localhost:8081/api/v1/stream?run_id=${runId}`
+);
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log("Event:", data);
+};
+
+eventSource.onerror = () => {
+  eventSource.close();
+};
+```
+
+## Resources
+
+- [REST API Documentation](/docs/api-reference/rest-api)
+- [SSE Streaming](/docs/api-reference/sse-streaming)
+- [Architecture Overview](/docs/architecture/overview)

@@ -1,25 +1,23 @@
 ---
 title: Python SDK
-description: DuraGraph Python SDK documentation
+description: Build AI workflows with the DuraGraph Python SDK
 ---
 
 The DuraGraph Python SDK provides a clean, Pythonic interface for building and managing AI workflows.
 
 
 :::note[Development Status]
-**Status**: In Development (Q1 2024)
-**Implementation**: Python Eino adapter worker
-**Tracking**: [GitHub Issue #4](https://github.com/adwiteeymauriya/duragraph/issues/4)
+**Status**: In Development
+**Tracking**: [GitHub Issues](https://github.com/duragraph/duragraph/issues)
 :::
 
 ## Installation
 
 ```bash
-# Available in Q1 2024
 pip install duragraph-sdk
 ```
 
-For now, use the REST API directly or the LangGraph SDK with Duragraph's compatible endpoints.
+You can also use the REST API directly or the LangGraph SDK with DuraGraph's compatible endpoints.
 
 ## Quick Start
 
@@ -28,7 +26,7 @@ from duragraph import DuragraphClient, Workflow
 
 # Initialize client
 client = DuragraphClient(
-    base_url="http://localhost:8080",
+    base_url="http://localhost:8081",
     api_key="your-api-key"  # Optional for local development
 )
 
@@ -178,7 +176,7 @@ import asyncio
 from duragraph import AsyncDuragraphClient
 
 async def main():
-    client = AsyncDuragraphClient(base_url="http://localhost:8080")
+    client = AsyncDuragraphClient(base_url="http://localhost:8081")
 
     # Create assistant and thread
     assistant = await client.create_assistant("My Assistant")
@@ -391,21 +389,19 @@ client = get_client(url="http://localhost:8080")
 
 # Native Duragraph style
 from duragraph import DuragraphClient
-client = DuragraphClient(base_url="http://localhost:8080")
+client = DuragraphClient(base_url="http://localhost:8081")
 ```
 
 Both approaches work! The native SDK provides additional Duragraph-specific features and better type safety.
 
 ## API Reference
 
-Full API documentation: [https://duragraph.ai/sdk/python](https://duragraph.ai/sdk/python)
-
 ## Contributing
 
-The Python SDK is open source! Contribute at [GitHub](https://github.com/adwiteeymauriya/duragraph/tree/main/sdk/python).
+The Python SDK is open source. Contribute at [GitHub](https://github.com/duragraph/duragraph).
 
 ```bash
-git clone https://github.com/adwiteeymauriya/duragraph
+git clone https://github.com/duragraph/duragraph
 cd duragraph/sdk/python
 pip install -e ".[dev]"
 pytest tests/

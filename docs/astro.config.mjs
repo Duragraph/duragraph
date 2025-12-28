@@ -52,7 +52,6 @@ export default defineConfig({
         {
           label: 'User Guide',
           items: [
-            { label: 'Quickstart', slug: 'docs/user-guide/quickstart' },
             {
               label: 'Installation',
               autogenerate: { directory: 'docs/user-guide/installation' },
