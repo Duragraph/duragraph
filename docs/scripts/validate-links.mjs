@@ -89,7 +89,7 @@ async function checkInternalLink(link) {
   let path = link.replace(/^\//, '').replace(/\.html$/, '').replace(/\/$/, '');
 
   // Handle anchor links
-  const [basePath, anchor] = path.split('#');
+  const [basePath] = path.split('#');
   path = basePath || 'index';
 
   // Check if it's a blog link
