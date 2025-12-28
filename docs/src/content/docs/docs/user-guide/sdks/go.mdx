@@ -1,15 +1,60 @@
 ---
 title: Go SDK
-description: DuraGraph Go SDK documentation
+description: Build AI workflows with the DuraGraph Go SDK
 ---
 
 :::note[Development Status]
-**Status**: Planned for Q2-Q3 2024
-**Current**: Use REST API directly or existing Go client libraries
+**Status**: Planned
+**Current**: Use REST API directly or existing Go HTTP clients
 :::
 
-## Coming Soon
+The Go SDK is currently in development. For now, you can interact with DuraGraph using the REST API.
 
-The Go SDK is planned for Q2-Q3 2024.
+## Using the REST API
 
-📚 **For now**: [REST API Documentation](../../api-reference/overview.md)
+```go
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "net/http"
+)
+
+const baseURL = "http://localhost:8081/api/v1"
+
+func main() {
+    // Create an assistant
+    assistant := map[string]interface{}{
+        "name":         "my-assistant",
+        "graph_schema": map[string]interface{}{},
+    }
+
+    body, _ := json.Marshal(assistant)
+    resp, err := http.Post(baseURL+"/assistants", "application/json", bytes.NewBuffer(body))
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+
+    var result map[string]interface{}
+    json.NewDecoder(resp.Body).Decode(&result)
+    fmt.Printf("Created assistant: %v\n", result)
+}
+```
+
+## LangGraph SDK Compatibility
+
+You can also use any LangGraph-compatible Go client, as DuraGraph implements the same API:
+
+```go
+// Point your LangGraph client to DuraGraph
+client := langgraph.NewClient("http://localhost:8081")
+```
+
+## Resources
+
+- [REST API Documentation](/docs/api-reference/rest-api)
+- [SSE Streaming](/docs/api-reference/sse-streaming)
+- [Architecture Overview](/docs/architecture/overview)

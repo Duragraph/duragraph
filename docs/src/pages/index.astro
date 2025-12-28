@@ -7,8 +7,8 @@ import '../styles/landing.css';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DuraGraph - Durable Workflows. Open Source. Cloud Ready.</title>
-    <meta name="description" content="DuraGraph is an open-core orchestration platform for AI and data workflows — self-host or run on DuraGraph Cloud." />
+    <title>DuraGraph - Reliable AI Workflows. Open Source. Deploy Anywhere.</title>
+    <meta name="description" content="DuraGraph is an open-source orchestration platform for AI and data workflows. Self-host on any cloud with full observability and fault tolerance." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body class="min-h-screen bg-background">
@@ -26,10 +26,7 @@ import '../styles/landing.css';
           <nav class="hidden md:flex items-center gap-8">
             <a href="#why" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Why DuraGraph</a>
             <a href="#how" class="text-sm text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
-            <span class="relative inline-block">
-              <span class="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-primary text-primary-foreground text-[8px] font-semibold uppercase tracking-wide whitespace-nowrap">Soon</span>
-              <span class="text-sm text-muted-foreground/60 cursor-not-allowed select-none">Cloud</span>
-            </span>
+            <a href="#features" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a>
             <a href="#use-cases" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Use Cases</a>
             <a href="/docs/introduction" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Docs</a>
           </nav>
@@ -77,19 +74,19 @@ import '../styles/landing.css';
             <!-- Badge -->
             <div class="inline-flex items-center gap-2 px-3 py-1 bg-accent text-accent-foreground text-sm font-medium mb-8">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-              <span>Open Source & Cloud Ready</span>
+              <span>Open Source — Deploy Anywhere</span>
             </div>
 
             <!-- Title -->
             <h1 class="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold text-foreground mb-8 leading-[1.1] tracking-tight sm:tracking-normal">
-              Durable Workflows.<br class="hidden xl:block" />
+              Reliable AI Workflows.<br class="hidden xl:block" />
               <span class="text-primary">Open Source.</span><br class="hidden xl:block" />
-              Cloud Ready.
+              Deploy Anywhere.
             </h1>
 
             <!-- Subtitle -->
             <p class="text-lg text-muted-foreground mb-10 max-w-2xl mx-auto">
-              DuraGraph is an open-core orchestration platform for AI and data workflows — self-host or run on DuraGraph Cloud.
+              DuraGraph is an open-source control plane for AI and data workflows. Self-host on any cloud with full observability, fault tolerance, and LangGraph compatibility.
             </p>
 
             <!-- CTAs -->
@@ -99,17 +96,15 @@ import '../styles/landing.css';
                 class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 transition-colors"
               >
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                Get Started (OSS)
+                View on GitHub
               </a>
-              <span class="relative inline-block">
-                <span class="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-primary text-primary-foreground text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap shadow-sm z-10">Coming Soon</span>
-                <span
-                  class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-muted-foreground bg-secondary/60 border border-border cursor-not-allowed select-none"
-                >
-                  Try DuraGraph Cloud
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
-                </span>
-              </span>
+              <a
+                href="/docs/introduction"
+                class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-foreground bg-secondary hover:bg-secondary/80 transition-colors"
+              >
+                Read the Docs
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+              </a>
             </div>
 
             <!-- Stats -->
@@ -119,12 +114,12 @@ import '../styles/landing.css';
                 <div class="text-xs text-muted-foreground mt-1 uppercase tracking-wide">LangGraph Compatible</div>
               </div>
               <div>
-                <div class="text-2xl font-bold text-foreground font-mono">&lt;10ms</div>
-                <div class="text-xs text-muted-foreground mt-1 uppercase tracking-wide">P99 Latency</div>
+                <div class="text-2xl font-bold text-foreground font-mono">OSS</div>
+                <div class="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Fully Open Source</div>
               </div>
               <div>
-                <div class="text-2xl font-bold text-foreground font-mono">99.9%</div>
-                <div class="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Uptime SLA</div>
+                <div class="text-2xl font-bold text-foreground font-mono">Any</div>
+                <div class="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Cloud / On-Prem</div>
               </div>
             </div>
           </div>
@@ -147,8 +142,8 @@ import '../styles/landing.css';
               <div class="inline-flex items-center justify-center w-10 h-10 bg-primary/10 text-primary mb-4">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
               </div>
-              <h3 class="text-lg font-semibold text-foreground mb-2">Resilient</h3>
-              <p class="text-sm text-muted-foreground">Fault-tolerant, stateful workflows that recover gracefully from failures</p>
+              <h3 class="text-lg font-semibold text-foreground mb-2">Fault Tolerant</h3>
+              <p class="text-sm text-muted-foreground">Event-sourced workflows that recover gracefully from failures with full state reconstruction</p>
             </div>
 
             <!-- Developer-Friendly -->
@@ -157,16 +152,16 @@ import '../styles/landing.css';
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
               </div>
               <h3 class="text-lg font-semibold text-foreground mb-2">Developer-Friendly</h3>
-              <p class="text-sm text-muted-foreground">Graph APIs, LangGraph compatible, multi-language SDKs</p>
+              <p class="text-sm text-muted-foreground">LangGraph-compatible APIs, multi-language SDKs, and familiar workflow patterns</p>
             </div>
 
-            <!-- Cloud-Scale -->
+            <!-- Self-Hosted -->
             <div class="p-6 bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow">
               <div class="inline-flex items-center justify-center w-10 h-10 bg-primary/10 text-primary mb-4">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
               </div>
-              <h3 class="text-lg font-semibold text-foreground mb-2">Cloud-Scale</h3>
-              <p class="text-sm text-muted-foreground">Managed hosting, real-time monitoring, OpenTelemetry tracing</p>
+              <h3 class="text-lg font-semibold text-foreground mb-2">Deploy Anywhere</h3>
+              <p class="text-sm text-muted-foreground">Self-host on AWS, GCP, Azure, on-premises, or any infrastructure you control</p>
             </div>
           </div>
         </div>
@@ -207,78 +202,114 @@ import '../styles/landing.css';
         </div>
       </section>
 
-      <!-- OSS vs Cloud -->
-      <section id="cloud" class="py-20 lg:py-28">
+      <!-- Features (replaces OSS vs Cloud) -->
+      <section id="features" class="py-20 lg:py-28">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h2 class="text-2xl sm:text-3xl font-bold text-center text-foreground mb-4">
-            Open-Source Core + Cloud Upgrade
+            Everything You Need
           </h2>
           <p class="text-center text-muted-foreground mb-16 max-w-2xl mx-auto">
-            Start free, scale with confidence
+            All features included, no premium tiers
           </p>
 
-          <div class="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-            <!-- OSS Card -->
-            <div class="bg-card shadow-[var(--shadow-card)] p-8">
-              <div class="mb-6">
-                <h3 class="text-lg font-semibold text-foreground mb-1">DuraGraph OSS</h3>
-                <div class="h-px w-12 bg-muted-foreground/30"></div>
+          <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
+            <!-- Feature 1 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">Event Sourcing</h3>
+                  <p class="text-sm text-muted-foreground mt-1">Immutable event log for replay, debugging, and audit</p>
+                </div>
               </div>
-              <ul class="space-y-3">
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-muted-foreground">Apache-licensed, self-host</span>
-                </li>
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-muted-foreground">Core orchestration engine</span>
-                </li>
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-muted-foreground">Multi-language SDKs</span>
-                </li>
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-muted-foreground">LangGraph compatibility</span>
-                </li>
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-muted-foreground">Community support</span>
-                </li>
-              </ul>
             </div>
 
-            <!-- Cloud Card -->
-            <div class="bg-card shadow-[var(--shadow-elevated)] p-8 relative border-l-2 border-l-primary">
-              <div class="absolute -top-px -right-px px-2 py-0.5 bg-primary text-primary-foreground text-xs font-medium">
-                Coming Soon
+            <!-- Feature 2 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">LangGraph Compatible</h3>
+                  <p class="text-sm text-muted-foreground mt-1">Drop-in replacement for LangGraph Cloud APIs</p>
+                </div>
               </div>
-              <div class="mb-6">
-                <h3 class="text-lg font-semibold text-foreground mb-1">DuraGraph Cloud</h3>
-                <div class="h-px w-12 bg-primary"></div>
+            </div>
+
+            <!-- Feature 3 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">Human-in-the-Loop</h3>
+                  <p class="text-sm text-muted-foreground mt-1">Built-in support for approvals and user input</p>
+                </div>
               </div>
-              <ul class="space-y-3">
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-foreground">Managed hosting & scaling</span>
-                </li>
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-foreground">Enterprise security & RBAC</span>
-                </li>
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-foreground">Advanced monitoring & alerts</span>
-                </li>
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-foreground">SLA-backed uptime</span>
-                </li>
-                <li class="flex items-start gap-3 text-sm">
-                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  <span class="text-foreground">Priority support</span>
-                </li>
-              </ul>
+            </div>
+
+            <!-- Feature 4 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">Real-time Streaming</h3>
+                  <p class="text-sm text-muted-foreground mt-1">SSE-based updates for live monitoring</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Feature 5 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">RBAC & Multi-tenancy</h3>
+                  <p class="text-sm text-muted-foreground mt-1">Enterprise access control included</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Feature 6 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">OpenTelemetry</h3>
+                  <p class="text-sm text-muted-foreground mt-1">Prometheus metrics and distributed tracing</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Feature 7 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">Dashboard UI</h3>
+                  <p class="text-sm text-muted-foreground mt-1">Visual management interface included</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Feature 8 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">Reliable Delivery</h3>
+                  <p class="text-sm text-muted-foreground mt-1">Outbox pattern for at-least-once guarantees</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Feature 9 -->
+            <div class="p-5 bg-card shadow-[var(--shadow-card)]">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div>
+                  <h3 class="font-medium text-foreground">Vendor Neutral</h3>
+                  <p class="text-sm text-muted-foreground mt-1">No lock-in to any cloud or provider</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -328,7 +359,7 @@ import '../styles/landing.css';
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
               </div>
               <h3 class="text-base font-semibold text-foreground mb-1">Enterprise Apps</h3>
-              <p class="text-sm text-muted-foreground">Power mission-critical workflows with SLA-backed reliability</p>
+              <p class="text-sm text-muted-foreground">Power mission-critical workflows with enterprise-grade reliability</p>
             </div>
           </div>
         </div>
@@ -364,6 +395,17 @@ import '../styles/landing.css';
           </div>
         </div>
       </section>
+
+      <!-- Sustainability Note -->
+      <section class="py-16 bg-muted/30">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <p class="text-sm text-muted-foreground">
+            DuraGraph is an open-source project focused on reliable and observable AI workflows.
+            In the future, optional hosted or support offerings may be explored to ensure long-term sustainability.
+            The core project will remain open and vendor-neutral.
+          </p>
+        </div>
+      </section>
     </main>
 
     <!-- Footer -->
@@ -377,7 +419,7 @@ import '../styles/landing.css';
               <span class="font-semibold text-foreground">DuraGraph</span>
             </div>
             <p class="text-sm text-muted-foreground">
-              Durable Workflows. Open Source. Cloud Ready.
+              Reliable AI Workflows. Open Source. Deploy Anywhere.
             </p>
           </div>
 
@@ -385,8 +427,8 @@ import '../styles/landing.css';
           <div>
             <h4 class="text-sm font-medium text-foreground mb-3 uppercase tracking-wide">License</h4>
             <p class="text-sm text-muted-foreground">
-              <span class="text-foreground">DuraGraph Core</span> is Apache 2.0 licensed.
-              <span class="text-foreground">DuraGraph Cloud</span> is enterprise-ready hosting.
+              DuraGraph is open source under the Apache 2.0 license.
+              All features are included — no premium tiers.
             </p>
           </div>
 
@@ -396,7 +438,6 @@ import '../styles/landing.css';
             <div class="flex flex-wrap gap-4">
               <a href="/docs/introduction" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Docs</a>
               <a href="https://github.com/duragraph/duragraph" target="_blank" rel="noopener noreferrer" class="text-sm text-muted-foreground hover:text-foreground transition-colors">GitHub</a>
-              <a href="#cloud" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Cloud</a>
               <a href="/blog" class="text-sm text-muted-foreground hover:text-foreground transition-colors">Blog</a>
             </div>
           </div>

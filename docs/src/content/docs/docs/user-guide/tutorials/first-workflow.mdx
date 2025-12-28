@@ -1,6 +1,6 @@
 ---
 title: Your First Workflow
-description: Build your first AI workflow with DuraGraph
+description: Build a complete AI workflow from scratch
 ---
 
 Learn to build a complete AI workflow from scratch using Duragraph.
@@ -15,7 +15,7 @@ A customer support chatbot that:
 
 ## Prerequisites
 
-- Duragraph running locally ([Quickstart Guide](../quickstart.md))
+- DuraGraph running locally ([Quick Start](../../getting-started))
 - Python 3.8+ installed
 - Basic understanding of AI/LLM concepts
 
@@ -74,7 +74,7 @@ workflow.add_step("standard_response", Step.llm_call(
 from duragraph import DuragraphClient
 
 # Initialize client
-client = DuragraphClient(base_url="http://localhost:8080")
+client = DuragraphClient(base_url="http://localhost:8081")
 
 # Create assistant
 assistant = client.create_assistant(
@@ -287,7 +287,7 @@ def create_customer_support_workflow():
 
 def main():
     # Initialize
-    client = DuragraphClient(base_url="http://localhost:8080")
+    client = DuragraphClient(base_url="http://localhost:8081")
     workflow = create_customer_support_workflow()
 
     # Create assistant
@@ -320,19 +320,19 @@ if __name__ == "__main__":
 
 ## Next Steps
 
-🎯 **Enhance your workflow:**
-- [Add multi-agent coordination](multi-agent.md)
-- [Implement caching for performance](../concepts/workflows.md)
-- [Set up monitoring and alerts](../concepts/observability.md)
+**Enhance your workflow:**
+- [Add multi-agent coordination](/docs/user-guide/tutorials/multi-agent)
+- [Workflow concepts](/docs/user-guide/concepts/workflows)
+- [Set up monitoring](/docs/user-guide/concepts/observability)
 
-🔍 **Explore advanced features:**
-- [Human-in-the-loop patterns](../concepts/agents.md)
-- [Custom tool integration](../sdks/python.md#custom-tools)
-- [Workflow versioning and deployment](production-deploy.md)
+**Explore advanced features:**
+- [Human-in-the-loop patterns](/docs/user-guide/concepts/agents)
+- [Python SDK](/docs/user-guide/sdks/python)
+- [Production deployment](/docs/user-guide/tutorials/production-deploy)
 
-🛠️ **Production readiness:**
-- [Scale for high traffic](production-deploy.md)
-- [Set up proper monitoring](../../operations/observability.md)
-- [Configure security](../../operations/security.md)
+**Production readiness:**
+- [Observability](/docs/ops/observability)
+- [Security](/docs/ops/security)
+- [Troubleshooting](/docs/ops/troubleshooting)
 
-**Need help?** Check our [troubleshooting guide](../../operations/troubleshooting.md) or [join the community](https://github.com/adwiteeymauriya/duragraph/discussions)!
+**Need help?** [Join the community](https://github.com/duragraph/duragraph/discussions).
