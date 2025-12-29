@@ -70,6 +70,7 @@ Homepage = "https://duragraph.io"
 Documentation = "https://docs.duragraph.io"
 Repository = "https://github.com/duragraph/duragraph-python"
 Issues = "https://github.com/duragraph/duragraph-python/issues"
+Changelog = "https://github.com/duragraph/duragraph-python/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/duragraph"]
