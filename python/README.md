@@ -1,7 +1,7 @@
 # DuraGraph Python SDK
 
-[![PyPI version](https://badge.fury.io/py/duragraph.svg)](https://badge.fury.io/py/duragraph)
-[![Python](https://img.shields.io/pypi/pyversions/duragraph.svg)](https://pypi.org/project/duragraph/)
+[![PyPI version](https://badge.fury.io/py/duragraph-python.svg)](https://badge.fury.io/py/duragraph-python)
+[![Python](https://img.shields.io/pypi/pyversions/duragraph-python.svg)](https://pypi.org/project/duragraph-python/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 Python SDK for [DuraGraph](https://github.com/duragraph/duragraph) - Reliable AI Workflow Orchestration.
@@ -11,16 +11,16 @@ Build AI agents with decorators, deploy to a control plane, and get full observa
 ## Installation
 
 ```bash
-pip install duragraph
+pip install duragraph-python
 
 # With OpenAI support
-pip install duragraph[openai]
+pip install duragraph-python[openai]
 
 # With Anthropic support
-pip install duragraph[anthropic]
+pip install duragraph-python[anthropic]
 
 # All features
-pip install duragraph[all]
+pip install duragraph-python[all]
 ```
 
 ## Quick Start

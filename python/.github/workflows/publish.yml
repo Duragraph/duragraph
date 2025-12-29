@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/duragraph
+      url: https://pypi.org/p/duragraph-python
     permissions:
       id-token: write  # Required for trusted publishing
 
@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/duragraph
+      url: https://test.pypi.org/p/duragraph-python
     permissions:
       id-token: write
 
