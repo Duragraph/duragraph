@@ -1,0 +1,269 @@
+---
+title: Evaluation Scorers
+description: Reference for all evaluation scorers in DuraGraph Evals
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+Scorers evaluate agent outputs and produce scores. DuraGraph supports both heuristic (rule-based) and LLM-based scorers.
+
+## Heuristic Scorers
+
+Fast, deterministic scorers for objective criteria.
+
+### exact_match
+
+Checks if output exactly matches expected value.
+
+```json
+{
+  "name": "answer_correct",
+  "scorer": "exact_match",
+  "config": {
+    "field": "answer",
+    "case_sensitive": false
+  }
+}
+```
+
+### contains
+
+Checks if output contains a substring.
+
+```json
+{
+  "name": "mentions_refund",
+  "scorer": "contains",
+  "config": {
+    "substring": "refund",
+    "case_sensitive": false
+  }
+}
+```
+
+### regex
+
+Checks if output matches a regular expression.
+
+```json
+{
+  "name": "valid_email",
+  "scorer": "regex",
+  "config": {
+    "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+  }
+}
+```
+
+### json_valid
+
+Checks if output is valid JSON.
+
+```json
+{
+  "name": "valid_json",
+  "scorer": "json_valid"
+}
+```
+
+### json_schema
+
+Validates output against a JSON Schema.
+
+```json
+{
+  "name": "valid_response",
+  "scorer": "json_schema",
+  "config": {
+    "schema": {
+      "type": "object",
+      "required": ["action", "message"],
+      "properties": {
+        "action": {"type": "string", "enum": ["reply", "transfer", "escalate"]},
+        "message": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}
+```
+
+### length
+
+Checks if output length is within bounds.
+
+```json
+{
+  "name": "appropriate_length",
+  "scorer": "length",
+  "config": {
+    "min": 50,
+    "max": 500
+  }
+}
+```
+
+## LLM Judge Scorer
+
+Uses an LLM to evaluate subjective qualities.
+
+### Basic Usage
+
+```json
+{
+  "name": "helpfulness",
+  "scorer": "llm_judge",
+  "config": {
+    "model": "gpt-4o",
+    "criteria": ["helpfulness", "accuracy", "clarity"]
+  }
+}
+```
+
+### Custom Rubric
+
+```json
+{
+  "name": "custom_quality",
+  "scorer": "llm_judge",
+  "config": {
+    "model": "gpt-4o",
+    "rubric": "Evaluate the response on:\n1. Does it address the user's question?\n2. Is the tone professional?\n3. Is the information accurate?\n\nScore 1-5 for each criterion."
+  }
+}
+```
+
+### Multi-Criteria
+
+```json
+{
+  "name": "comprehensive",
+  "scorer": "llm_judge",
+  "config": {
+    "model": "claude-3-sonnet",
+    "criteria": [
+      {
+        "name": "relevance",
+        "description": "How relevant is the response to the query?"
+      },
+      {
+        "name": "completeness",
+        "description": "Does the response fully address the question?"
+      },
+      {
+        "name": "safety",
+        "description": "Is the response safe and appropriate?"
+      }
+    ]
+  }
+}
+```
+
+## Using Scorers in Python SDK
+
+<Tabs>
+<TabItem label="Heuristic">
+```python
+from duragraph.evals import (
+    EvalRunner,
+    ExactMatch,
+    Contains,
+    Regex,
+    JSONSchema,
+)
+
+runner = EvalRunner(
+    graph=my_agent,
+    scorers=[
+        ExactMatch(field="action"),
+        Contains(substring="thank you", case_sensitive=False),
+        JSONSchema(schema={"type": "object", "required": ["response"]}),
+    ],
+)
+
+results = await runner.run(dataset)
+```
+</TabItem>
+<TabItem label="LLM Judge">
+```python
+from duragraph.evals import EvalRunner, LLMJudge
+
+runner = EvalRunner(
+    graph=my_agent,
+    scorers=[
+        LLMJudge(
+            model="gpt-4o",
+            criteria=["helpfulness", "accuracy"],
+            rubric="Rate each criterion 1-5",
+        ),
+    ],
+)
+
+results = await runner.run(dataset)
+```
+</TabItem>
+</Tabs>
+
+## Score Output
+
+All scorers produce a standardized score:
+
+```python
+@dataclass
+class Score:
+    criterion: str      # Name of the criterion
+    value: float        # Score value (0-1 for pass/fail, 1-5 for ratings)
+    passed: bool        # Whether the score passes threshold
+    explanation: str    # Human-readable explanation
+```
+
+## Custom Scorers
+
+Create custom scorers by implementing the Scorer interface:
+
+```python
+from duragraph.evals import Scorer, Score
+
+class SentimentScorer(Scorer):
+    """Custom scorer that checks sentiment."""
+
+    def __init__(self, target_sentiment: str = "positive"):
+        self.target_sentiment = target_sentiment
+
+    async def score(
+        self,
+        output: str,
+        expected: str | None,
+        config: dict | None,
+    ) -> Score:
+        # Your scoring logic here
+        sentiment = analyze_sentiment(output)
+        passed = sentiment == self.target_sentiment
+
+        return Score(
+            criterion="sentiment",
+            value=1.0 if passed else 0.0,
+            passed=passed,
+            explanation=f"Detected sentiment: {sentiment}",
+        )
+
+# Use custom scorer
+runner = EvalRunner(
+    graph=my_agent,
+    scorers=[SentimentScorer(target_sentiment="positive")],
+)
+```
+
+## Best Practices
+
+<Aside type="tip" title="Combine Scorers">
+Use multiple scorers together - heuristic for objective checks, LLM judge for subjective quality.
+</Aside>
+
+<Aside type="caution" title="LLM Judge Costs">
+LLM judge adds latency and cost. Use sparingly and cache results when possible.
+</Aside>
+
+1. **Start simple**: Begin with heuristic scorers, add LLM judge for nuanced evaluation
+2. **Be specific**: Clear criteria produce more reliable scores
+3. **Calibrate thresholds**: Adjust pass/fail thresholds based on your quality bar
+4. **Monitor drift**: Track scores over time to catch regressions

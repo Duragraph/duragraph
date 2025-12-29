@@ -1,0 +1,287 @@
+---
+title: Agent Memory
+description: Build agents with persistent memory using DuraGraph
+---
+
+import { Tabs, TabItem, Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+DuraGraph provides a sophisticated memory system that enables agents to remember past interactions, learn from experience, and maintain context across conversations.
+
+## Memory Architecture
+
+DuraGraph implements a hierarchical memory system inspired by human cognition:
+
+```
+┌─────────────────────────────────────────────────┐
+│  L1: Working Memory (current context)           │
+│  - Active conversation                          │
+│  - Immediate task state                         │
+├─────────────────────────────────────────────────┤
+│  L2: Episodic Memory (recent interactions)      │
+│  - Past conversations                           │
+│  - Stored in vector database                    │
+├─────────────────────────────────────────────────┤
+│  L3: Semantic Memory (facts & knowledge)        │
+│  - Entity relationships                         │
+│  - Stored in knowledge graph                    │
+└─────────────────────────────────────────────────┘
+```
+
+## Quick Start
+
+### Basic Memory Usage
+
+```python
+from duragraph import Graph, llm_node
+from duragraph.memory import MemoryManager
+
+# Create memory manager
+memory = MemoryManager(
+    vector_store=ChromaVectorStore(collection="agent_memory"),
+)
+
+@Graph
+class AssistantWithMemory:
+    @llm_node
+    async def respond(self, state: State) -> State:
+        # Recall relevant memories
+        memories = await memory.recall(
+            state.user_message,
+            k=5,
+        )
+
+        # Include memories in context
+        context = "\n".join([m.content for m in memories])
+
+        response = await self.llm.complete(
+            messages=[
+                {"role": "system", "content": f"Context from memory:\n{context}"},
+                {"role": "user", "content": state.user_message},
+            ]
+        )
+
+        # Remember this interaction
+        await memory.remember(
+            f"User asked: {state.user_message}\nAssistant responded: {response}",
+            importance=0.7,
+        )
+
+        state.response = response
+        return state
+```
+
+## Memory Manager API
+
+### remember()
+
+Store a memory with optional importance scoring:
+
+```python
+await memory.remember(
+    content="User prefers formal communication style",
+    importance=0.8,  # 0-1, higher = more important
+    memory_type="episodic",  # or "semantic"
+    metadata={"user_id": "123", "topic": "preferences"},
+)
+```
+
+### recall()
+
+Retrieve relevant memories with weighted scoring:
+
+```python
+memories = await memory.recall(
+    query="communication preferences",
+    k=5,
+    memory_types=["episodic", "semantic"],
+    recency_weight=0.3,     # Prefer recent memories
+    importance_weight=0.3,  # Prefer important memories
+    relevance_weight=0.4,   # Prefer semantically similar
+)
+```
+
+### forget()
+
+Remove a specific memory:
+
+```python
+await memory.forget(memory_id="mem_123")
+```
+
+### consolidate()
+
+Consolidate short-term memories to long-term storage:
+
+```python
+await memory.consolidate()
+```
+
+## Hierarchical Memory
+
+For advanced use cases, use the hierarchical memory system:
+
+```python
+from duragraph.memory import HierarchicalMemory
+from duragraph.vectorstores import QdrantVectorStore
+from duragraph.knowledgegraph import Neo4jGraph
+
+memory = HierarchicalMemory(
+    working_memory_size=10,  # Last 10 messages in context
+    vector_store=QdrantVectorStore(
+        collection="episodic_memory",
+        url="http://localhost:6333",
+    ),
+    knowledge_graph=Neo4jGraph(
+        uri="bolt://localhost:7687",
+    ),
+)
+
+# Multi-tier recall
+memories = await memory.recall(
+    query="user preferences",
+    tiers=["working", "episodic", "semantic"],
+    k_per_tier={"working": 3, "episodic": 5, "semantic": 2},
+)
+```
+
+## Memory Types
+
+<CardGrid>
+  <Card title="Episodic Memory" icon="clock">
+    Specific past events and interactions. Time-decayed importance.
+  </Card>
+  <Card title="Semantic Memory" icon="puzzle">
+    Facts, concepts, and entity relationships. Persistent knowledge.
+  </Card>
+  <Card title="Procedural Memory" icon="setting">
+    Learned behaviors and patterns. Skills and preferences.
+  </Card>
+</CardGrid>
+
+### Episodic Memory
+
+Store and retrieve specific interactions:
+
+```python
+# Store episode
+await memory.remember(
+    "User reported bug #1234 about login issues",
+    memory_type="episodic",
+    metadata={"timestamp": datetime.now(), "topic": "bug_report"},
+)
+
+# Recall episodes
+bugs = await memory.recall(
+    "login problems",
+    memory_types=["episodic"],
+    filter={"topic": "bug_report"},
+)
+```
+
+### Semantic Memory
+
+Store facts and relationships:
+
+```python
+# Store fact
+await memory.remember(
+    "Customer ACME Corp is on Enterprise plan",
+    memory_type="semantic",
+    metadata={"entity": "ACME Corp", "fact_type": "subscription"},
+)
+
+# Query facts
+facts = await memory.recall(
+    "ACME Corp subscription",
+    memory_types=["semantic"],
+)
+```
+
+## Importance Scoring
+
+DuraGraph uses importance scoring to prioritize memories:
+
+```python
+# High importance - critical information
+await memory.remember(
+    "User is allergic to peanuts",
+    importance=1.0,  # Never forget
+)
+
+# Medium importance - useful context
+await memory.remember(
+    "User prefers email over phone",
+    importance=0.5,
+)
+
+# Low importance - transient information
+await memory.remember(
+    "User mentioned the weather",
+    importance=0.1,  # May be forgotten during consolidation
+)
+```
+
+## Memory Consolidation
+
+Periodically consolidate memories to optimize storage:
+
+```python
+# Manual consolidation
+await memory.consolidate()
+
+# Automatic consolidation (background task)
+memory = MemoryManager(
+    auto_consolidate=True,
+    consolidation_interval=3600,  # Every hour
+)
+```
+
+During consolidation:
+1. Low-importance memories are pruned
+2. Similar memories are merged
+3. Episodic memories may be promoted to semantic
+
+## Best Practices
+
+<Aside type="tip" title="Be Selective">
+Don't remember everything. Focus on information that will be useful for future interactions.
+</Aside>
+
+<Aside type="caution" title="Privacy">
+Be mindful of storing sensitive information. Consider PII policies and data retention.
+</Aside>
+
+1. **Score importance thoughtfully**: Not all information is equally valuable
+2. **Use metadata**: Tag memories for easier filtering and retrieval
+3. **Consolidate regularly**: Prevent memory bloat
+4. **Test recall**: Verify memories are retrievable with expected queries
+5. **Consider context window**: Balance memory context with prompt limits
+
+## Integration with Threads
+
+Memory integrates with DuraGraph threads for conversation persistence:
+
+```python
+# Memories scoped to thread
+memory = MemoryManager(
+    thread_id="thread_123",
+    vector_store=store,
+)
+
+# Or global memories
+memory = MemoryManager(
+    vector_store=store,
+    scope="global",
+)
+```
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Vector Stores" icon="document">
+    Configure [vector stores](/docs/user-guide/sdks/python#vector-stores) for memory storage
+  </Card>
+  <Card title="Knowledge Graphs" icon="puzzle">
+    Add [knowledge graphs](/docs/user-guide/integrations/knowledge-graphs) for semantic memory
+  </Card>
+</CardGrid>

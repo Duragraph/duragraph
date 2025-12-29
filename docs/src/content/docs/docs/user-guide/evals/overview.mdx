@@ -1,0 +1,216 @@
+---
+title: Evaluations Overview
+description: Evaluate and monitor AI agent quality with DuraGraph Evals
+---
+
+import { Tabs, TabItem, Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+DuraGraph Evals provides a comprehensive evaluation framework for AI agents. Test your agents automatically, collect human feedback, and monitor quality over time.
+
+## Why Evaluate?
+
+AI agents can fail in subtle ways. Evaluations help you:
+
+- **Catch regressions** before deploying to production
+- **Compare versions** to pick the best prompt or model
+- **Monitor quality** continuously in production
+- **Collect feedback** to improve over time
+
+## Evaluation Types
+
+<CardGrid>
+  <Card title="Heuristic" icon="setting">
+    Rule-based checks like exact match, contains, regex, JSON validation
+  </Card>
+  <Card title="LLM Judge" icon="rocket">
+    Use GPT-4 or Claude to evaluate subjective quality
+  </Card>
+  <Card title="Human Feedback" icon="star">
+    Collect ratings, thumbs up/down, and comments
+  </Card>
+  <Card title="Comparison" icon="random">
+    A/B test between assistant versions
+  </Card>
+</CardGrid>
+
+## Quick Start
+
+### 1. Create a Dataset
+
+First, create a dataset with test cases:
+
+<Tabs>
+<TabItem label="API">
+```bash
+curl -X POST http://localhost:8081/api/v1/datasets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "customer_support_cases",
+    "description": "Common customer support scenarios"
+  }'
+```
+</TabItem>
+<TabItem label="Python SDK">
+```python
+from duragraph.evals import Dataset
+
+dataset = Dataset.create(
+    name="customer_support_cases",
+    description="Common customer support scenarios"
+)
+```
+</TabItem>
+</Tabs>
+
+### 2. Add Test Examples
+
+Add input/expected output pairs:
+
+<Tabs>
+<TabItem label="API">
+```bash
+curl -X POST http://localhost:8081/api/v1/datasets/{dataset_id}/examples \
+  -H "Content-Type: application/json" \
+  -d '{
+    "examples": [
+      {
+        "input": {"message": "How do I reset my password?"},
+        "expected_output": {"contains": "reset", "action": "password_reset"},
+        "tags": ["password", "account"]
+      },
+      {
+        "input": {"message": "I want a refund"},
+        "expected_output": {"action": "refund_request"},
+        "tags": ["billing", "refund"]
+      }
+    ]
+  }'
+```
+</TabItem>
+<TabItem label="Python SDK">
+```python
+dataset.add_examples([
+    {
+        "input": {"message": "How do I reset my password?"},
+        "expected_output": {"contains": "reset", "action": "password_reset"},
+        "tags": ["password", "account"]
+    },
+    {
+        "input": {"message": "I want a refund"},
+        "expected_output": {"action": "refund_request"},
+        "tags": ["billing", "refund"]
+    }
+])
+```
+</TabItem>
+</Tabs>
+
+### 3. Run an Evaluation
+
+Create and run an evaluation against your assistant:
+
+<Tabs>
+<TabItem label="API">
+```bash
+curl -X POST http://localhost:8081/api/v1/evals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "support_agent_v1.2",
+    "type": "heuristic",
+    "assistant_id": "your-assistant-id",
+    "dataset_id": "your-dataset-id",
+    "criteria": [
+      {
+        "name": "contains_action",
+        "scorer": "json_schema",
+        "config": {
+          "schema": {
+            "type": "object",
+            "required": ["action"]
+          }
+        }
+      },
+      {
+        "name": "response_quality",
+        "scorer": "llm_judge",
+        "config": {
+          "model": "gpt-4o",
+          "rubric": "Rate helpfulness 1-5"
+        }
+      }
+    ],
+    "run_immediately": true
+  }'
+```
+</TabItem>
+<TabItem label="Python SDK">
+```python
+from duragraph.evals import EvalRunner, ExactMatch, LLMJudge
+
+runner = EvalRunner(
+    graph=support_agent,
+    scorers=[
+        JSONSchema(schema={"type": "object", "required": ["action"]}),
+        LLMJudge(model="gpt-4o", rubric="Rate helpfulness 1-5"),
+    ],
+)
+
+results = await runner.run(dataset)
+print(f"Pass rate: {results.pass_rate:.1%}")
+print(f"Avg score: {results.avg_score:.2f}")
+```
+</TabItem>
+</Tabs>
+
+### 4. View Results
+
+Check evaluation results in the dashboard or via API:
+
+```bash
+curl http://localhost:8081/api/v1/evals/{eval_id}
+```
+
+```json
+{
+  "id": "eval-123",
+  "name": "support_agent_v1.2",
+  "status": "completed",
+  "summary": {
+    "total_examples": 50,
+    "passed": 45,
+    "failed": 5,
+    "pass_rate": 0.90,
+    "avg_score": 4.2,
+    "by_criterion": {
+      "contains_action": {"pass_rate": 0.96},
+      "response_quality": {"avg_score": 4.2}
+    }
+  }
+}
+```
+
+## Dashboard
+
+The Evals Dashboard provides visualization and analysis:
+
+- **Overview**: Pass rate trends, score distribution, regressions
+- **Eval Detail**: Drill down into individual results
+- **Comparison**: Side-by-side A/B testing
+- **Feedback**: Human annotation queue
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Scorers Reference" icon="document">
+    Learn about all available [scorers](/docs/user-guide/evals/scorers)
+  </Card>
+  <Card title="LLM Judge" icon="rocket">
+    Configure [LLM-as-judge](/docs/user-guide/evals/llm-judge) evaluation
+  </Card>
+  <Card title="Human Feedback" icon="star">
+    Set up [human feedback](/docs/user-guide/evals/feedback) collection
+  </Card>
+  <Card title="CI/CD Integration" icon="setting">
+    Add evals to your [CI/CD pipeline](/docs/user-guide/evals/ci-cd)
+  </Card>
+</CardGrid>
