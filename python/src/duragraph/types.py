@@ -1,10 +1,11 @@
 """Type definitions for DuraGraph SDK."""
 
-from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
+from typing import Any, Literal, TypedDict, Union
+
 from pydantic import BaseModel, Field
 
 # State is a dictionary that flows through the graph
-State = Dict[str, Any]
+State = dict[str, Any]
 
 
 class Message(BaseModel):
@@ -12,8 +13,8 @@ class Message(BaseModel):
 
     role: Literal["human", "assistant", "tool", "system"]
     content: str
-    name: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    name: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class HumanMessage(Message):
@@ -26,7 +27,7 @@ class AIMessage(Message):
     """Message from an AI assistant."""
 
     role: Literal["assistant"] = "assistant"
-    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 class ToolMessage(Message):
@@ -53,9 +54,9 @@ class NodeConfig(TypedDict, total=False):
     temperature: float
     max_tokens: int
     system_prompt: str
-    tools: List[str]
+    tools: list[str]
     stream: bool
-    retry_on: List[str]
+    retry_on: list[str]
     max_retries: int
     retry_delay: float
 
@@ -64,7 +65,7 @@ class GraphConfig(TypedDict, total=False):
     """Configuration for graph execution."""
 
     checkpoint_id: str
-    stream_mode: List[Literal["values", "updates", "messages", "events"]]
+    stream_mode: list[Literal["values", "updates", "messages", "events"]]
     recursion_limit: int
     timeout: float
 
@@ -74,11 +75,11 @@ class RunResult(BaseModel):
 
     run_id: str
     status: Literal["completed", "failed", "interrupted", "cancelled"]
-    output: Dict[str, Any]
-    error: Optional[str] = None
-    nodes_executed: List[str] = Field(default_factory=list)
-    tokens: Optional[Dict[str, int]] = None
-    duration_ms: Optional[float] = None
+    output: dict[str, Any]
+    error: str | None = None
+    nodes_executed: list[str] = Field(default_factory=list)
+    tokens: dict[str, int] | None = None
+    duration_ms: float | None = None
 
 
 class Event(BaseModel):
@@ -94,6 +95,6 @@ class Event(BaseModel):
         "checkpoint",
     ]
     run_id: str
-    node_id: Optional[str] = None
-    data: Dict[str, Any] = Field(default_factory=dict)
+    node_id: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
     timestamp: str

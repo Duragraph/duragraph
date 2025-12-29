@@ -1,6 +1,6 @@
 """Prompt store client for DuraGraph."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -12,7 +12,7 @@ class PromptStore:
         self,
         base_url: str,
         *,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
     ):
         """Initialize prompt store client.
 
@@ -24,7 +24,7 @@ class PromptStore:
         self.api_key = api_key
         self._client = httpx.Client(timeout=30.0)
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         """Get request headers."""
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -35,9 +35,9 @@ class PromptStore:
         self,
         prompt_id: str,
         *,
-        version: Optional[str] = None,
-        variant: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: str | None = None,
+        variant: str | None = None,
+    ) -> dict[str, Any]:
         """Get a prompt from the store.
 
         Args:
@@ -48,7 +48,7 @@ class PromptStore:
         Returns:
             Prompt data including content and metadata.
         """
-        params: Dict[str, str] = {}
+        params: dict[str, str] = {}
         if version:
             params["version"] = version
         if variant:
@@ -65,9 +65,9 @@ class PromptStore:
     def list_prompts(
         self,
         *,
-        namespace: Optional[str] = None,
-        tag: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        namespace: str | None = None,
+        tag: str | None = None,
+    ) -> list[dict[str, Any]]:
         """List prompts in the store.
 
         Args:
@@ -77,7 +77,7 @@ class PromptStore:
         Returns:
             List of prompt metadata.
         """
-        params: Dict[str, str] = {}
+        params: dict[str, str] = {}
         if namespace:
             params["namespace"] = namespace
         if tag:
@@ -96,10 +96,10 @@ class PromptStore:
         prompt_id: str,
         content: str,
         *,
-        description: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        description: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Create a new prompt.
 
         Args:
@@ -136,8 +136,8 @@ class PromptStore:
         prompt_id: str,
         content: str,
         *,
-        change_log: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        change_log: str | None = None,
+    ) -> dict[str, Any]:
         """Create a new version of an existing prompt.
 
         Args:

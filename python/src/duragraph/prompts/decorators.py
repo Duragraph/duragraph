@@ -1,7 +1,8 @@
 """Prompt decorators for DuraGraph."""
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -9,8 +10,8 @@ F = TypeVar("F", bound=Callable[..., Any])
 def prompt(
     prompt_id: str,
     *,
-    version: Optional[str] = None,
-    variant: Optional[str] = None,
+    version: str | None = None,
+    variant: str | None = None,
 ) -> Callable[[F], F]:
     """Decorator to attach a prompt from the prompt store to a node.
 

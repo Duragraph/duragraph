@@ -1,6 +1,7 @@
 """Graph decorator and class for DuraGraph workflows."""
 
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Type, TypeVar
+from collections.abc import AsyncIterator, Callable
+from typing import Any, TypeVar
 
 from duragraph.edges import Edge, NodeProxy
 from duragraph.nodes import NodeMetadata
@@ -15,16 +16,16 @@ class GraphDefinition:
     def __init__(
         self,
         graph_id: str,
-        nodes: Dict[str, NodeMetadata],
-        edges: List[Edge],
-        entrypoint: Optional[str] = None,
+        nodes: dict[str, NodeMetadata],
+        edges: list[Edge],
+        entrypoint: str | None = None,
     ):
         self.graph_id = graph_id
         self.nodes = nodes
         self.edges = edges
         self.entrypoint = entrypoint
 
-    def to_ir(self) -> Dict[str, Any]:
+    def to_ir(self) -> dict[str, Any]:
         """Convert to Intermediate Representation for the control plane."""
         nodes_ir = []
         for name, meta in self.nodes.items():
@@ -57,14 +58,14 @@ class GraphInstance:
     def __init__(self, definition: GraphDefinition, instance: Any):
         self._definition = definition
         self._instance = instance
-        self._control_plane_url: Optional[str] = None
+        self._control_plane_url: str | None = None
 
     def run(
         self,
         input: State,
         *,
-        config: Optional[GraphConfig] = None,
-        thread_id: Optional[str] = None,
+        config: GraphConfig | None = None,
+        thread_id: str | None = None,
     ) -> RunResult:
         """Execute the graph synchronously.
 
@@ -78,7 +79,7 @@ class GraphInstance:
         """
         # Local execution - traverse graph and execute nodes
         state = input.copy()
-        nodes_executed: List[str] = []
+        nodes_executed: list[str] = []
 
         current_node = self._definition.entrypoint
         if current_node is None:
@@ -120,8 +121,8 @@ class GraphInstance:
         self,
         input: State,
         *,
-        config: Optional[GraphConfig] = None,
-        thread_id: Optional[str] = None,
+        config: GraphConfig | None = None,
+        thread_id: str | None = None,
     ) -> RunResult:
         """Execute the graph asynchronously.
 
@@ -140,8 +141,8 @@ class GraphInstance:
         self,
         input: State,
         *,
-        config: Optional[GraphConfig] = None,
-        thread_id: Optional[str] = None,
+        config: GraphConfig | None = None,
+        thread_id: str | None = None,
     ) -> AsyncIterator[Event]:
         """Stream graph execution events.
 
@@ -230,8 +231,8 @@ class GraphInstance:
         self,
         control_plane_url: str,
         *,
-        worker_name: Optional[str] = None,
-        capabilities: Optional[List[str]] = None,
+        worker_name: str | None = None,
+        capabilities: list[str] | None = None,
     ) -> None:
         """Register and serve this graph on the control plane.
 
@@ -254,8 +255,8 @@ class GraphInstance:
         self,
         control_plane_url: str,
         *,
-        worker_name: Optional[str] = None,
-        capabilities: Optional[List[str]] = None,
+        worker_name: str | None = None,
+        capabilities: list[str] | None = None,
     ) -> None:
         """Async version of serve().
 
@@ -278,9 +279,9 @@ class GraphInstance:
 def Graph(
     id: str,
     *,
-    description: Optional[str] = None,
+    description: str | None = None,
     version: str = "1.0.0",
-) -> Callable[[Type[T]], Type[T]]:
+) -> Callable[[type[T]], type[T]]:
     """Decorator to define a graph from a class.
 
     Args:
@@ -306,7 +307,7 @@ def Graph(
             classify >> respond
     """
 
-    def decorator(cls: Type[T]) -> Type[T]:
+    def decorator(cls: type[T]) -> type[T]:
         original_init = cls.__init__
 
         def new_init(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -314,7 +315,7 @@ def Graph(
             self._graph_id = id
             self._graph_description = description
             self._graph_version = version
-            self._edges: List[Edge] = []
+            self._edges: list[Edge] = []
             self._setup_node_proxies()
 
         def _setup_node_proxies(self: Any) -> None:
@@ -334,8 +335,8 @@ def Graph(
 
         def _get_definition(self: Any) -> GraphDefinition:
             """Get the graph definition."""
-            nodes: Dict[str, NodeMetadata] = {}
-            entrypoint: Optional[str] = None
+            nodes: dict[str, NodeMetadata] = {}
+            entrypoint: str | None = None
 
             for name in dir(self):
                 if name.startswith("_"):
@@ -358,8 +359,8 @@ def Graph(
             self: Any,
             input: State,
             *,
-            config: Optional[GraphConfig] = None,
-            thread_id: Optional[str] = None,
+            config: GraphConfig | None = None,
+            thread_id: str | None = None,
         ) -> RunResult:
             """Execute the graph."""
             definition = self._get_definition()
@@ -370,8 +371,8 @@ def Graph(
             self: Any,
             input: State,
             *,
-            config: Optional[GraphConfig] = None,
-            thread_id: Optional[str] = None,
+            config: GraphConfig | None = None,
+            thread_id: str | None = None,
         ) -> RunResult:
             """Execute the graph asynchronously."""
             definition = self._get_definition()
@@ -382,8 +383,8 @@ def Graph(
             self: Any,
             input: State,
             *,
-            config: Optional[GraphConfig] = None,
-            thread_id: Optional[str] = None,
+            config: GraphConfig | None = None,
+            thread_id: str | None = None,
         ) -> AsyncIterator[Event]:
             """Stream graph execution events."""
             definition = self._get_definition()
@@ -395,8 +396,8 @@ def Graph(
             self: Any,
             control_plane_url: str,
             *,
-            worker_name: Optional[str] = None,
-            capabilities: Optional[List[str]] = None,
+            worker_name: str | None = None,
+            capabilities: list[str] | None = None,
         ) -> None:
             """Register and serve this graph."""
             definition = self._get_definition()
@@ -407,7 +408,7 @@ def Graph(
                 capabilities=capabilities,
             )
 
-        def as_subgraph(cls_self: Type[Any]) -> Any:
+        def as_subgraph(cls_self: type[Any]) -> Any:
             """Return this graph as a subgraph node."""
             # Create a subgraph node that can be used in another graph
             instance = cls_self()

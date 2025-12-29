@@ -131,10 +131,10 @@ control_plane = "http://localhost:8081"
     (project_dir / "pyproject.toml").write_text(pyproject_content)
 
     print(f"Created new DuraGraph project: {name}")
-    print(f"\nNext steps:")
+    print("\nNext steps:")
     print(f"  cd {name}")
-    print(f"  uv sync")
-    print(f"  duragraph dev")
+    print("  uv sync")
+    print("  duragraph dev")
     return 0
 
 

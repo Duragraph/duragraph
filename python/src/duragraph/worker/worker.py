@@ -2,8 +2,8 @@
 
 import asyncio
 import signal
-import sys
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -18,8 +18,8 @@ class Worker:
         self,
         control_plane_url: str,
         *,
-        name: Optional[str] = None,
-        capabilities: Optional[List[str]] = None,
+        name: str | None = None,
+        capabilities: list[str] | None = None,
         poll_interval: float = 1.0,
     ):
         """Initialize worker.
@@ -35,16 +35,16 @@ class Worker:
         self.capabilities = capabilities or []
         self.poll_interval = poll_interval
 
-        self._worker_id: Optional[str] = None
-        self._graphs: Dict[str, GraphDefinition] = {}
-        self._executors: Dict[str, Callable[..., Any]] = {}
+        self._worker_id: str | None = None
+        self._graphs: dict[str, GraphDefinition] = {}
+        self._executors: dict[str, Callable[..., Any]] = {}
         self._running = False
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     def register_graph(
         self,
         definition: GraphDefinition,
-        executor: Optional[Callable[..., Any]] = None,
+        executor: Callable[..., Any] | None = None,
     ) -> None:
         """Register a graph definition with this worker.
 
@@ -82,7 +82,7 @@ class Worker:
         data = response.json()
         return data["worker_id"]
 
-    async def _poll_for_work(self) -> Optional[Dict[str, Any]]:
+    async def _poll_for_work(self) -> dict[str, Any] | None:
         """Poll the control plane for work."""
         if self._client is None or self._worker_id is None:
             return None
@@ -103,7 +103,7 @@ class Worker:
         except Exception:
             return None
 
-    async def _execute_run(self, work: Dict[str, Any]) -> None:
+    async def _execute_run(self, work: dict[str, Any]) -> None:
         """Execute a run from the control plane."""
         run_id = work.get("run_id")
         graph_id = work.get("graph_id")
@@ -191,8 +191,8 @@ class Worker:
     async def _execute_llm_node(
         self,
         node_meta: Any,
-        state: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
         """Execute an LLM node."""
         # Placeholder - would integrate with LLM providers
         config = node_meta.config
@@ -204,8 +204,8 @@ class Worker:
     async def _execute_tool_node(
         self,
         node_meta: Any,
-        state: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
         """Execute a tool node."""
         # Placeholder - would execute registered tools
         return state
@@ -214,8 +214,8 @@ class Worker:
         self,
         run_id: str,
         node_meta: Any,
-        state: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+        state: dict[str, Any],
+    ) -> dict[str, Any] | None:
         """Execute a human-in-the-loop node."""
         config = node_meta.config
         prompt = config.get("prompt", "Please review")
@@ -234,7 +234,7 @@ class Worker:
         self,
         run_id: str,
         event_type: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> None:
         """Send an event to the control plane."""
         if self._client is None or self._worker_id is None:

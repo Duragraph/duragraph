@@ -1,7 +1,8 @@
 """Node decorators for DuraGraph workflows."""
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, Dict, List, Literal, Optional, TypeVar, Union
+from typing import Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -12,8 +13,8 @@ class NodeMetadata:
     def __init__(
         self,
         node_type: str,
-        name: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None,
+        name: str | None = None,
+        config: dict[str, Any] | None = None,
     ):
         self.node_type = node_type
         self.name = name
@@ -21,9 +22,9 @@ class NodeMetadata:
 
 
 def node(
-    name: Optional[str] = None,
+    name: str | None = None,
     *,
-    retry_on: Optional[List[str]] = None,
+    retry_on: list[str] | None = None,
     max_retries: int = 3,
     retry_delay: float = 1.0,
 ) -> Callable[[F], F]:
@@ -63,11 +64,11 @@ def node(
 def llm_node(
     model: str = "gpt-4o-mini",
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
     temperature: float = 0.7,
-    max_tokens: Optional[int] = None,
-    system_prompt: Optional[str] = None,
-    tools: Optional[List[str]] = None,
+    max_tokens: int | None = None,
+    system_prompt: str | None = None,
+    tools: list[str] | None = None,
     stream: bool = True,
 ) -> Callable[[F], F]:
     """LLM node decorator for AI-powered processing.
@@ -110,10 +111,10 @@ def llm_node(
 
 
 def tool_node(
-    name: Optional[str] = None,
+    name: str | None = None,
     *,
     timeout: float = 30.0,
-    retry_on: Optional[List[str]] = None,
+    retry_on: list[str] | None = None,
     max_retries: int = 3,
 ) -> Callable[[F], F]:
     """Tool node decorator for external tool execution.
@@ -151,7 +152,7 @@ def tool_node(
 
 
 def router_node(
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> Callable[[F], F]:
     """Router node decorator for conditional branching.
 
@@ -186,8 +187,8 @@ def router_node(
 def human_node(
     prompt: str = "Please review and continue",
     *,
-    name: Optional[str] = None,
-    timeout: Optional[float] = None,
+    name: str | None = None,
+    timeout: float | None = None,
     interrupt_before: bool = True,
 ) -> Callable[[F], F]:
     """Human-in-the-loop node decorator.

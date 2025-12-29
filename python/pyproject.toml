@@ -97,6 +97,11 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "B008",   # do not perform function calls in argument defaults
+    "ARG001", # unused function argument (needed for stub functions)
+    "ARG002", # unused method argument (needed for stub methods)
+    "SIM102", # nested if statements (sometimes more readable)
+    "SIM105", # contextlib.suppress suggestion (explicit try/except is clearer)
+    "UP007",  # Use X | Y for Union types (keep Union for type aliases)
 ]
 
 [tool.ruff.lint.isort]

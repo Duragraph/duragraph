@@ -54,3 +54,9 @@ Thumbs.db
 *.log
 .env
 .env.local
+
+# Build artifacts
+dist/
+
+# UV lock file (optional - can be committed for reproducibility)
+# uv.lock

@@ -1,6 +1,7 @@
 """Edge definitions for DuraGraph workflows."""
 
-from typing import Any, Callable, Dict, List, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 
 class Edge:
@@ -9,16 +10,16 @@ class Edge:
     def __init__(
         self,
         source: str,
-        target: Union[str, Dict[str, str]],
-        condition: Optional[Callable[[Dict[str, Any]], bool]] = None,
+        target: str | dict[str, str],
+        condition: Callable[[dict[str, Any]], bool] | None = None,
     ):
         self.source = source
         self.target = target
         self.condition = condition
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert edge to dictionary representation."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "source": self.source,
             "target": self.target,
         }
@@ -32,13 +33,13 @@ class EdgeBuilder:
 
     def __init__(self, source: str):
         self.source = source
-        self._edges: List[Edge] = []
+        self._edges: list[Edge] = []
 
     def to(
         self,
         target: str,
         *,
-        condition: Optional[Callable[[Dict[str, Any]], bool]] = None,
+        condition: Callable[[dict[str, Any]], bool] | None = None,
     ) -> "EdgeBuilder":
         """Add an edge to a target node.
 
@@ -54,7 +55,7 @@ class EdgeBuilder:
 
     def to_conditional(
         self,
-        mapping: Dict[str, str],
+        mapping: dict[str, str],
     ) -> "EdgeBuilder":
         """Add conditional edges based on router output.
 
@@ -67,7 +68,7 @@ class EdgeBuilder:
         self._edges.append(Edge(self.source, mapping))
         return self
 
-    def build(self) -> List[Edge]:
+    def build(self) -> list[Edge]:
         """Build and return all edges."""
         return self._edges
 
