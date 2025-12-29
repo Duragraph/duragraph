@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  # DuraGraph Control Plane
+  duragraph:
+    image: ghcr.io/duragraph/duragraph:latest
+    ports:
+      - "8081:8081"
+      - "9090:9090"  # Metrics
+    environment:
+      - PORT=8081
+      - HOST=0.0.0.0
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=duragraph
+      - DB_PASSWORD=duragraph
+      - DB_NAME=duragraph
+      - DB_SSLMODE=disable
+      - NATS_URL=nats://nats:4222
+      - AUTH_ENABLED=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=duragraph
+      - POSTGRES_PASSWORD=duragraph
+      - POSTGRES_DB=duragraph
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U duragraph"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # NATS JetStream
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"  # HTTP monitoring
+    command: ["--jetstream", "--http_port", "8222"]
+    volumes:
+      - nats_data:/data
+
+  # Redis (optional, for caching)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    profiles:
+      - with-redis
+
+volumes:
+  postgres_data:
+  nats_data:
+  redis_data:
