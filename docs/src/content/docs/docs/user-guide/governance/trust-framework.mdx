@@ -1,0 +1,409 @@
+---
+title: Strategic Trust Framework
+description: Build verifiable trust through transparent AI decision trails
+---
+
+import { Tabs, TabItem, Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+Trust is created not by controlling AI outputs, but by PROVING that systems behave consistently, safely, and transparently across scenarios.
+
+## Trust Layers
+
+<CardGrid>
+  <Card title="Policy-Aligned Reasoning" icon="document">
+    AI cannot generate decisions outside approved boundaries
+  </Card>
+  <Card title="Data Sensitivity Awareness" icon="warning">
+    Automatic adjustments based on data classification
+  </Card>
+  <Card title="Scenario-Aware Oversight" icon="setting">
+    Context factors evaluated before every action
+  </Card>
+  <Card title="Transparent Decision Trails" icon="approve-check">
+    Complete auditability of every AI decision
+  </Card>
+</CardGrid>
+
+## Policy-Aligned Reasoning
+
+Ensure AI reasoning stays within approved boundaries:
+
+```python
+from duragraph.governance import PolicyAlignedReasoning
+
+aligned_reasoning = PolicyAlignedReasoning(
+    # Embed policy constraints in prompts
+    system_constraints=[
+        "You are a customer support agent for ACME Corp.",
+        "You may only discuss ACME products and services.",
+        "You cannot provide legal, medical, or financial advice.",
+        "You must verify information before sharing.",
+    ],
+    # Constitutional AI-style constraints
+    constitutional_principles=[
+        "Responses must be helpful and accurate.",
+        "Responses must not cause harm.",
+        "Responses must respect user privacy.",
+    ],
+    # Hard stops for policy violations
+    hard_stops=[
+        "competitor_mention",
+        "unauthorized_promise",
+        "pii_disclosure",
+    ],
+)
+```
+
+### Implementation Approaches
+
+<Tabs>
+<TabItem label="Prompt Engineering">
+```python
+# Embed policies in system prompt
+system_prompt = """
+You are a support agent bound by these policies:
+- Only discuss authorized topics
+- Cannot make promises about refunds over $100
+- Must escalate legal questions to human agents
+
+POLICY VIOLATION = IMMEDIATE STOP
+"""
+```
+</TabItem>
+<TabItem label="Constitutional AI">
+```python
+# Self-critique and revision
+constitutional = ConstitutionalAI(
+    principles=[
+        "Is this response accurate?",
+        "Does this stay within authorized scope?",
+        "Could this cause harm to the user?",
+    ],
+    revision_rounds=2,
+)
+```
+</TabItem>
+<TabItem label="Hard Stops">
+```python
+# Post-generation policy check
+def policy_check(response: str) -> bool:
+    violations = detect_violations(response)
+    if violations:
+        log_violation(violations)
+        return False  # Block response
+    return True
+```
+</TabItem>
+</Tabs>
+
+## Data Sensitivity Awareness
+
+AI automatically adjusts behavior based on data classification:
+
+```python
+from duragraph.governance import DataSensitivityHandler
+
+sensitivity_handler = DataSensitivityHandler(
+    classification_actions={
+        "public": {
+            "controls": ["basic_logging"],
+            "processing": "standard",
+        },
+        "internal": {
+            "controls": ["access_logging", "basic_redaction"],
+            "processing": "standard",
+        },
+        "confidential": {
+            "controls": ["strict_access", "full_audit", "encryption"],
+            "processing": "restricted",
+            "require_justification": True,
+        },
+        "restricted": {
+            "controls": ["approval_required", "encryption", "limited_retention"],
+            "processing": "minimal",
+            "require_approval": True,
+            "max_retention_days": 30,
+        },
+    },
+)
+```
+
+### Classification Detection
+
+```python
+from duragraph.governance import DataClassifier
+
+classifier = DataClassifier(
+    detection_rules={
+        "pii": {
+            "patterns": ["ssn", "credit_card", "email", "phone"],
+            "classification": "confidential",
+        },
+        "financial": {
+            "patterns": ["account_number", "balance", "transaction"],
+            "classification": "confidential",
+        },
+        "health": {
+            "patterns": ["diagnosis", "medication", "treatment"],
+            "classification": "restricted",
+        },
+    },
+)
+
+# Automatic classification
+data_class = await classifier.classify(input_data)
+# Returns: "confidential" with reasoning
+```
+
+## Scenario-Aware Oversight
+
+Every AI decision is evaluated against contextual factors:
+
+### Temporal Context
+
+```python
+temporal_factors = {
+    "time_of_day": "business_hours",  # vs off-hours
+    "deadline_pressure": "normal",     # urgent, normal, relaxed
+    "data_freshness": "current",       # How recent is the data?
+}
+
+# Different governance for off-hours requests
+if temporal_factors["time_of_day"] == "off_hours":
+    require_additional_verification = True
+```
+
+### Source Context
+
+```python
+source_factors = {
+    "request_origin": "api",           # internal, external, api
+    "user_history": "established",      # new, established, trusted
+    "channel": "production",            # dev, staging, production
+}
+
+# Stricter controls for external sources
+if source_factors["request_origin"] == "external":
+    apply_enhanced_validation = True
+```
+
+### Purpose Context
+
+```python
+purpose_factors = {
+    "stated_intent": "billing_inquiry",
+    "inferred_intent": "billing_inquiry",  # ML-detected
+    "historical_pattern": "consistent",     # Does this match past behavior?
+}
+
+# Flag mismatched intents
+if purpose_factors["stated_intent"] != purpose_factors["inferred_intent"]:
+    flag_for_review = True
+```
+
+### Constraint Context
+
+```python
+constraint_factors = {
+    "regulatory": ["GDPR", "SOC2"],     # Applicable regulations
+    "organizational": ["no_competitors"], # Company policies
+    "technical": ["rate_limited"],        # System limitations
+}
+```
+
+## Transparent Decision Trails
+
+Complete audit trails for every AI decision:
+
+```python
+from duragraph.governance import DecisionTrail
+
+# Automatically captured for every interaction
+trail = DecisionTrail(
+    decision_id="dec_abc123",
+    timestamp="2024-12-29T10:30:00Z",
+
+    # Context at decision time
+    context_snapshot={
+        "user_id": "user_123",
+        "session_id": "sess_456",
+        "data_classification": "confidential",
+        "risk_score": 0.45,
+    },
+
+    # Reasoning chain
+    reasoning_chain=[
+        {"step": 1, "action": "classify_intent", "result": "billing_inquiry"},
+        {"step": 2, "action": "evaluate_risk", "result": "medium"},
+        {"step": 3, "action": "select_policy", "result": "customer_support"},
+        {"step": 4, "action": "apply_guardrails", "result": "passed"},
+    ],
+
+    # Data sources used
+    data_sources=[
+        {"type": "user_profile", "id": "profile_123"},
+        {"type": "knowledge_base", "id": "kb_billing_faq"},
+    ],
+
+    # Policies evaluated
+    policies_applied=["customer_support", "pii_protection"],
+
+    # Controls triggered
+    controls_triggered=["audit_log", "pii_redaction"],
+
+    # Final outcome
+    outcome={
+        "action": "respond",
+        "confidence": 0.92,
+        "response_id": "resp_789",
+    },
+)
+```
+
+### Querying Audit Trails
+
+```bash
+# Get specific decision trail
+GET /api/v1/governance/trust/audit/dec_abc123
+
+# Search trails by criteria
+GET /api/v1/governance/trust/audit?user_id=user_123&date_from=2024-12-01
+```
+
+Response:
+
+```json
+{
+  "decision_id": "dec_abc123",
+  "timestamp": "2024-12-29T10:30:00Z",
+  "context_snapshot": {
+    "user_id": "user_123",
+    "risk_score": 0.45
+  },
+  "reasoning_chain": [
+    {"step": 1, "action": "classify_intent", "result": "billing_inquiry"}
+  ],
+  "policies_applied": ["customer_support"],
+  "controls_triggered": ["audit_log"],
+  "outcome": {
+    "action": "respond",
+    "confidence": 0.92
+  }
+}
+```
+
+## Trust Scoring
+
+Assign trust scores to entities and decisions:
+
+```python
+from duragraph.governance import TrustScorer
+
+scorer = TrustScorer()
+
+# Score an entity (user, agent, data source)
+trust_score = await scorer.score_entity(
+    entity_id="user_123",
+    factors={
+        "history_length": 365,      # Days of history
+        "violation_count": 0,        # Past violations
+        "verification_level": "2fa", # Identity verification
+        "behavior_consistency": 0.95, # How consistent is behavior
+    },
+)
+# Returns: TrustScore(value=0.87, level="high", factors={...})
+
+# Score a decision
+decision_trust = await scorer.score_decision(
+    decision_id="dec_abc123",
+    factors={
+        "data_quality": 0.9,         # Source data reliability
+        "model_confidence": 0.85,     # AI certainty
+        "guardrails_passed": True,    # All checks passed
+        "human_verified": False,      # Human review status
+    },
+)
+```
+
+### Trust Score API
+
+```bash
+GET /api/v1/governance/trust/score/user_123
+```
+
+```json
+{
+  "entity_id": "user_123",
+  "trust_score": 0.87,
+  "trust_level": "high",
+  "factors": {
+    "history": 0.95,
+    "verification": 0.90,
+    "behavior": 0.85,
+    "violations": 1.0
+  },
+  "recommendations": [
+    "Enable advanced features",
+    "Reduce verification friction"
+  ]
+}
+```
+
+## Compliance Integration
+
+Trust framework supports regulatory compliance:
+
+### EU AI Act
+
+```python
+compliance = EUAIActCompliance(
+    risk_classification="high_risk",  # Based on use case
+    requirements={
+        "transparency": True,          # Disclose AI usage
+        "human_oversight": True,        # Human can intervene
+        "accuracy_monitoring": True,    # Track performance
+        "documentation": True,          # Maintain records
+    },
+)
+```
+
+### SOC 2
+
+```python
+compliance = SOC2Compliance(
+    trust_criteria={
+        "security": ["access_controls", "encryption"],
+        "availability": ["uptime_monitoring", "failover"],
+        "processing_integrity": ["validation", "audit_trails"],
+        "confidentiality": ["classification", "access_logs"],
+        "privacy": ["consent", "data_minimization"],
+    },
+)
+```
+
+## Best Practices
+
+<Aside type="tip" title="Progressive Trust">
+Start with lower trust levels and increase as entities prove reliable. Don't grant maximum trust immediately.
+</Aside>
+
+<Aside type="caution" title="Trust Decay">
+Trust should decay over time without positive reinforcement. Inactive accounts or unchanged scores should gradually decrease.
+</Aside>
+
+1. **Make trust visible** - Show users and admins trust scores and reasoning
+2. **Enable trust recovery** - Provide paths to rebuild trust after violations
+3. **Calibrate regularly** - Adjust trust algorithms based on outcomes
+4. **Audit the auditors** - Monitor the trust system itself for drift
+5. **Document decisions** - Every trust change should have clear reasoning
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Guardrails" icon="warning">
+    Configure [behavioral guardrails](/docs/user-guide/governance/guardrails) to enforce boundaries
+  </Card>
+  <Card title="Governance Overview" icon="open-book">
+    Return to [governance overview](/docs/user-guide/governance/overview) for architecture details
+  </Card>
+</CardGrid>

@@ -1,0 +1,237 @@
+---
+title: AI Contextual Governance
+description: Adaptive governance for responsible, scalable AI systems
+---
+
+import { Tabs, TabItem, Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+DuraGraph provides infrastructure-level AI contextual governance that adapts to intent, sensitivity, environment, and trust boundaries.
+
+<Aside type="tip" title="Key Insight">
+"Context is the new control layer for AI." Unlike static rules, contextual governance ADAPTS to situational conditions.
+</Aside>
+
+## Why Contextual Governance?
+
+Traditional rule-based governance fails modern AI systems:
+
+| Challenge | Impact |
+|-----------|--------|
+| 45% of enterprises experienced GenAI data leakage | Static rules can't prevent dynamic threats |
+| Only 25% have implemented AI governance | Governance is seen as blocker, not enabler |
+| Multi-modal AI combines diverse data | Single rule sets can't cover all scenarios |
+
+**The missing dimension: CONTEXT determines acceptable risk, privacy requirements, reasoning boundaries, and interaction patterns.**
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                   AI CONTEXTUAL GOVERNANCE LAYER                    │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐        │
+│  │                │  │     Policy     │  │   Automated    │        │
+│  │ Context Engine │  │  Orchestration │  │     Risk       │        │
+│  │                │  │     Layer      │  │   Evaluation   │        │
+│  └───────┬────────┘  └───────┬────────┘  └───────┬────────┘        │
+│          │                   │                   │                  │
+│          └───────────────────┼───────────────────┘                  │
+│                              │                                      │
+│  ┌────────────────┐  ┌──────┴───────┐  ┌────────────────┐          │
+│  │      AI        │  │  Behavioral  │  │ Multi-Environ  │          │
+│  │ Observability  │◄─┤  Guardrails  │──┤  Enforcement   │          │
+│  │                │  │              │  │                │          │
+│  └────────────────┘  └──────────────┘  └────────────────┘          │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Core Components
+
+<CardGrid>
+  <Card title="Context Engine" icon="setting">
+    Interprets metadata, domain rules, user intent, and operational signals to determine governance response.
+  </Card>
+  <Card title="Policy Orchestration" icon="document">
+    Programmable, composable governance building blocks with hot-reload and inheritance.
+  </Card>
+  <Card title="Behavioral Guardrails" icon="warning">
+    Adaptive guardrails that prevent misuse, hallucinations, and drift from expected behavior.
+  </Card>
+  <Card title="Risk Evaluation" icon="approve-check">
+    Real-time scoring based on sensitivity, impact, and probability of misalignment.
+  </Card>
+</CardGrid>
+
+## Quick Start
+
+### Enable Basic Governance
+
+```python
+from duragraph import Graph, llm_node
+from duragraph.governance import GovernanceEngine, Policy
+
+# Create governance engine
+governance = GovernanceEngine()
+
+# Define a policy
+policy = Policy(
+    name="customer_support",
+    guardrails=[
+        {"type": "output_filter", "config": {"block_pii": True}},
+        {"type": "topic_restriction", "config": {"blocked": ["competitor_info"]}},
+    ],
+    audit_level="full",
+)
+
+governance.register_policy(policy)
+
+@Graph
+class GoverndAssistant:
+    @llm_node(governance=governance)
+    async def respond(self, state: State) -> State:
+        # Governance automatically applied
+        response = await self.llm.complete(state.messages)
+        state.response = response
+        return state
+```
+
+### Context-Aware Governance
+
+```python
+from duragraph.governance import ContextEngine, GovernanceProfile
+
+# Context engine evaluates situational factors
+context_engine = ContextEngine()
+
+# Evaluate context
+profile = await context_engine.evaluate(
+    data_metadata={"classification": "confidential", "contains_pii": True},
+    user_context={"role": "support_agent", "department": "customer_success"},
+    intent="answer_billing_question",
+    environment="production",
+)
+
+# Profile contains:
+# - risk_score: 0.65
+# - allowed_actions: ["read_account", "view_invoice"]
+# - required_controls: ["audit_log", "pii_redaction"]
+# - applicable_policies: ["customer_support", "pii_protection"]
+```
+
+## Risk Evaluation
+
+DuraGraph evaluates risk across multiple dimensions:
+
+### Data Sensitivity
+
+```python
+sensitivity_factors = {
+    "classification_level": "confidential",  # public, internal, confidential, restricted
+    "pii_presence": True,
+    "regulatory_scope": ["GDPR", "HIPAA"],
+}
+```
+
+### Decision Impact
+
+```python
+impact_factors = {
+    "reversibility": "low",      # Can decision be undone?
+    "affected_parties": 50,       # Number of people impacted
+    "financial_exposure": 10000,  # Potential monetary impact
+}
+```
+
+### Operational Context
+
+```python
+operational_factors = {
+    "time_pressure": "normal",    # urgent, normal, relaxed
+    "human_oversight": True,       # Is human review available?
+    "system_confidence": 0.85,     # Model certainty
+}
+```
+
+## Governance Maturity Model
+
+DuraGraph supports progressive governance maturity:
+
+| Level | Name | Characteristics |
+|-------|------|-----------------|
+| 1 | Reactive | Static policies, manual updates, post-hoc audit |
+| 2 | Proactive | Dynamic policies, real-time evaluation, continuous monitoring |
+| 3 | Adaptive | Self-adjusting policies, predictive risk, autonomous guardrails |
+| 4 | Intelligent | Goal-aware governance, self-healing controls, strategic trust |
+
+## Compliance Frameworks
+
+DuraGraph governance aligns with:
+
+- **EU AI Act** - Risk classification and transparency requirements
+- **NIST AI RMF** - Risk management framework controls
+- **ISO 42001** - AI management system certification
+- **SOC 2** - Trust service criteria
+- **HIPAA** - Healthcare data protection
+
+## API Reference
+
+### Context Evaluation
+
+```bash
+POST /api/v1/governance/context/evaluate
+```
+
+```json
+{
+  "data_metadata": {
+    "classification": "confidential",
+    "source": "customer_database"
+  },
+  "user_context": {
+    "user_id": "user_123",
+    "role": "analyst"
+  },
+  "intent": "generate_report",
+  "environment": "production"
+}
+```
+
+Response:
+
+```json
+{
+  "governance_profile": {
+    "policies": ["data_analyst", "pii_protection"],
+    "risk_level": "medium"
+  },
+  "risk_score": 0.45,
+  "allowed_actions": ["read", "aggregate", "export_anonymized"],
+  "required_controls": ["audit_log", "data_minimization"]
+}
+```
+
+### Policy Management
+
+```bash
+# List policies
+GET /api/v1/governance/policies
+
+# Create policy
+POST /api/v1/governance/policies
+
+# Simulate policy
+POST /api/v1/governance/policies/simulate
+```
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Guardrails" icon="warning">
+    Configure [behavioral guardrails](/docs/user-guide/governance/guardrails) for your AI workflows
+  </Card>
+  <Card title="Trust Framework" icon="approve-check">
+    Implement [strategic trust](/docs/user-guide/governance/trust-framework) with audit trails
+  </Card>
+</CardGrid>

@@ -1,0 +1,346 @@
+---
+title: Behavioral Guardrails
+description: Adaptive guardrails that prevent misuse, hallucinations, and behavioral drift
+---
+
+import { Tabs, TabItem, Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+Behavioral guardrails are contextual controls that adapt to workflow intent, preventing AI misuse while enabling productive operation.
+
+## Guardrail Types
+
+<CardGrid>
+  <Card title="Reasoning Boundaries" icon="puzzle">
+    Limit what the AI can reason about based on context
+  </Card>
+  <Card title="Output Integrity" icon="approve-check">
+    Ensure output quality, accuracy, and safety
+  </Card>
+  <Card title="Behavioral Drift" icon="warning">
+    Detect deviation from expected patterns
+  </Card>
+</CardGrid>
+
+## Reasoning Boundaries
+
+Control the scope of AI reasoning:
+
+```python
+from duragraph.governance import Guardrail, ReasoningBoundary
+
+# Topic restrictions
+topic_guard = ReasoningBoundary(
+    name="support_topics",
+    allowed_topics=["billing", "technical_support", "account_management"],
+    blocked_topics=["competitor_products", "investment_advice", "medical_guidance"],
+)
+
+# Knowledge cutoffs
+knowledge_guard = ReasoningBoundary(
+    name="verified_only",
+    require_grounding=True,  # Must cite sources
+    speculation_allowed=False,
+    knowledge_sources=["product_docs", "faq_database"],
+)
+```
+
+### Topic Restrictions
+
+```yaml
+guardrail:
+  type: topic_restriction
+  config:
+    allowed:
+      - billing_inquiries
+      - product_features
+      - account_management
+    blocked:
+      - competitor_comparisons
+      - legal_advice
+      - medical_recommendations
+    action_on_violation: redirect  # redirect, block, warn
+```
+
+## Output Integrity
+
+Ensure AI outputs meet quality and safety standards:
+
+### Hallucination Detection
+
+```python
+from duragraph.governance import OutputIntegrity, HallucinationDetector
+
+hallucination_guard = HallucinationDetector(
+    name="fact_checker",
+    strategies=[
+        "source_verification",    # Check claims against sources
+        "self_consistency",       # Multiple generations agree
+        "confidence_threshold",   # Require high certainty
+    ],
+    threshold=0.8,
+    action="flag_for_review",
+)
+
+# Apply to workflow
+@llm_node(guardrails=[hallucination_guard])
+async def respond(self, state):
+    response = await self.llm.complete(state.messages)
+    # Guardrail automatically checks output
+    return state
+```
+
+### Consistency Checks
+
+```python
+consistency_guard = OutputIntegrity(
+    name="logical_consistency",
+    checks=[
+        "no_contradictions",       # Output doesn't contradict itself
+        "matches_context",         # Aligns with conversation history
+        "factual_alignment",       # Facts match known data
+    ],
+)
+```
+
+### Source Attribution
+
+```python
+attribution_guard = OutputIntegrity(
+    name="require_citations",
+    require_sources=True,
+    source_format="inline",  # or "footnote", "appendix"
+    minimum_sources=1,
+)
+```
+
+## Behavioral Drift Detection
+
+Monitor for deviations from expected AI behavior:
+
+```python
+from duragraph.governance import DriftDetector
+
+drift_guard = DriftDetector(
+    name="persona_enforcement",
+    baseline_behavior={
+        "tone": "professional",
+        "response_length": {"min": 50, "max": 500},
+        "topics": ["customer_support"],
+    },
+    sensitivity=0.7,  # How strictly to enforce
+    alert_threshold=3,  # Consecutive violations before alert
+)
+```
+
+### Anomaly Detection
+
+```yaml
+guardrail:
+  type: anomaly_detection
+  config:
+    metrics:
+      - response_length_variance
+      - sentiment_deviation
+      - topic_drift_score
+    baseline_window: 100  # Compare against last 100 responses
+    alert_on: 2_sigma_deviation
+```
+
+## Adaptive Guardrails
+
+Guardrails that adjust based on context:
+
+```python
+from duragraph.governance import AdaptiveGuardrail
+
+adaptive_guard = AdaptiveGuardrail(
+    name="context_sensitive",
+    profiles={
+        "low_risk": {
+            "guardrails": ["basic_safety"],
+            "audit_level": "minimal",
+        },
+        "medium_risk": {
+            "guardrails": ["safety", "attribution", "consistency"],
+            "audit_level": "standard",
+        },
+        "high_risk": {
+            "guardrails": ["all"],
+            "audit_level": "full",
+            "require_human_review": True,
+        },
+    },
+    context_evaluator=lambda ctx: calculate_risk_level(ctx),
+)
+```
+
+### Risk-Based Adaptation
+
+```
+Low Risk Context (e.g., internal FAQ):
+  - Minimal guardrails
+  - Allow creative responses
+  - Basic logging only
+
+Medium Risk Context (e.g., customer support):
+  - Standard guardrails
+  - Require source attribution
+  - Full audit logging
+
+High Risk Context (e.g., financial advice):
+  - Maximum guardrails
+  - Human review required
+  - Real-time compliance checks
+```
+
+## Guardrail Configuration
+
+### YAML Configuration
+
+```yaml
+# guardrails.yml
+guardrails:
+  - name: pii_protection
+    type: output_filter
+    enabled: true
+    config:
+      detect_patterns:
+        - ssn: '\d{3}-\d{2}-\d{4}'
+        - credit_card: '\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}'
+        - email: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+      action: redact
+      replacement: "[REDACTED]"
+
+  - name: safety_filter
+    type: content_safety
+    config:
+      categories:
+        - hate_speech
+        - violence
+        - self_harm
+      threshold: 0.8
+      action: block
+
+  - name: response_quality
+    type: output_integrity
+    config:
+      min_length: 20
+      max_length: 2000
+      require_complete_sentences: true
+```
+
+### Python Configuration
+
+```python
+from duragraph.governance import GuardrailEngine
+
+engine = GuardrailEngine()
+
+# Load from YAML
+engine.load_config("guardrails.yml")
+
+# Or configure programmatically
+engine.add_guardrail(
+    name="custom_filter",
+    type="output_filter",
+    config={"block_patterns": ["forbidden_term"]},
+)
+```
+
+## Guardrail Metrics
+
+Monitor guardrail effectiveness:
+
+```python
+# Get guardrail metrics
+metrics = await governance.get_guardrail_metrics()
+
+# Returns:
+{
+    "total_evaluations": 10000,
+    "guardrail_triggers": {
+        "pii_protection": 45,
+        "hallucination_detector": 12,
+        "topic_restriction": 8,
+    },
+    "trigger_rate": 0.0065,
+    "false_positive_rate": 0.02,
+    "response_latency_ms": 15,
+}
+```
+
+### Dashboard Metrics
+
+```bash
+GET /api/v1/governance/guardrails/metrics
+```
+
+```json
+{
+  "summary": {
+    "total_requests": 50000,
+    "blocked": 125,
+    "flagged": 340,
+    "passed": 49535
+  },
+  "by_guardrail": [
+    {
+      "name": "pii_protection",
+      "triggers": 89,
+      "action_taken": "redact",
+      "avg_latency_ms": 12
+    }
+  ],
+  "trends": {
+    "trigger_rate_7d": [0.005, 0.006, 0.004, 0.007, 0.005, 0.006, 0.005]
+  }
+}
+```
+
+## Best Practices
+
+<Aside type="tip" title="Layer Guardrails">
+Use multiple guardrails in layers - fast heuristic checks first, then deeper LLM-based checks for flagged content.
+</Aside>
+
+<Aside type="caution" title="Avoid Over-Restriction">
+Overly strict guardrails can harm user experience. Tune thresholds based on actual false positive rates.
+</Aside>
+
+1. **Start permissive, tighten as needed** - Begin with minimal guardrails and add based on observed issues
+2. **Monitor false positives** - Track when guardrails block legitimate content
+3. **Use adaptive thresholds** - Adjust sensitivity based on context and risk level
+4. **Test with adversarial inputs** - Regularly test guardrails against edge cases
+5. **Maintain escape hatches** - Allow authorized users to override in specific situations
+
+## Integration with Policies
+
+Guardrails work with policies for comprehensive governance:
+
+```python
+from duragraph.governance import Policy, Guardrail
+
+policy = Policy(
+    name="financial_advisory",
+    # Guardrails specific to this policy
+    guardrails=[
+        Guardrail(type="topic_restriction", config={"allowed": ["investments", "planning"]}),
+        Guardrail(type="disclaimer_required", config={"text": "This is not financial advice."}),
+        Guardrail(type="human_review", config={"for_amounts_over": 100000}),
+    ],
+    # Audit requirements
+    audit_level="comprehensive",
+    retention_days=2555,  # 7 years for financial records
+)
+```
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Trust Framework" icon="approve-check">
+    Build [strategic trust](/docs/user-guide/governance/trust-framework) with transparent decision trails
+  </Card>
+  <Card title="Governance Overview" icon="open-book">
+    Return to [governance overview](/docs/user-guide/governance/overview) for architecture details
+  </Card>
+</CardGrid>
