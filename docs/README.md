@@ -1,49 +1,98 @@
-# Starlight Starter Kit: Basics
+# DuraGraph Documentation
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+[![Deploy](https://github.com/Duragraph/duragraph-docs/actions/workflows/deploy.yml/badge.svg)](https://github.com/Duragraph/duragraph-docs/actions/workflows/deploy.yml)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
+Official documentation, blog, and landing page for DuraGraph - Reliable AI Workflow Orchestration.
+
+**Live site:** [duragraph.dev](https://duragraph.dev)
+
+## Tech Stack
+
+- **Framework:** [Astro](https://astro.build/) 5
+- **Docs:** [Starlight](https://starlight.astro.build/)
+- **Styling:** TailwindCSS
+- **Diagrams:** Mermaid
+- **Deployment:** Cloudflare Pages
+
+## Local Development
+
+```bash
+# Install dependencies
+pnpm install
+
+# Start dev server
+pnpm dev
+
+# Build for production
+pnpm build
+
+# Preview production build
+pnpm preview
+
+# Validate internal links
+pnpm validate-links
+```
+
+## Project Structure
 
 ```
-pnpm create astro@latest -- --template starlight
+src/
+├── assets/              # Images and logos
+├── components/
+│   └── landing/         # Landing page components
+├── content/
+│   ├── docs/            # Documentation (MDX)
+│   └── blog/            # Blog posts (MDX)
+├── pages/               # Custom pages
+└── styles/              # Global styles
 ```
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+## Content
 
-## 🚀 Project Structure
+### Documentation
 
-Inside of your Astro + Starlight project, you'll see the following folders and files:
+Add new docs in `src/content/docs/`:
 
-```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
+```mdx
+---
+title: My Page
+description: Page description for SEO
+---
+
+Content here...
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+### Blog Posts
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+Add new posts in `src/content/blog/`:
 
-Static assets, like favicons, can be placed in the `public/` directory.
+```mdx
+---
+title: My Post
+date: 2025-01-01
+authors:
+  - name: Author Name
+description: Post description
+---
 
-## 🧞 Commands
+Content here...
+```
 
-All commands are run from the root of the project, from a terminal:
+## Related Repositories
 
-| Command                | Action                                           |
-| :--------------------- | :----------------------------------------------- |
-| `pnpm install`         | Installs dependencies                            |
-| `pnpm dev`             | Starts local dev server at `localhost:4321`      |
-| `pnpm build`           | Build your production site to `./dist/`          |
-| `pnpm preview`         | Preview your build locally, before deploying     |
-| `pnpm astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `pnpm astro -- --help` | Get help using the Astro CLI                     |
+| Repository | Description |
+|------------|-------------|
+| [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
+| [duragraph-python](https://github.com/Duragraph/duragraph-python) | Python SDK |
+| [duragraph-go](https://github.com/Duragraph/duragraph-go) | Go SDK |
+| [duragraph-examples](https://github.com/Duragraph/duragraph-examples) | Example projects |
+| [duragraph-studio](https://github.com/Duragraph/duragraph-studio) | Interactive UI |
 
-## 👀 Want to learn more?
+## Contributing
 
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+See [CONTRIBUTING.md](https://github.com/Duragraph/.github/blob/main/CONTRIBUTING.md) for guidelines.
+
+## License
+
+Apache 2.0 - See [LICENSE](LICENSE) for details.
