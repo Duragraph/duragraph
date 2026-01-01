@@ -1,11 +1,18 @@
 # DuraGraph Go SDK
 
-Enterprise-grade Go SDK for AI workflow orchestration.
+[![Go Reference](https://pkg.go.dev/badge/github.com/Duragraph/duragraph-go.svg)](https://pkg.go.dev/github.com/Duragraph/duragraph-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Duragraph/duragraph-go)](https://goreportcard.com/report/github.com/Duragraph/duragraph-go)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/Duragraph/duragraph-go/actions/workflows/ci.yml/badge.svg)](https://github.com/Duragraph/duragraph-go/actions/workflows/ci.yml)
+
+Go SDK for [DuraGraph](https://github.com/Duragraph/duragraph) - Reliable AI Workflow Orchestration.
+
+Build AI agents with structs and interfaces, deploy to a control plane, and get full observability out of the box.
 
 ## Installation
 
 ```bash
-go get github.com/duragraph/duragraph-go
+go get github.com/Duragraph/duragraph-go
 ```
 
 ## Quick Start
@@ -17,8 +24,8 @@ import (
     "context"
     "log"
 
-    "github.com/duragraph/duragraph-go/graph"
-    "github.com/duragraph/duragraph-go/worker"
+    "github.com/Duragraph/duragraph-go/graph"
+    "github.com/Duragraph/duragraph-go/worker"
 )
 
 // Define your state
@@ -68,10 +75,30 @@ func main() {
 - **Observability** - OpenTelemetry, Prometheus metrics
 - **Worker Runtime** - Connect to DuraGraph control plane
 
+## Requirements
+
+- Go 1.21+
+- DuraGraph Control Plane (for deployment)
+
 ## Documentation
 
-See [docs.duragraph.io](https://docs.duragraph.io) for full documentation.
+- [Full Documentation](https://duragraph.dev/docs)
+- [API Reference](https://duragraph.dev/docs/api-reference/overview)
+- [Examples](https://github.com/Duragraph/duragraph-examples)
+
+## Related Repositories
+
+| Repository | Description |
+|------------|-------------|
+| [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
+| [duragraph-python](https://github.com/Duragraph/duragraph-python) | Python SDK |
+| [duragraph-examples](https://github.com/Duragraph/duragraph-examples) | Example projects |
+| [duragraph-docs](https://github.com/Duragraph/duragraph-docs) | Documentation |
+
+## Contributing
+
+See [CONTRIBUTING.md](https://github.com/Duragraph/.github/blob/main/CONTRIBUTING.md) for guidelines.
 
 ## License
 
-Apache-2.0
+Apache 2.0 - See [LICENSE](LICENSE) for details.
