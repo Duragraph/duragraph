@@ -112,3 +112,10 @@ node_modules/
 # tasks.json
 # tasks/
 __pycache__/
+
+# Internal/private files (not for repo)
+.claude/
+GOVERNANCE.md
+PROJECT_OVERVIEW.md
+STRATEGY.md
+spec/
