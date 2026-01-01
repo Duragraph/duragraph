@@ -1,14 +1,14 @@
 # DuraGraph Examples
 
-Real-world examples demonstrating DuraGraph capabilities for AI workflow orchestration.
+[![DuraGraph](https://img.shields.io/badge/DuraGraph-latest-blue)](https://github.com/Duragraph/duragraph)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-[![DuraGraph Version](https://img.shields.io/badge/DuraGraph-v0.3.0-blue)](https://github.com/Duragraph/duragraph)
-[![License](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
+Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/duragraph) capabilities for AI workflow orchestration.
 
 ## Prerequisites
 
 - [DuraGraph](https://github.com/Duragraph/duragraph) control plane running
-- Python 3.11+ (for Python examples)
+- Python 3.10+ (for Python examples)
 - Go 1.21+ (for Go examples)
 - Docker & Docker Compose (for infrastructure examples)
 
@@ -76,24 +76,31 @@ duragraph-examples/
 └── README.md
 ```
 
+## Related Repositories
+
+| Repository | Description |
+|------------|-------------|
+| [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
+| [duragraph-python](https://github.com/Duragraph/duragraph-python) | Python SDK |
+| [duragraph-go](https://github.com/Duragraph/duragraph-go) | Go SDK |
+| [duragraph-docs](https://github.com/Duragraph/duragraph-docs) | Documentation |
+
+## Documentation
+
+- [Full Documentation](https://duragraph.dev/docs)
+- [Python SDK](https://github.com/Duragraph/duragraph-python)
+- [Go SDK](https://github.com/Duragraph/duragraph-go)
+
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+See [CONTRIBUTING.md](https://github.com/Duragraph/.github/blob/main/CONTRIBUTING.md) for guidelines.
 
 ### Adding a New Example
 
 1. Create a new directory under the appropriate language folder
 2. Include required files: `README.md`, `main.py`/`main.go`, dependencies file
-3. Follow the [example standards](CONTRIBUTING.md#example-standards)
-4. Test against the latest DuraGraph version
-5. Submit a PR
-
-## Resources
-
-- [DuraGraph Documentation](https://duragraph.dev/docs)
-- [Python SDK](https://github.com/Duragraph/duragraph-python)
-- [Go SDK](https://github.com/Duragraph/duragraph-go)
-- [Discord Community](https://discord.gg/duragraph)
+3. Test against the latest DuraGraph version
+4. Submit a PR
 
 ## License
 
