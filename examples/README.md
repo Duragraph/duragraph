@@ -87,7 +87,7 @@ duragraph-examples/
 
 ## Documentation
 
-- [Full Documentation](https://duragraph.dev/docs)
+- [Full Documentation](https://duragraph.ai/docs)
 - [Python SDK](https://github.com/Duragraph/duragraph-python)
 - [Go SDK](https://github.com/Duragraph/duragraph-go)
 
