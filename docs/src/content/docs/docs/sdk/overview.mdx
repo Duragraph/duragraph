@@ -1,0 +1,112 @@
+---
+title: SDK Overview
+description: DuraGraph SDK options for Python and Go
+---
+
+DuraGraph provides official SDKs for Python and Go, enabling you to build AI agents in your preferred language.
+
+## Available SDKs
+
+### Python SDK
+
+The Python SDK is ideal for rapid prototyping, data science workflows, and teams already using Python for AI/ML.
+
+```bash
+pip install duragraph-python
+```
+
+**Key Features:**
+
+- Decorator-based graph definition (`@Graph`, `@llm_node`, etc.)
+- Built-in vector store integrations (Chroma, Pinecone, Qdrant, etc.)
+- Embedding providers (OpenAI, Cohere, Ollama)
+- CLI for local development
+
+```python
+from duragraph import Graph, llm_node, entrypoint
+
+@Graph(id="my_agent")
+class MyAgent:
+    @entrypoint
+    @llm_node(model="gpt-4o-mini")
+    def think(self, state):
+        return state
+
+# Run locally
+agent = MyAgent()
+result = agent.run({"message": "Hello"})
+
+# Or connect to control plane
+agent.serve("http://localhost:8081")
+```
+
+### Go SDK
+
+The Go SDK is designed for high-performance, production-grade deployments with strong typing and low latency.
+
+```bash
+go get github.com/duragraph/duragraph-go
+```
+
+**Key Features:**
+
+- Generic graph definition with compile-time type safety
+- Interface-based node and provider design
+- High-performance worker runtime
+- Idiomatic Go patterns
+
+```go
+package main
+
+import (
+    "context"
+    "github.com/duragraph/duragraph-go/graph"
+    "github.com/duragraph/duragraph-go/worker"
+)
+
+type ChatState struct {
+    Messages []string `json:"messages"`
+    Result   string   `json:"result"`
+}
+
+type ThinkNode struct{}
+
+func (n *ThinkNode) Execute(ctx context.Context, state *ChatState) (*ChatState, error) {
+    state.Result = "Hello from Go!"
+    return state, nil
+}
+
+func main() {
+    g := graph.New[*ChatState]("my_agent")
+    g.AddNode("think", &ThinkNode{})
+    g.SetEntrypoint("think")
+
+    // Run locally
+    result, _ := g.Run(context.Background(), &ChatState{})
+
+    // Or connect to control plane
+    w := worker.New(g, worker.WithControlPlane("http://localhost:8081"))
+    w.Start(context.Background())
+}
+```
+
+## Choosing an SDK
+
+| Use Case                    | Recommended SDK            |
+| --------------------------- | -------------------------- |
+| Rapid prototyping           | Python                     |
+| Data science / ML pipelines | Python                     |
+| High-performance production | Go                         |
+| Existing Go codebase        | Go                         |
+| RAG applications            | Python (more integrations) |
+| Low-latency requirements    | Go                         |
+
+## Feature Comparison
+
+See the [Feature Matrix](/docs/sdk/feature-matrix) for a detailed comparison of features available in each SDK.
+
+## Resources
+
+- [Feature Matrix](/docs/sdk/feature-matrix) - Detailed feature comparison
+- [Python SDK Repository](https://github.com/Duragraph/duragraph-python)
+- [Go SDK Repository](https://github.com/Duragraph/duragraph-go)
