@@ -5,7 +5,7 @@
 
 Official documentation, blog, and landing page for DuraGraph - Reliable AI Workflow Orchestration.
 
-**Live site:** [duragraph.dev](https://duragraph.dev)
+**Live site:** [duragraph.ai](https://duragraph.ai)
 
 ## Tech Stack
 
