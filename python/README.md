@@ -121,8 +121,8 @@ class MainAgent:
 
 ## Documentation
 
-- [Full Documentation](https://duragraph.dev/docs)
-- [API Reference](https://duragraph.dev/docs/api-reference/overview)
+- [Full Documentation](https://duragraph.ai/docs)
+- [API Reference](https://duragraph.ai/docs/api-reference/overview)
 - [Examples](https://github.com/Duragraph/duragraph-examples)
 
 ## Related Repositories
