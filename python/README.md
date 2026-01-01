@@ -1,26 +1,27 @@
 # DuraGraph Python SDK
 
-[![PyPI version](https://badge.fury.io/py/duragraph-python.svg)](https://badge.fury.io/py/duragraph-python)
-[![Python](https://img.shields.io/pypi/pyversions/duragraph-python.svg)](https://pypi.org/project/duragraph-python/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![PyPI version](https://badge.fury.io/py/duragraph.svg)](https://badge.fury.io/py/duragraph)
+[![Python](https://img.shields.io/pypi/pyversions/duragraph.svg)](https://pypi.org/project/duragraph/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/Duragraph/duragraph-python/actions/workflows/ci.yml/badge.svg)](https://github.com/Duragraph/duragraph-python/actions/workflows/ci.yml)
 
-Python SDK for [DuraGraph](https://github.com/duragraph/duragraph) - Reliable AI Workflow Orchestration.
+Python SDK for [DuraGraph](https://github.com/Duragraph/duragraph) - Reliable AI Workflow Orchestration.
 
 Build AI agents with decorators, deploy to a control plane, and get full observability out of the box.
 
 ## Installation
 
 ```bash
-pip install duragraph-python
+pip install duragraph
 
 # With OpenAI support
-pip install duragraph-python[openai]
+pip install duragraph[openai]
 
 # With Anthropic support
-pip install duragraph-python[anthropic]
+pip install duragraph[anthropic]
 
 # All features
-pip install duragraph-python[all]
+pip install duragraph[all]
 ```
 
 ## Quick Start
@@ -83,18 +84,6 @@ class MyAgent:
         return state
 ```
 
-### Prompt Management
-
-```python
-from duragraph.prompts import prompt
-
-@llm_node(model="gpt-4o-mini")
-@prompt("support/classify_intent", version="2.1.0")
-def classify(self, state):
-    # Prompt is fetched from prompt store automatically
-    return state
-```
-
 ### Streaming
 
 ```python
@@ -125,51 +114,30 @@ class MainAgent:
     plan >> research
 ```
 
-## CLI
-
-```bash
-# Initialize new project
-duragraph init my-agent
-
-# Run locally in development mode
-duragraph dev
-
-# Deploy to control plane
-duragraph deploy --control-plane http://localhost:8081
-
-# Visualize graph
-duragraph visualize my_agent.py
-```
-
-## Configuration
-
-```toml
-# pyproject.toml
-[tool.duragraph]
-control_plane = "http://localhost:8081"
-
-[tool.duragraph.llm]
-default_model = "gpt-4o-mini"
-
-[tool.duragraph.llm.providers.openai]
-api_key = "${OPENAI_API_KEY}"
-```
-
-## Documentation
-
-- [Full Documentation](https://docs.duragraph.io)
-- [API Reference](https://docs.duragraph.io/api)
-- [Examples](https://github.com/duragraph/duragraph-python/tree/main/examples)
-
 ## Requirements
 
 - Python 3.10+
 - DuraGraph Control Plane (for deployment)
 
+## Documentation
+
+- [Full Documentation](https://duragraph.dev/docs)
+- [API Reference](https://duragraph.dev/docs/api-reference/overview)
+- [Examples](https://github.com/Duragraph/duragraph-examples)
+
+## Related Repositories
+
+| Repository | Description |
+|------------|-------------|
+| [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
+| [duragraph-go](https://github.com/Duragraph/duragraph-go) | Go SDK |
+| [duragraph-examples](https://github.com/Duragraph/duragraph-examples) | Example projects |
+| [duragraph-docs](https://github.com/Duragraph/duragraph-docs) | Documentation |
+
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md).
+See [CONTRIBUTING.md](https://github.com/Duragraph/.github/blob/main/CONTRIBUTING.md) for guidelines.
 
 ## License
 
-Apache 2.0 - see [LICENSE](LICENSE) for details.
+Apache 2.0 - See [LICENSE](LICENSE) for details.
