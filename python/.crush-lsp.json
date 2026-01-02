@@ -1,0 +1,10 @@
+{
+  "lsp_servers": ["pyright"],
+  "pyright": {
+    "settings": {
+      "python.analysis.typeCheckingMode": "strict",
+      "python.analysis.autoImportCompletions": true,
+      "python.pythonPath": "./.venv/bin/python"
+    }
+  }
+}

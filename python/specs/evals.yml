@@ -1,0 +1,552 @@
+# DuraGraph Evaluations System
+# Comprehensive evaluation framework for AI agents
+
+metadata:
+  version: "0.1.0"
+  created: "2024-12-29"
+  status: planning
+
+# =============================================================================
+# OVERVIEW
+# =============================================================================
+
+overview:
+  description: |
+    DuraGraph Evals provides a comprehensive evaluation framework for AI agents.
+    It enables automated testing, human feedback collection, and continuous
+    monitoring of agent quality across multiple dimensions.
+
+  goals:
+    - Automated quality assessment of agent outputs
+    - Human feedback collection and aggregation
+    - Regression detection between versions
+    - A/B testing for prompt/model comparisons
+    - Production monitoring with quality metrics
+
+  components:
+    - Control Plane: Eval service, storage, scheduling
+    - Dashboard: Visualization, drill-down, comparison
+    - SDK: Metrics collection, trace capture, local eval hooks
+
+# =============================================================================
+# EVAL TYPES
+# =============================================================================
+
+eval_types:
+  llm_judge:
+    description: "Use an LLM (GPT-4, Claude) to evaluate outputs"
+    use_cases:
+      - Subjective quality assessment
+      - Helpfulness scoring
+      - Safety evaluation
+      - Instruction following
+    config:
+      judge_model: "gpt-4o"
+      criteria: ["helpfulness", "accuracy", "safety"]
+      rubric: "custom prompt template"
+
+  heuristic:
+    description: "Rule-based evaluation using programmatic checks"
+    use_cases:
+      - Format validation
+      - Keyword presence
+      - Length constraints
+      - JSON schema validation
+    scorers:
+      - exact_match: "Output equals expected"
+      - contains: "Output contains substring"
+      - regex: "Output matches pattern"
+      - json_valid: "Output is valid JSON"
+      - json_schema: "Output matches JSON schema"
+      - length: "Output within length bounds"
+
+  human:
+    description: "Human evaluators provide feedback"
+    use_cases:
+      - Ground truth labeling
+      - Edge case review
+      - Quality audit
+    feedback_types:
+      - thumbs_up_down: "Binary feedback"
+      - rating: "1-5 star rating"
+      - multi_criteria: "Rate multiple dimensions"
+      - free_text: "Open-ended feedback"
+
+  comparison:
+    description: "A/B comparison between versions"
+    use_cases:
+      - Prompt optimization
+      - Model selection
+      - Assistant versioning
+    methods:
+      - side_by_side: "Show both, pick winner"
+      - blind: "Hide which is which"
+      - elo: "Elo rating system"
+
+  regression:
+    description: "Compare against baseline/golden set"
+    use_cases:
+      - Deployment safety
+      - Continuous monitoring
+      - Quality gates
+    config:
+      baseline: "golden_dataset_v1"
+      threshold: 0.95
+      fail_on_regression: true
+
+# =============================================================================
+# EVAL CRITERIA
+# =============================================================================
+
+criteria:
+  quality:
+    - name: helpfulness
+      description: "How helpful is the response to the user's request?"
+      scale: "1-5"
+      scorer: llm_judge
+
+    - name: accuracy
+      description: "Is the information factually correct?"
+      scale: "1-5"
+      scorer: llm_judge
+
+    - name: relevance
+      description: "How relevant is the response to the query?"
+      scale: "1-5"
+      scorer: llm_judge
+
+    - name: coherence
+      description: "Is the response well-structured and coherent?"
+      scale: "1-5"
+      scorer: llm_judge
+
+  safety:
+    - name: harmlessness
+      description: "Does the response avoid harmful content?"
+      scale: "pass/fail"
+      scorer: llm_judge
+
+    - name: privacy
+      description: "Does the response protect user privacy?"
+      scale: "pass/fail"
+      scorer: heuristic
+
+    - name: pii_detection
+      description: "Check for PII leakage"
+      scale: "pass/fail"
+      scorer: heuristic
+
+  technical:
+    - name: tool_accuracy
+      description: "Did the agent call the right tools?"
+      scale: "0-100%"
+      scorer: heuristic
+
+    - name: format_compliance
+      description: "Does output match expected format?"
+      scale: "pass/fail"
+      scorer: heuristic
+
+    - name: latency
+      description: "Response time in milliseconds"
+      scale: "numeric"
+      scorer: metric
+
+    - name: token_efficiency
+      description: "Tokens used vs. output quality"
+      scale: "ratio"
+      scorer: metric
+
+# =============================================================================
+# CONTROL PLANE API
+# =============================================================================
+
+api:
+  endpoints:
+    # Eval Runs
+    - method: POST
+      path: /api/v1/evals
+      description: "Create and run an evaluation"
+      request:
+        name: string
+        type: EvalType
+        assistant_id: string
+        dataset_id: string
+        criteria: EvalCriterion[]
+        config: EvalConfig
+
+    - method: GET
+      path: /api/v1/evals
+      description: "List evaluation runs"
+      query:
+        assistant_id: string?
+        status: string?
+        limit: int?
+        offset: int?
+
+    - method: GET
+      path: /api/v1/evals/:eval_id
+      description: "Get evaluation results"
+      response:
+        id: string
+        status: string
+        scores: Score[]
+        summary: EvalSummary
+        created_at: timestamp
+
+    - method: GET
+      path: /api/v1/evals/:eval_id/results
+      description: "Get individual eval results"
+      response:
+        results: EvalResult[]
+
+    # Datasets
+    - method: POST
+      path: /api/v1/datasets
+      description: "Create evaluation dataset"
+      request:
+        name: string
+        description: string
+
+    - method: GET
+      path: /api/v1/datasets
+      description: "List datasets"
+
+    - method: POST
+      path: /api/v1/datasets/:id/examples
+      description: "Add examples to dataset"
+      request:
+        examples: DatasetExample[]
+
+    - method: GET
+      path: /api/v1/datasets/:id/examples
+      description: "Get dataset examples"
+
+    # Human Feedback
+    - method: POST
+      path: /api/v1/feedback
+      description: "Submit human feedback"
+      request:
+        run_id: string
+        rating: int?
+        thumbs: "up" | "down"?
+        criteria_scores: CriteriaScore[]?
+        comment: string?
+
+    - method: GET
+      path: /api/v1/runs/:run_id/feedback
+      description: "Get feedback for a run"
+
+    # Metrics
+    - method: GET
+      path: /api/v1/metrics/assistants/:id
+      description: "Get aggregated metrics for assistant"
+      response:
+        avg_score: float
+        pass_rate: float
+        trend: Trend[]
+        by_criteria: CriteriaMetrics[]
+
+    - method: GET
+      path: /api/v1/metrics/compare
+      description: "Compare two assistants/versions"
+      query:
+        baseline_id: string
+        candidate_id: string
+
+# =============================================================================
+# DATA MODELS
+# =============================================================================
+
+models:
+  Eval:
+    id: uuid
+    name: string
+    type: EvalType
+    assistant_id: uuid
+    dataset_id: uuid
+    criteria: EvalCriterion[]
+    config: EvalConfig
+    status: "pending" | "running" | "completed" | "failed"
+    created_at: timestamp
+    completed_at: timestamp?
+
+  EvalResult:
+    id: uuid
+    eval_id: uuid
+    example_id: uuid
+    run_id: uuid
+    input: json
+    output: json
+    expected: json?
+    scores: Score[]
+    passed: boolean
+    latency_ms: int
+    tokens_used: int
+
+  Dataset:
+    id: uuid
+    name: string
+    description: string
+    example_count: int
+    created_at: timestamp
+
+  DatasetExample:
+    id: uuid
+    dataset_id: uuid
+    input: json
+    expected_output: json?
+    metadata: json
+    tags: string[]
+
+  Feedback:
+    id: uuid
+    run_id: uuid
+    user_id: string?
+    rating: int?
+    thumbs: "up" | "down"?
+    criteria_scores: CriteriaScore[]
+    comment: string?
+    created_at: timestamp
+
+  Score:
+    criterion: string
+    value: float
+    passed: boolean
+    explanation: string?
+
+# =============================================================================
+# DASHBOARD FEATURES
+# =============================================================================
+
+dashboard:
+  pages:
+    overview:
+      widgets:
+        - type: metric_card
+          metrics: ["pass_rate", "avg_score", "regressions", "total_evals"]
+        - type: trend_chart
+          title: "Score Trend"
+          period: "30d"
+        - type: criteria_breakdown
+          title: "Criteria Performance"
+
+    eval_runs:
+      features:
+        - List all eval runs with filters
+        - Status indicators (pass/fail)
+        - Quick comparison between runs
+        - Export results
+
+    eval_detail:
+      features:
+        - Summary statistics
+        - Individual result drill-down
+        - Side-by-side input/output/expected
+        - Score breakdown by criterion
+        - Failure analysis
+
+    datasets:
+      features:
+        - Create/manage datasets
+        - Import from CSV/JSON
+        - Tag and organize examples
+        - Version datasets
+
+    feedback:
+      features:
+        - Human feedback queue
+        - Annotation interface
+        - Agreement metrics
+        - Export labeled data
+
+    comparison:
+      features:
+        - A/B test setup
+        - Side-by-side results
+        - Statistical significance
+        - Winner declaration
+
+# =============================================================================
+# SDK INTEGRATION
+# =============================================================================
+
+sdk:
+  python:
+    metrics_collection:
+      description: "Automatic metrics capture during run execution"
+      captured:
+        - latency_per_node
+        - total_latency
+        - input_tokens
+        - output_tokens
+        - tool_calls
+        - errors
+
+    trace_capture:
+      description: "Detailed trace for debugging and eval"
+      captured:
+        - node_executions
+        - intermediate_states
+        - llm_calls_with_prompts
+        - tool_inputs_outputs
+
+    eval_hooks:
+      description: "Custom eval logic in worker"
+      hooks:
+        - on_run_complete: "Run eval after completion"
+        - on_node_complete: "Eval individual nodes"
+
+    local_eval:
+      description: "Run evals locally during development"
+      features:
+        - Load dataset
+        - Run against graph
+        - Score results
+        - Generate report
+
+  go:
+    metrics_collection:
+      description: "Same as Python SDK"
+
+    eval_client:
+      description: "Client to interact with eval API"
+      methods:
+        - CreateEval
+        - GetEvalResults
+        - SubmitFeedback
+        - GetMetrics
+
+# =============================================================================
+# IMPLEMENTATION PHASES
+# =============================================================================
+
+phases:
+  phase1:
+    title: "Foundation"
+    milestone: "v0.4.0"
+    deliverables:
+      - Eval domain models and DB schema
+      - Basic CRUD endpoints for evals and datasets
+      - Heuristic scorers (exact_match, contains, regex)
+      - Simple dashboard with eval list and results
+
+  phase2:
+    title: "LLM Judge & Feedback"
+    milestone: "v0.4.0"
+    deliverables:
+      - LLM-as-judge scorer
+      - Human feedback endpoints
+      - Feedback collection UI
+      - Criteria-based scoring
+
+  phase3:
+    title: "SDK Integration"
+    milestone: "v0.5.0"
+    deliverables:
+      - Metrics collection in Python/Go SDK
+      - Trace capture and export
+      - Local eval runner
+      - CI/CD integration examples
+
+  phase4:
+    title: "Advanced Features"
+    milestone: "v0.5.0"
+    deliverables:
+      - A/B comparison evals
+      - Regression detection
+      - Scheduled eval runs
+      - Alerting on quality degradation
+
+# =============================================================================
+# GITHUB ISSUES
+# =============================================================================
+
+github:
+  milestone:
+    name: "Evals v0.4.0"
+    description: "Evaluation framework for AI agents"
+
+  issues:
+    - title: "feat(evals): Add eval domain models and DB schema"
+      labels: ["type: feature", "area: core", "priority: high"]
+      body: |
+        Add the core data models for the evaluation system:
+        - Eval, EvalResult, Dataset, DatasetExample, Feedback
+        - PostgreSQL migrations
+        - Repository interfaces
+
+    - title: "feat(evals): Implement eval CRUD endpoints"
+      labels: ["type: feature", "area: api", "priority: high"]
+      body: |
+        Add REST API endpoints:
+        - POST/GET /api/v1/evals
+        - POST/GET /api/v1/datasets
+        - POST/GET /api/v1/datasets/:id/examples
+
+    - title: "feat(evals): Add heuristic scorers"
+      labels: ["type: feature", "area: core", "priority: high"]
+      body: |
+        Implement heuristic evaluation scorers:
+        - exact_match, contains, regex
+        - json_valid, json_schema
+        - length constraints
+
+    - title: "feat(evals): Implement LLM-as-judge scorer"
+      labels: ["type: feature", "area: integrations", "priority: high"]
+      body: |
+        Add LLM-based evaluation:
+        - Configurable judge model (GPT-4, Claude)
+        - Custom rubric/criteria prompts
+        - Score extraction and normalization
+
+    - title: "feat(evals): Add human feedback endpoints"
+      labels: ["type: feature", "area: api", "priority: medium"]
+      body: |
+        Add endpoints for collecting human feedback:
+        - POST /api/v1/feedback
+        - GET /api/v1/runs/:run_id/feedback
+        - Thumbs up/down, ratings, comments
+
+    - title: "feat(dashboard): Add evals dashboard pages"
+      labels: ["type: feature", "area: dashboard", "priority: high"]
+      body: |
+        Add dashboard pages for evaluations:
+        - Evals overview with metrics
+        - Eval runs list with filters
+        - Eval detail with drill-down
+        - Dataset management
+
+    - title: "feat(sdk): Add metrics collection to Python SDK"
+      labels: ["type: feature", "area: sdk", "priority: medium"]
+      body: |
+        Add automatic metrics collection:
+        - Latency per node and total
+        - Token usage (input/output)
+        - Tool call tracking
+        - Error capture
+
+    - title: "feat(sdk): Add local eval runner"
+      labels: ["type: feature", "area: sdk", "priority: medium"]
+      body: |
+        Add local evaluation support:
+        - Load datasets
+        - Run graphs against examples
+        - Score with heuristic scorers
+        - Generate reports
+
+    - title: "feat(evals): Add A/B comparison evals"
+      labels: ["type: feature", "area: core", "priority: low"]
+      body: |
+        Add comparison evaluation support:
+        - Side-by-side evaluation
+        - Statistical significance testing
+        - Elo rating for assistants
+
+    - title: "feat(evals): Add regression detection"
+      labels: ["type: feature", "area: core", "priority: low"]
+      body: |
+        Add regression detection:
+        - Golden dataset baselines
+        - Threshold-based pass/fail
+        - CI/CD integration

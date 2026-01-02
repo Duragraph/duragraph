@@ -134,8 +134,52 @@ class GraphInstance:
         Returns:
             RunResult with execution output.
         """
-        # For now, delegate to sync implementation
-        return self.run(input, config=config, thread_id=thread_id)
+        from duragraph.executor import execute_node
+
+        state = input.copy()
+        nodes_executed: list[str] = []
+
+        current_node = self._definition.entrypoint
+        if current_node is None:
+            raise ValueError("No entrypoint defined for graph")
+
+        while current_node is not None:
+            # Get node metadata
+            metadata = self._definition.nodes.get(current_node)
+            if metadata is None:
+                raise ValueError(f"Node metadata for '{current_node}' not found")
+
+            # Get node method
+            node_method = getattr(self._instance, current_node, None)
+            if node_method is None:
+                raise ValueError(f"Node method '{current_node}' not found")
+
+            # Execute node
+            result = await execute_node(current_node, metadata, node_method, state)
+            if isinstance(result, dict):
+                state.update(result)
+            nodes_executed.append(current_node)
+
+            # Find next node
+            next_node = None
+            for edge in self._definition.edges:
+                if edge.source == current_node:
+                    if isinstance(edge.target, str):
+                        next_node = edge.target
+                    elif isinstance(edge.target, dict):
+                        # Router node - result should be the key
+                        if isinstance(result, str) and result in edge.target:
+                            next_node = edge.target[result]
+                    break
+
+            current_node = next_node
+
+        return RunResult(
+            run_id="local-run",
+            status="completed",
+            output=state,
+            nodes_executed=nodes_executed,
+        )
 
     async def stream(
         self,
@@ -185,6 +229,17 @@ class GraphInstance:
                 timestamp=datetime.utcnow().isoformat(),
             )
 
+            # Get node metadata
+            metadata = self._definition.nodes.get(current_node)
+            if metadata is None:
+                yield Event(
+                    type="run_failed",
+                    run_id=run_id,
+                    data={"error": f"Node metadata for '{current_node}' not found"},
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+                return
+
             node_method = getattr(self._instance, current_node, None)
             if node_method is None:
                 yield Event(
@@ -195,7 +250,10 @@ class GraphInstance:
                 )
                 return
 
-            result = node_method(state)
+            # Import executor
+            from duragraph.executor import execute_node
+
+            result = await execute_node(current_node, metadata, node_method, state)
             if isinstance(result, dict):
                 state.update(result)
 

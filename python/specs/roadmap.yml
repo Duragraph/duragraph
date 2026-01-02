@@ -1,0 +1,273 @@
+# DuraGraph Python SDK Roadmap
+# Development milestones and feature planning
+
+metadata:
+  version: "0.1.0"
+  last_updated: "2024-12-29"
+  status: active
+
+# =============================================================================
+# VERSION HISTORY
+# =============================================================================
+
+releases:
+  v0.1.0:
+    status: released
+    date: "2024-12-29"
+    features:
+      - Core package structure
+      - Graph decorator (@Graph)
+      - Node decorators (@llm_node, @tool_node, @router_node, @human_node)
+      - Edge definitions with >> operator
+      - Basic type definitions
+      - CLI skeleton
+      - Prompt store skeleton
+
+# =============================================================================
+# CURRENT MILESTONE: v0.2.0
+# =============================================================================
+
+v0.2.0:
+  status: in_progress
+  target: "Q1 2025"
+  theme: "Core Integrations"
+
+  completed:
+    - issue: "#1"
+      title: "LLM provider integrations"
+      pr: "#15"
+      features:
+        - LLMProvider base class
+        - OpenAI provider with streaming
+        - Anthropic provider with streaming
+        - Provider registry with auto-detection
+
+    - issue: "#16"
+      title: "Vector store abstraction"
+      pr: "pending"
+      features:
+        - VectorStore base class
+        - Document and SearchResult dataclasses
+        - ChromaVectorStore implementation
+        - PineconeVectorStore implementation
+
+  in_progress:
+    - issue: "#18"
+      title: "Embedding providers"
+      features:
+        - EmbeddingProvider base class
+        - OpenAI embeddings
+        - Local embeddings (sentence-transformers)
+
+  planned:
+    - issue: "#17"
+      title: "Knowledge graph support"
+      features:
+        - KnowledgeGraph base class
+        - Neo4j implementation
+        - Query interface
+
+    - issue: "#13"
+      title: "Tool registry and execution"
+      features:
+        - Tool registration decorators
+        - Tool execution engine
+        - Schema generation
+
+    - issue: "#5"
+      title: "Edge operator in class body"
+      features:
+        - Support >> operator inside Graph class
+        - Automatic edge inference
+
+    - issue: "#4"
+      title: "Async execution support"
+      features:
+        - Proper async graph execution
+        - Parallel node execution
+        - Async streaming
+
+    - issue: "#2"
+      title: "CLI commands implementation"
+      features:
+        - duragraph init
+        - duragraph run
+        - duragraph deploy
+
+# =============================================================================
+# FUTURE MILESTONE: v0.3.0
+# =============================================================================
+
+v0.3.0:
+  status: planned
+  target: "Q2 2025"
+  theme: "Production Ready"
+
+  planned:
+    - issue: "#6"
+      title: "Worker connection to control plane"
+      features:
+        - HTTP client for control plane API
+        - Run execution polling
+        - Event streaming
+
+    - issue: "#7"
+      title: "Checkpoint and state persistence"
+      features:
+        - State serialization
+        - Checkpoint storage
+        - Recovery from checkpoints
+
+    - issue: "#8"
+      title: "SSE streaming support"
+      features:
+        - Server-sent events client
+        - Real-time event handling
+        - Reconnection logic
+
+    - issue: "#9"
+      title: "Human-in-the-loop implementation"
+      features:
+        - Interrupt handling
+        - Resume from interrupt
+        - Tool output submission
+
+    - issue: "#10"
+      title: "OpenTelemetry tracing"
+      features:
+        - Span creation for nodes
+        - Distributed tracing
+        - Metrics export
+
+    - issue: "#11"
+      title: "Retry and error handling"
+      features:
+        - Configurable retries
+        - Backoff strategies
+        - Error recovery
+
+    - issue: "#12"
+      title: "Rate limiting"
+      features:
+        - Token bucket implementation
+        - Per-provider limits
+        - Graceful throttling
+
+# =============================================================================
+# FUTURE MILESTONE: v0.4.0
+# =============================================================================
+
+v0.4.0:
+  status: planned
+  target: "Q2-Q3 2025"
+  theme: "Evaluations & Memory"
+
+  planned:
+    - issue: "TBD"
+      title: "SDK metrics collection"
+      features:
+        - Automatic latency tracking per node
+        - Token usage counting (input/output)
+        - Tool call success/failure tracking
+        - Error capture and reporting
+
+    - issue: "TBD"
+      title: "Trace capture for evals"
+      features:
+        - Node execution traces
+        - Intermediate state snapshots
+        - LLM call logging
+        - Export to control plane
+
+    - issue: "TBD"
+      title: "Local eval runner"
+      features:
+        - Load datasets from file/API
+        - Run graphs against examples
+        - Heuristic scorers (exact_match, contains, regex)
+        - Generate eval reports
+
+    - issue: "TBD"
+      title: "Memory abstraction"
+      features:
+        - MemoryManager interface
+        - Short-term memory (conversation buffer)
+        - Long-term memory (vector store backed)
+        - Memory consolidation
+
+    - issue: "TBD"
+      title: "Hierarchical memory"
+      features:
+        - Working memory (L1)
+        - Episodic memory (L2)
+        - Semantic memory (L3)
+        - Importance-weighted retrieval
+
+# =============================================================================
+# BACKLOG
+# =============================================================================
+
+backlog:
+  integrations:
+    - title: "Milvus vector store"
+    - title: "Elasticsearch vector store"
+    - title: "Amazon Neptune graph"
+    - title: "Apache AGE graph"
+    - title: "Voyage AI embeddings"
+    - title: "Google Vertex AI embeddings"
+
+  features:
+    - title: "Document loaders and chunking"
+    - title: "Caching layer"
+    - title: "Batch processing"
+    - title: "Multi-agent orchestration"
+    - title: "LangGraph adapter layer"
+    - title: "Self-reflective memory"
+    - title: "Memory schemas per user"
+
+  tooling:
+    - title: "VS Code extension"
+    - title: "Graph visualization"
+    - title: "Testing utilities"
+    - title: "Debugging tools"
+
+  evals:
+    - title: "A/B comparison runner"
+    - title: "Regression detection"
+    - title: "CI/CD integration"
+    - title: "Custom scorer plugins"
+
+# =============================================================================
+# GITHUB ISSUES MAPPING
+# =============================================================================
+
+github_issues:
+  repository: "duragraph/duragraph-python"
+
+  milestones:
+    v0.2.0:
+      id: 1
+      issues: [1, 2, 3, 4, 5, 13, 16, 17, 18, 19]
+
+    v0.3.0:
+      id: 2
+      issues: [6, 7, 8, 9, 10, 11, 12]
+
+  labels:
+    priority:
+      - "priority: critical"
+      - "priority: high"
+      - "priority: medium"
+      - "priority: low"
+
+    type:
+      - "type: feature"
+      - "type: bug"
+      - "type: docs"
+      - "type: chore"
+
+    area:
+      - "area: core"
+      - "area: integrations"
+      - "area: cli"
+      - "area: worker"

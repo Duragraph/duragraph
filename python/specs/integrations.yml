@@ -1,0 +1,494 @@
+# DuraGraph Python SDK Integrations Specification
+# Details on all SDK integrations
+
+metadata:
+  version: "0.1.0"
+  last_updated: "2024-12-29"
+  status: draft
+
+# =============================================================================
+# LLM PROVIDERS
+# =============================================================================
+
+llm_providers:
+  base_class: LLMProvider
+  location: duragraph.llm
+
+  interface:
+    methods:
+      - name: complete
+        async: true
+        params:
+          - messages: list[Message]
+          - model: str
+          - temperature: float
+          - max_tokens: int | None
+          - tools: list[dict] | None
+        returns: LLMResponse
+
+      - name: stream
+        async: true
+        generator: true
+        params:
+          - messages: list[Message]
+          - model: str
+        yields: StreamChunk
+
+  implementations:
+    openai:
+      status: implemented
+      optional_dep: openai
+      models:
+        - gpt-4o
+        - gpt-4o-mini
+        - gpt-4-turbo
+        - gpt-3.5-turbo
+        - o1-preview
+        - o1-mini
+        - o3-mini
+
+    anthropic:
+      status: implemented
+      optional_dep: anthropic
+      models:
+        - claude-3-opus
+        - claude-3-sonnet
+        - claude-3-haiku
+        - claude-3.5-sonnet
+        - claude-3.5-haiku
+
+    gemini:
+      status: planned
+      optional_dep: google-genai
+      models:
+        - gemini-2.0-flash
+        - gemini-1.5-pro
+        - gemini-1.5-flash
+        - gemini-1.0-pro
+
+    ollama:
+      status: planned
+      optional_dep: ollama
+      future_transport: grpc  # Will support gRPC when available
+      models:
+        - llama3
+        - llama3.2
+        - mistral
+        - mixtral
+        - qwen2.5
+        - deepseek-r1
+        - custom
+
+    cohere:
+      status: planned
+      optional_dep: cohere
+      models:
+        - command-r
+        - command-r-plus
+
+  registry:
+    auto_detection: true
+    pattern: |
+      from duragraph.llm import get_provider
+
+      # Auto-detects provider from model name
+      provider = get_provider("gpt-4o-mini")  # Returns OpenAIProvider
+      provider = get_provider("claude-3-sonnet")  # Returns AnthropicProvider
+
+# =============================================================================
+# VECTOR STORES
+# =============================================================================
+
+vector_stores:
+  base_class: VectorStore
+  location: duragraph.vectorstores
+
+  interface:
+    methods:
+      - name: add
+        async: true
+        params:
+          - documents: Sequence[Document]
+          - embeddings: Sequence[Sequence[float]] | None
+          - ids: Sequence[str] | None
+        returns: list[str]  # Document IDs
+
+      - name: search
+        async: true
+        params:
+          - query: str | list[float]
+          - k: int
+          - filter: dict | None
+        returns: list[SearchResult]
+
+      - name: delete
+        async: true
+        params:
+          - ids: Sequence[str] | None
+          - filter: dict | None
+        returns: int  # Count deleted
+
+      - name: get
+        async: true
+        optional: true
+        params:
+          - ids: Sequence[str]
+        returns: list[Document]
+
+      - name: clear
+        async: true
+        optional: true
+        returns: int
+
+      - name: count
+        async: true
+        optional: true
+        returns: int
+
+  data_classes:
+    Document:
+      fields:
+        - content: str
+        - metadata: dict
+        - id: str | None
+        - embedding: list[float] | None
+
+    SearchResult:
+      fields:
+        - document: Document
+        - score: float
+        - id: str
+
+  implementations:
+    chroma:
+      status: implemented
+      optional_dep: chromadb
+      modes:
+        - in_memory: "For development/testing"
+        - persistent: "Local directory storage"
+        - client_server: "Production deployment"
+      example: |
+        from duragraph.vectorstores import ChromaVectorStore
+
+        # In-memory
+        store = ChromaVectorStore(collection="docs")
+
+        # Persistent
+        store = ChromaVectorStore(
+            collection="docs",
+            persist_directory="./chroma_data"
+        )
+
+        # Client-server
+        store = ChromaVectorStore(
+            collection="docs",
+            host="localhost",
+            port=8000
+        )
+
+    pinecone:
+      status: implemented
+      optional_dep: pinecone
+      features:
+        - serverless
+        - namespaces
+        - metadata_filtering
+      example: |
+        from duragraph.vectorstores import PineconeVectorStore
+
+        store = PineconeVectorStore(
+            index="my-index",
+            embedding_provider=embeddings,
+            namespace="production"
+        )
+
+    weaviate:
+      status: planned
+      optional_dep: weaviate-client
+
+    qdrant:
+      status: planned
+      optional_dep: qdrant-client
+
+    pgvector:
+      status: planned
+      optional_dep: psycopg
+      notes: "Works with any PostgreSQL including Neon"
+
+    neon:
+      status: planned
+      optional_dep: psycopg
+      notes: "Neon serverless Postgres with pgvector extension"
+      features:
+        - serverless
+        - autoscaling
+        - branching
+
+    milvus:
+      status: planned
+      optional_dep: pymilvus
+
+    elasticsearch:
+      status: planned
+      optional_dep: elasticsearch
+      features:
+        - dense_vector
+        - knn_search
+        - hybrid_search
+
+    turso:
+      status: planned
+      optional_dep: libsql-experimental
+      notes: "SQLite-based with vector search support"
+      features:
+        - edge_deployment
+        - embedded
+        - replicated
+
+# =============================================================================
+# EMBEDDING PROVIDERS
+# =============================================================================
+
+embedding_providers:
+  base_class: EmbeddingProvider
+  location: duragraph.embeddings  # Planned
+
+  interface:
+    methods:
+      - name: embed
+        async: true
+        params:
+          - texts: Sequence[str]
+        returns: list[list[float]]
+
+      - name: embed_query
+        async: true
+        params:
+          - text: str
+        returns: list[float]
+
+    properties:
+      - name: dimension
+        returns: int | None
+
+  implementations:
+    openai:
+      status: planned
+      optional_dep: openai
+      models:
+        - text-embedding-3-small
+        - text-embedding-3-large
+        - text-embedding-ada-002
+
+    cohere:
+      status: planned
+      optional_dep: cohere
+      models:
+        - embed-english-v3.0
+        - embed-multilingual-v3.0
+
+    sentence_transformers:
+      status: planned
+      optional_dep: sentence-transformers
+      models:
+        - all-MiniLM-L6-v2
+        - all-mpnet-base-v2
+        - multi-qa-mpnet-base-dot-v1
+
+# =============================================================================
+# KNOWLEDGE GRAPHS
+# =============================================================================
+
+knowledge_graphs:
+  base_class: KnowledgeGraph
+  location: duragraph.graphs  # Planned
+
+  interface:
+    methods:
+      - name: query
+        async: true
+        params:
+          - cypher: str  # Or SPARQL depending on backend
+          - params: dict | None
+        returns: list[dict]
+
+      - name: add_nodes
+        async: true
+        params:
+          - nodes: list[Node]
+        returns: list[str]
+
+      - name: add_edges
+        async: true
+        params:
+          - edges: list[Edge]
+        returns: list[str]
+
+  implementations:
+    neo4j:
+      status: planned
+      optional_dep: neo4j
+      query_language: cypher
+
+    memgraph:
+      status: planned
+      optional_dep: gqlalchemy
+      query_language: cypher
+      features:
+        - in_memory
+        - real_time
+        - high_performance
+
+    arangodb:
+      status: planned
+      optional_dep: python-arango
+      query_language: aql
+      features:
+        - multi_model  # document + graph + search
+        - native_graphs
+        - distributed
+
+    neptune:
+      status: planned
+      optional_dep: boto3
+      query_language: gremlin
+
+    apache_age:
+      status: planned
+      optional_dep: psycopg
+      query_language: cypher
+      notes: "PostgreSQL extension, works with Neon"
+
+    neon_graph:
+      status: planned
+      optional_dep: psycopg
+      query_language: cypher
+      notes: "Neon Postgres with Apache AGE extension"
+
+# =============================================================================
+# DOCUMENT STORAGE
+# =============================================================================
+
+document_storage:
+  base_class: DocumentStore
+  location: duragraph.storage  # Planned
+
+  interface:
+    methods:
+      - name: upload
+        async: true
+        params:
+          - key: str
+          - content: bytes | str
+          - metadata: dict | None
+        returns: str  # URL or key
+
+      - name: download
+        async: true
+        params:
+          - key: str
+        returns: bytes
+
+      - name: delete
+        async: true
+        params:
+          - key: str
+        returns: bool
+
+      - name: list
+        async: true
+        params:
+          - prefix: str | None
+        returns: list[str]
+
+  implementations:
+    s3:
+      status: planned
+      optional_dep: boto3
+      features:
+        - presigned_urls
+        - multipart_upload
+        - versioning
+      compatible_services:
+        - AWS S3
+        - MinIO
+        - Cloudflare R2
+        - DigitalOcean Spaces
+
+    gcs:
+      status: planned
+      optional_dep: google-cloud-storage
+      notes: "Google Cloud Storage"
+
+    azure_blob:
+      status: planned
+      optional_dep: azure-storage-blob
+      notes: "Azure Blob Storage"
+
+    local:
+      status: planned
+      optional_dep: null  # No extra deps
+      notes: "Local filesystem for development"
+
+# =============================================================================
+# OPTIONAL DEPENDENCIES
+# =============================================================================
+
+optional_dependencies:
+  install_commands:
+    llm:
+      openai: "pip install duragraph-python[openai]"
+      anthropic: "pip install duragraph-python[anthropic]"
+      gemini: "pip install duragraph-python[gemini]"
+      ollama: "pip install duragraph-python[ollama]"
+
+    vectorstores:
+      chroma: "pip install duragraph-python[chroma]"
+      pinecone: "pip install duragraph-python[pinecone]"
+      weaviate: "pip install duragraph-python[weaviate]"
+      qdrant: "pip install duragraph-python[qdrant]"
+      milvus: "pip install duragraph-python[milvus]"
+      elasticsearch: "pip install duragraph-python[elasticsearch]"
+      pgvector: "pip install duragraph-python[pgvector]"
+      turso: "pip install duragraph-python[turso]"
+
+    knowledge_graphs:
+      neo4j: "pip install duragraph-python[neo4j]"
+      memgraph: "pip install duragraph-python[memgraph]"
+      arangodb: "pip install duragraph-python[arangodb]"
+
+    storage:
+      s3: "pip install duragraph-python[s3]"
+      gcs: "pip install duragraph-python[gcs]"
+      azure: "pip install duragraph-python[azure]"
+
+    all: "pip install duragraph-python[all]"
+
+  # Grouped by milestone for gradual implementation
+  milestones:
+    v0.2.0:
+      - openai
+      - anthropic
+      - chroma
+      - pinecone
+
+    v0.3.0:
+      - gemini
+      - ollama
+      - weaviate
+      - qdrant
+      - neo4j
+
+    v0.4.0:
+      - milvus
+      - elasticsearch
+      - pgvector  # includes Neon
+      - memgraph
+      - arangodb
+      - s3
+
+    v0.5.0:
+      - turso
+      - gcs
+      - azure
+      - cohere

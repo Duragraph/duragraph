@@ -62,10 +62,7 @@ class Worker:
             self._client = httpx.AsyncClient(timeout=30.0)
 
         # Prepare graph definitions
-        graphs = [
-            {"graph_id": g.graph_id, "definition": g.to_ir()}
-            for g in self._graphs.values()
-        ]
+        graphs = [{"graph_id": g.graph_id, "definition": g.to_ir()} for g in self._graphs.values()]
 
         payload = {
             "name": self.name,
@@ -116,9 +113,13 @@ class Worker:
         # Find the graph definition
         graph_def = self._graphs.get(graph_id)
         if not graph_def:
-            await self._send_event(run_id, "run_failed", {
-                "error": f"Graph '{graph_id}' not registered with this worker",
-            })
+            await self._send_event(
+                run_id,
+                "run_failed",
+                {
+                    "error": f"Graph '{graph_id}' not registered with this worker",
+                },
+            )
             return
 
         # Start the run
@@ -130,9 +131,13 @@ class Worker:
             current_node = graph_def.entrypoint
 
             while current_node:
-                await self._send_event(run_id, "node_started", {
-                    "node_id": current_node,
-                })
+                await self._send_event(
+                    run_id,
+                    "node_started",
+                    {
+                        "node_id": current_node,
+                    },
+                )
 
                 # Get node metadata
                 node_meta = graph_def.nodes.get(current_node)
@@ -145,9 +150,7 @@ class Worker:
                 elif node_meta.node_type == "tool":
                     result = await self._execute_tool_node(node_meta, state)
                 elif node_meta.node_type == "human":
-                    result = await self._execute_human_node(
-                        run_id, node_meta, state
-                    )
+                    result = await self._execute_human_node(run_id, node_meta, state)
                     if result is None:
                         # Interrupted, waiting for human input
                         return
@@ -158,10 +161,14 @@ class Worker:
                 if isinstance(result, dict):
                     state.update(result)
 
-                await self._send_event(run_id, "node_completed", {
-                    "node_id": current_node,
-                    "output": result,
-                })
+                await self._send_event(
+                    run_id,
+                    "node_completed",
+                    {
+                        "node_id": current_node,
+                        "output": result,
+                    },
+                )
 
                 # Find next node
                 next_node = None
@@ -177,16 +184,24 @@ class Worker:
                 current_node = next_node
 
             # Run completed
-            await self._send_event(run_id, "run_completed", {
-                "output": state,
-                "thread_id": thread_id,
-            })
+            await self._send_event(
+                run_id,
+                "run_completed",
+                {
+                    "output": state,
+                    "thread_id": thread_id,
+                },
+            )
 
         except Exception as e:
-            await self._send_event(run_id, "run_failed", {
-                "error": str(e),
-                "thread_id": thread_id,
-            })
+            await self._send_event(
+                run_id,
+                "run_failed",
+                {
+                    "error": str(e),
+                    "thread_id": thread_id,
+                },
+            )
 
     async def _execute_llm_node(
         self,
@@ -221,11 +236,15 @@ class Worker:
         prompt = config.get("prompt", "Please review")
 
         # Signal that human input is required
-        await self._send_event(run_id, "run_requires_action", {
-            "action_type": "human_review",
-            "prompt": prompt,
-            "state": state,
-        })
+        await self._send_event(
+            run_id,
+            "run_requires_action",
+            {
+                "action_type": "human_review",
+                "prompt": prompt,
+                "state": state,
+            },
+        )
 
         # Return None to indicate the run is waiting
         return None
