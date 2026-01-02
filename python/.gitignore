@@ -60,3 +60,11 @@ dist/
 
 # UV lock file (optional - can be committed for reproducibility)
 # uv.lock
+
+# AI Assistant files (DO NOT COMMIT)
+CLAUDE.md
+.claude/
+.crush/
+.crush-lsp.json
+crush.json
+specs/
