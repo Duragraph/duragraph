@@ -1,5 +1,6 @@
 """Node decorators for DuraGraph workflows."""
 
+import inspect
 from collections.abc import Callable
 from functools import wraps
 from typing import Any, TypeVar
@@ -15,10 +16,12 @@ class NodeMetadata:
         node_type: str,
         name: str | None = None,
         config: dict[str, Any] | None = None,
+        is_async: bool = False,
     ):
         self.node_type = node_type
         self.name = name
         self.config = config or {}
+        self.is_async = is_async
 
 
 def node(
@@ -40,23 +43,53 @@ def node(
         @node()
         def my_processor(self, state):
             return {"processed": True}
+
+        @node()
+        async def my_async_processor(self, state):
+            await some_async_operation()
+            return {"processed": True}
     """
 
     def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return func(*args, **kwargs)
+        # Check if the original function is async
+        is_async = inspect.iscoroutinefunction(func)
 
-        wrapper._node_metadata = NodeMetadata(  # type: ignore
-            node_type="function",
-            name=name or func.__name__,
-            config={
-                "retry_on": retry_on or [],
-                "max_retries": max_retries,
-                "retry_delay": retry_delay,
-            },
-        )
-        return wrapper  # type: ignore
+        if is_async:
+
+            @wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                return await func(*args, **kwargs)
+
+            async_wrapper._node_metadata = NodeMetadata(  # type: ignore
+                node_type="function",
+                name=name or func.__name__,
+                config={
+                    "retry_on": retry_on or [],
+                    "max_retries": max_retries,
+                    "retry_delay": retry_delay,
+                },
+                is_async=True,
+            )
+            async_wrapper._original_func = func  # type: ignore
+            return async_wrapper  # type: ignore
+        else:
+
+            @wraps(func)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                return func(*args, **kwargs)
+
+            wrapper._node_metadata = NodeMetadata(  # type: ignore
+                node_type="function",
+                name=name or func.__name__,
+                config={
+                    "retry_on": retry_on or [],
+                    "max_retries": max_retries,
+                    "retry_delay": retry_delay,
+                },
+                is_async=False,
+            )
+            wrapper._original_func = func  # type: ignore
+            return wrapper  # type: ignore
 
     return decorator
 

@@ -1,5 +1,6 @@
 """Node execution logic for different node types."""
 
+import inspect
 from typing import Any
 
 from duragraph.nodes import NodeMetadata
@@ -73,11 +74,11 @@ async def execute_llm_node(
     return result
 
 
-def execute_function_node(
+async def execute_function_node(
     node_method: Any,
     state: State,
 ) -> dict[str, Any]:
-    """Execute a regular function node.
+    """Execute a regular function node (sync or async).
 
     Args:
         node_method: The node method to execute.
@@ -86,7 +87,13 @@ def execute_function_node(
     Returns:
         State updates from the node.
     """
-    result = node_method(state)
+    # The node_method is already the wrapped function from the decorator
+    # which preserves the async nature
+    if inspect.iscoroutinefunction(node_method):
+        result = await node_method(state)
+    else:
+        result = node_method(state)
+
     if isinstance(result, dict):
         return result
     return {}
@@ -114,6 +121,6 @@ async def execute_node(
     if node_type == "llm":
         return await execute_llm_node(node_name, metadata, state)
     elif node_type in ("function", "tool", "router", "human"):
-        return execute_function_node(node_method, state)
+        return await execute_function_node(node_method, state)
     else:
         raise ValueError(f"Unknown node type: {node_type}")
