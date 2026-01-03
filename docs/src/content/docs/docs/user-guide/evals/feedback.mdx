@@ -1,0 +1,520 @@
+---
+title: Human Feedback Collection
+description: Collect and integrate human feedback for evaluation and improvement
+---
+
+Human feedback is essential for evaluating and improving AI agents. DuraGraph provides tools for collecting, analyzing, and acting on human feedback at scale.
+
+## Overview
+
+Human feedback enables:
+
+- **Ground truth evaluation** for model outputs
+- **Preference learning** (RLHF/RLAIF)
+- **Quality monitoring** in production
+- **Active learning** for dataset improvement
+
+## Feedback Collection
+
+### In-App Feedback Widget
+
+```python
+from duragraph import Graph, llm_node
+from duragraph.feedback import FeedbackCollector
+
+@Graph(id="chatbot")
+class Chatbot:
+    def __init__(self):
+        self.feedback = FeedbackCollector()
+
+    @llm_node(model="gpt-4o-mini")
+    def generate_response(self, state):
+        return state
+
+    def collect_feedback(self, state):
+        """Attach feedback collection to response."""
+        return {
+            "response": state["response"],
+            "feedback_widget": self.feedback.create_widget(
+                run_id=state["run_id"],
+                output=state["response"],
+            )
+        }
+```
+
+### API-Based Feedback
+
+```bash
+# Submit thumbs up/down
+curl -X POST http://localhost:8081/api/v1/feedback \
+  -H "Content-Type: application/json" \
+  -d '{
+    "run_id": "323e4567-e89b-12d3-a456-426614174000",
+    "rating": "positive",
+    "comment": "Helpful response"
+  }'
+
+# Submit detailed feedback
+curl -X POST http://localhost:8081/api/v1/feedback \
+  -H "Content-Type: application/json" \
+  -d '{
+    "run_id": "323e4567-e89b-12d3-a456-426614174000",
+    "rating": "negative",
+    "dimensions": {
+      "accuracy": 2,
+      "helpfulness": 3,
+      "safety": 5
+    },
+    "comment": "Factually incorrect",
+    "corrected_output": "The correct answer is..."
+  }'
+```
+
+## Feedback Types
+
+### Binary Feedback (Thumbs Up/Down)
+
+```python
+from duragraph.feedback import BinaryFeedback
+
+feedback = BinaryFeedback.submit(
+    run_id="...",
+    rating="positive",  # or "negative"
+    user_id="user_123",
+)
+```
+
+### Likert Scale
+
+```python
+from duragraph.feedback import LikertFeedback
+
+feedback = LikertFeedback.submit(
+    run_id="...",
+    rating=4,  # 1-5 scale
+    dimension="helpfulness",
+    user_id="user_123",
+)
+```
+
+### Multi-Dimensional
+
+```python
+from duragraph.feedback import MultiDimensionalFeedback
+
+feedback = MultiDimensionalFeedback.submit(
+    run_id="...",
+    dimensions={
+        "accuracy": 4,
+        "helpfulness": 5,
+        "clarity": 3,
+        "safety": 5,
+    },
+    user_id="user_123",
+)
+```
+
+### Comparative (A/B)
+
+```python
+from duragraph.feedback import ComparativeFeedback
+
+feedback = ComparativeFeedback.submit(
+    run_id_a="...",
+    run_id_b="...",
+    preference="a",  # or "b" or "equal"
+    reason="More accurate and concise",
+    user_id="user_123",
+)
+```
+
+### Free-Form Comments
+
+```python
+from duragraph.feedback import CommentFeedback
+
+feedback = CommentFeedback.submit(
+    run_id="...",
+    comment="The response was helpful but could include more examples",
+    tags=["needs_examples", "good_start"],
+    user_id="user_123",
+)
+```
+
+## Feedback UI Components
+
+### React Component
+
+```tsx
+import { FeedbackWidget } from '@duragraph/react';
+
+function ChatMessage({ message, runId }) {
+  return (
+    <div>
+      <p>{message.content}</p>
+      <FeedbackWidget
+        runId={runId}
+        onSubmit={(feedback) => {
+          console.log('Feedback submitted:', feedback);
+        }}
+      />
+    </div>
+  );
+}
+```
+
+### HTML Widget
+
+```html
+<div id="feedback-widget" data-run-id="..."></div>
+<script src="https://cdn.duragraph.io/feedback-widget.js"></script>
+<script>
+  DuragraphFeedback.render('#feedback-widget', {
+    runId: '...',
+    apiKey: '...',
+    onSubmit: (feedback) => {
+      console.log('Submitted:', feedback);
+    },
+  });
+</script>
+```
+
+## Feedback Analysis
+
+### Aggregate Metrics
+
+```python
+from duragraph.feedback import FeedbackAnalyzer
+
+analyzer = FeedbackAnalyzer()
+
+# Get aggregate stats
+stats = analyzer.get_stats(
+    start_date="2025-01-01",
+    end_date="2025-01-31",
+    filters={"assistant_id": "..."}
+)
+
+print(stats.positive_rate)  # 0.85
+print(stats.average_rating)  # 4.2
+print(stats.total_feedback)  # 1234
+```
+
+### Trending Issues
+
+```python
+# Identify trending negative feedback topics
+issues = analyzer.get_trending_issues(
+    time_window="7d",
+    sentiment="negative",
+    min_count=5,
+)
+
+for issue in issues:
+    print(f"{issue.topic}: {issue.count} occurrences")
+    print(f"Example: {issue.examples[0]}")
+```
+
+### User Segments
+
+```python
+# Analyze feedback by user segment
+segments = analyzer.segment_analysis(
+    dimensions=["user_tier", "use_case"],
+)
+
+print(segments["enterprise"]["avg_rating"])  # 4.5
+print(segments["free_tier"]["avg_rating"])   # 3.8
+```
+
+## Active Learning
+
+### Identify Low-Confidence Outputs
+
+```python
+from duragraph.feedback import ActiveLearner
+
+learner = ActiveLearner()
+
+# Find outputs that need human review
+candidates = learner.identify_for_review(
+    criteria="low_confidence",
+    limit=50,
+)
+
+for candidate in candidates:
+    # Present to human for labeling
+    human_feedback = collect_human_review(candidate)
+    learner.submit_feedback(candidate.run_id, human_feedback)
+```
+
+### Disagreement Sampling
+
+```python
+# Find cases where automated scores disagree
+disagreements = learner.find_disagreements(
+    scorer_a="llm_judge",
+    scorer_b="heuristic",
+    threshold=0.3,  # Difference threshold
+)
+
+# Request human adjudication
+for case in disagreements:
+    human_score = request_human_rating(case)
+```
+
+## Feedback-Driven Improvements
+
+### Retrain with Feedback
+
+```python
+from duragraph.evals import FeedbackDataset
+
+# Create dataset from feedback
+dataset = FeedbackDataset.from_feedback(
+    min_rating=4,  # Only positive examples
+    include_corrections=True,
+)
+
+# Use for fine-tuning or prompt engineering
+training_data = dataset.to_training_format()
+```
+
+### Prompt Optimization
+
+```python
+from duragraph.prompts import PromptOptimizer
+
+optimizer = PromptOptimizer()
+
+# Optimize prompts based on feedback
+optimized_prompt = optimizer.optimize(
+    current_prompt="You are a helpful assistant.",
+    negative_examples=get_negative_feedback_examples(),
+    positive_examples=get_positive_feedback_examples(),
+)
+```
+
+### Automated A/B Testing
+
+```python
+from duragraph.feedback import ABTester
+
+tester = ABTester()
+
+# Create A/B test
+test = tester.create_test(
+    name="prompt_comparison",
+    variant_a={"prompt": "Version A"},
+    variant_b={"prompt": "Version B"},
+    traffic_split=0.5,
+    success_metric="positive_feedback_rate",
+)
+
+# Auto-promote winner after statistical significance
+tester.auto_promote(test_id=test.id, confidence=0.95)
+```
+
+## Integration with Evals
+
+### Feedback as Ground Truth
+
+```python
+from duragraph.evals import EvalRunner, FeedbackScorer
+
+runner = EvalRunner(
+    eval_name="human_feedback_validation",
+    dataset=load_production_runs(),
+    scorer=FeedbackScorer(
+        min_feedback_count=3,  # Require 3+ ratings
+        aggregation="mean",
+    ),
+)
+
+results = runner.run()
+```
+
+### Hybrid Scoring
+
+```python
+from duragraph.evals import HybridScorer
+
+scorer = HybridScorer(
+    scorers=[
+        LLMJudge(model="gpt-4o"),
+        FeedbackScorer(),
+        HeuristicScorer(),
+    ],
+    weights={
+        "llm_judge": 0.4,
+        "feedback": 0.4,
+        "heuristic": 0.2,
+    },
+)
+```
+
+## Feedback Workflows
+
+### Review Queue
+
+```python
+from duragraph import Graph
+from duragraph.feedback import ReviewQueue
+
+@Graph(id="feedback_review")
+class FeedbackReview:
+    def __init__(self):
+        self.queue = ReviewQueue()
+
+    def fetch_pending(self, state):
+        """Get feedback needing review."""
+        pending = self.queue.get_pending(limit=50)
+        return {"feedback_items": pending}
+
+    def categorize(self, state):
+        """Categorize feedback."""
+        for item in state["feedback_items"]:
+            category = categorize_feedback(item)
+            self.queue.tag(item.id, category)
+        return state
+
+    def route_to_team(self, state):
+        """Route to appropriate team."""
+        for item in state["feedback_items"]:
+            if item.category == "bug":
+                notify_engineering(item)
+            elif item.category == "content":
+                notify_content_team(item)
+        return state
+```
+
+### Automated Response
+
+```python
+@Graph(id="feedback_response")
+class FeedbackResponse:
+    @llm_node(model="gpt-4o")
+    def generate_response(self, state):
+        """Generate response to feedback."""
+        return {
+            "response": "Thank you for your feedback..."
+        }
+
+    def send_to_user(self, state):
+        """Send response to user."""
+        send_email(
+            to=state["user_email"],
+            subject="Thank you for your feedback",
+            body=state["response"],
+        )
+        return state
+```
+
+## Best Practices
+
+### 1. Make Feedback Easy
+
+```python
+# Single-click feedback
+feedback_widget = FeedbackWidget(
+    type="thumbs",  # Simple thumbs up/down
+    show_comment=False,  # Optional comment field
+)
+
+# Progressive disclosure
+feedback_widget = FeedbackWidget(
+    type="thumbs",
+    show_detailed=lambda rating: rating == "negative",  # Only ask details for negative
+)
+```
+
+### 2. Provide Context
+
+```python
+feedback = FeedbackCollector.submit(
+    run_id="...",
+    rating="negative",
+    context={
+        "user_intent": "...",
+        "conversation_history": [...],
+        "expected_outcome": "...",
+    }
+)
+```
+
+### 3. Close the Loop
+
+```python
+# Notify users when their feedback is acted upon
+def notify_feedback_action(feedback_id):
+    feedback = Feedback.get(feedback_id)
+    send_notification(
+        user_id=feedback.user_id,
+        message=f"Your feedback helped us improve! We've updated {feedback.feature}."
+    )
+```
+
+### 4. Incentivize Quality Feedback
+
+```python
+from duragraph.feedback import FeedbackRewards
+
+rewards = FeedbackRewards()
+
+# Track quality feedback
+rewards.track(
+    user_id="...",
+    feedback_id="...",
+    quality_score=calculate_feedback_quality(...),
+)
+
+# Reward top contributors
+top_contributors = rewards.get_top_contributors(limit=10)
+```
+
+## Analytics Dashboard
+
+```python
+from duragraph.feedback import FeedbackDashboard
+
+dashboard = FeedbackDashboard()
+
+# Generate report
+report = dashboard.generate_report(
+    metrics=[
+        "feedback_volume",
+        "sentiment_trend",
+        "category_distribution",
+        "response_rate",
+    ],
+    time_period="30d",
+    format="json",
+)
+```
+
+## Export Feedback Data
+
+```python
+from duragraph.feedback import FeedbackExporter
+
+exporter = FeedbackExporter()
+
+# Export to CSV
+exporter.to_csv(
+    filename="feedback_2025_01.csv",
+    filters={"rating": "negative"},
+)
+
+# Export to dataset format
+exporter.to_dataset(
+    format="jsonl",
+    include_runs=True,  # Include associated run data
+)
+```
+
+## Next Steps
+
+- [Evals Overview](/docs/user-guide/evals/overview) - Evaluation framework
+- [LLM Judge](/docs/user-guide/evals/llm-judge) - Automated evaluation
+- [CI/CD Integration](/docs/user-guide/evals/ci-cd) - Testing pipeline
+- [Scorers](/docs/user-guide/evals/scorers) - Scoring methods

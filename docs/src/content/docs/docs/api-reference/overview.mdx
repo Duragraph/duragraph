@@ -3,13 +3,348 @@ title: API Reference Overview
 description: Complete REST API documentation for DuraGraph
 ---
 
-:::note[Coming Soon]
-This documentation is under development.
+DuraGraph provides a RESTful API for managing assistants, threads, runs, and real-time streaming. The API is designed for LangGraph Cloud compatibility while adding DuraGraph-specific features.
+
+## Base URL
+
+```
+http://localhost:8081     # Local development
+https://your-domain.com   # Production
+```
+
+## API Version
+
+Current API version: **v1**
+
+All endpoints are prefixed with `/api/v1/`
+
+## Quick Start
+
+```bash
+# Health check
+curl http://localhost:8081/health
+
+# Create assistant
+curl -X POST http://localhost:8081/api/v1/assistants \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Assistant", "config": {}}'
+
+# Create thread
+curl -X POST http://localhost:8081/api/v1/threads \
+  -H "Content-Type: application/json" \
+  -d '{"metadata": {}}'
+
+# Create run
+curl -X POST http://localhost:8081/api/v1/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "thread_id": "123e4567-e89b-12d3-a456-426614174000",
+    "assistant_id": "223e4567-e89b-12d3-a456-426614174000",
+    "input": {"message": "Hello"}
+  }'
+
+# Stream events
+curl -N http://localhost:8081/api/v1/stream?run_id={run_id}
+```
+
+## Authentication
+
+:::note[Development]
+Authentication is **optional** in local development mode. For production deployments, API key or JWT authentication is recommended.
 :::
 
-This section provides comprehensive documentation for the DuraGraph REST API, including authentication, endpoints, request/response schemas, and error handling.
+### API Key Authentication
 
-## Resources
+```bash
+curl http://localhost:8081/api/v1/runs \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
 
-- [Getting Started](/docs/getting-started) — Quick start guide
-- [Architecture Overview](/docs/architecture/overview) — System design
+### JWT Authentication
+
+```bash
+curl http://localhost:8081/api/v1/runs \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+Configure authentication in environment variables:
+
+```bash
+AUTH_ENABLED=true
+JWT_SECRET=your-secret-key
+```
+
+## Core Resources
+
+### Assistants
+
+Assistants represent AI agents with specific configurations and capabilities.
+
+**Endpoints:**
+
+- `POST /api/v1/assistants` - Create assistant
+- `GET /api/v1/assistants/:assistant_id` - Get assistant
+- `GET /api/v1/assistants` - List assistants
+- `PATCH /api/v1/assistants/:assistant_id` - Update assistant
+- `DELETE /api/v1/assistants/:assistant_id` - Delete assistant
+
+**Example:**
+
+```json
+{
+  "assistant_id": "223e4567-e89b-12d3-a456-426614174000",
+  "name": "Customer Support Agent",
+  "config": {
+    "model": "gpt-4o-mini",
+    "temperature": 0.7
+  },
+  "created_at": "2025-01-03T12:00:00Z",
+  "updated_at": "2025-01-03T12:00:00Z"
+}
+```
+
+### Threads
+
+Threads represent conversation sessions or workflow contexts.
+
+**Endpoints:**
+
+- `POST /api/v1/threads` - Create thread
+- `GET /api/v1/threads/:thread_id` - Get thread
+- `GET /api/v1/threads` - List threads
+- `PATCH /api/v1/threads/:thread_id` - Update thread
+- `POST /api/v1/threads/:thread_id/messages` - Add message
+
+**Example:**
+
+```json
+{
+  "thread_id": "123e4567-e89b-12d3-a456-426614174000",
+  "metadata": {
+    "user_id": "user_123",
+    "session": "web"
+  },
+  "created_at": "2025-01-03T12:00:00Z",
+  "updated_at": "2025-01-03T12:00:00Z"
+}
+```
+
+### Runs
+
+Runs represent workflow executions within a thread.
+
+**Endpoints:**
+
+- `POST /api/v1/runs` - Create run
+- `GET /api/v1/runs/:run_id` - Get run
+- `GET /api/v1/threads/:thread_id/runs` - List runs
+- `POST /api/v1/runs/:run_id/submit_tool_outputs` - Submit tool results
+
+**Run States:**
+
+- `queued` - Waiting to start
+- `in_progress` - Currently executing
+- `requires_action` - Waiting for human input or tool outputs
+- `completed` - Successfully finished
+- `failed` - Execution failed
+- `cancelled` - Cancelled by user
+
+**Example:**
+
+```json
+{
+  "run_id": "323e4567-e89b-12d3-a456-426614174000",
+  "thread_id": "123e4567-e89b-12d3-a456-426614174000",
+  "assistant_id": "223e4567-e89b-12d3-a456-426614174000",
+  "status": "completed",
+  "input": {
+    "message": "Hello"
+  },
+  "output": {
+    "response": "Hi! How can I help you?"
+  },
+  "created_at": "2025-01-03T12:00:00Z",
+  "updated_at": "2025-01-03T12:00:30Z"
+}
+```
+
+## Event Streaming
+
+Real-time updates via Server-Sent Events (SSE).
+
+```bash
+curl -N http://localhost:8081/api/v1/stream?run_id={run_id}
+```
+
+**Event Types:**
+
+- `run.started` - Run execution started
+- `run.completed` - Run finished successfully
+- `run.failed` - Run failed with error
+- `node.started` - Node execution started
+- `node.completed` - Node execution finished
+- `llm.token` - LLM token streamed
+- `tool.call` - Tool call requested
+- `checkpoint.saved` - State checkpoint created
+
+See [SSE Streaming](/docs/api-reference/sse-streaming) for details.
+
+## Pagination
+
+List endpoints support cursor-based pagination:
+
+```bash
+GET /api/v1/threads?limit=50&cursor=eyJpZCI6MTIzfQ
+```
+
+**Query Parameters:**
+
+- `limit` (int) - Number of items per page (default: 50, max: 100)
+- `cursor` (string) - Pagination cursor from previous response
+
+**Response:**
+
+```json
+{
+  "data": [...],
+  "has_more": true,
+  "next_cursor": "eyJpZCI6NTB9"
+}
+```
+
+## Rate Limiting
+
+Rate limits are applied per API key (when authentication is enabled):
+
+- **Default:** 100 requests per minute
+- **Burst:** 200 requests
+
+**Rate Limit Headers:**
+
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+X-RateLimit-Reset: 1609459260
+```
+
+When exceeded:
+
+```json
+{
+  "error": "rate_limit_exceeded",
+  "message": "Too many requests",
+  "retry_after": 60
+}
+```
+
+## Error Handling
+
+All errors follow a consistent format:
+
+```json
+{
+  "error": "error_code",
+  "message": "Human-readable error message",
+  "details": {
+    "field": "Additional context"
+  }
+}
+```
+
+**HTTP Status Codes:**
+
+| Code  | Meaning                                 |
+| ----- | --------------------------------------- |
+| `200` | Success                                 |
+| `201` | Created                                 |
+| `400` | Bad Request - Invalid input             |
+| `401` | Unauthorized - Missing/invalid auth     |
+| `403` | Forbidden - Insufficient permissions    |
+| `404` | Not Found - Resource doesn't exist      |
+| `409` | Conflict - Resource already exists      |
+| `422` | Unprocessable Entity - Validation error |
+| `429` | Too Many Requests - Rate limited        |
+| `500` | Internal Server Error                   |
+| `503` | Service Unavailable                     |
+
+**Common Error Codes:**
+
+- `invalid_request` - Malformed request
+- `validation_error` - Input validation failed
+- `resource_not_found` - Resource doesn't exist
+- `resource_conflict` - Duplicate resource
+- `rate_limit_exceeded` - Too many requests
+- `internal_error` - Server error
+
+## Webhooks
+
+Configure webhooks to receive event notifications:
+
+```bash
+POST /api/v1/webhooks
+{
+  "url": "https://your-app.com/webhook",
+  "events": ["run.completed", "run.failed"],
+  "secret": "webhook-secret"
+}
+```
+
+See [Webhooks](/docs/api-reference/webhooks) for details.
+
+## Client Libraries
+
+### Official SDKs
+
+- [Python SDK](/docs/sdk/python)
+- [Go SDK](/docs/sdk/go)
+
+### Community SDKs
+
+- TypeScript/JavaScript - Coming soon
+- Rust - Coming soon
+
+## OpenAPI Specification
+
+Download the complete OpenAPI specification:
+
+```bash
+curl http://localhost:8081/api/v1/openapi.json
+```
+
+Use with tools like:
+
+- Swagger UI
+- Postman
+- Insomnia
+
+## LangGraph Cloud Compatibility
+
+DuraGraph implements the LangGraph Cloud API specification for maximum compatibility:
+
+- **Compatible endpoints:** 43/47 (91%)
+- **Migration guide:** [LangGraph Migration](/docs/user-guide/tutorials/langgraph-migration)
+
+Differences and extensions documented in [REST API Reference](/docs/api-reference/rest-api).
+
+## Service URLs (Local Development)
+
+| Service          | URL                           | Purpose        |
+| ---------------- | ----------------------------- | -------------- |
+| **API**          | http://localhost:8081         | REST API       |
+| **Dashboard**    | http://localhost:5173         | Web UI         |
+| **NATS Monitor** | http://localhost:8222         | Message broker |
+| **Metrics**      | http://localhost:8081/metrics | Prometheus     |
+| **Health**       | http://localhost:8081/health  | Health check   |
+
+## Next Steps
+
+- [REST API Reference](/docs/api-reference/rest-api) - Complete endpoint documentation
+- [SSE Streaming](/docs/api-reference/sse-streaming) - Real-time events
+- [Webhooks](/docs/api-reference/webhooks) - Event notifications
+- [Examples](/docs/api-reference/examples) - Code samples
+
+## Support
+
+- [GitHub Issues](https://github.com/duragraph/duragraph/issues)
+- [Discord Community](https://discord.gg/duragraph)
+- [Documentation](https://docs.duragraph.io)

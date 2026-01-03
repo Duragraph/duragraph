@@ -68,7 +68,23 @@ export default defineConfig({
               label: 'SDKs',
               autogenerate: { directory: 'docs/user-guide/sdks' },
             },
+            {
+              label: 'Memory',
+              autogenerate: { directory: 'docs/user-guide/memory' },
+            },
+            {
+              label: 'Evals',
+              autogenerate: { directory: 'docs/user-guide/evals' },
+            },
+            {
+              label: 'Governance',
+              autogenerate: { directory: 'docs/user-guide/governance' },
+            },
           ],
+        },
+        {
+          label: 'SDK Reference',
+          autogenerate: { directory: 'docs/sdk' },
         },
         {
           label: 'API Reference',

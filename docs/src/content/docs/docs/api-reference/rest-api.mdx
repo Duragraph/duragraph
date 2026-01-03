@@ -1,15 +1,596 @@
 ---
-title: REST API
-description: REST API endpoints and request/response schemas
+title: REST API Reference
+description: Complete REST API endpoint documentation
 ---
 
-:::note[Coming Soon]
-This documentation is under development.
-:::
+Complete reference for all DuraGraph REST API endpoints.
 
-This section covers all REST API endpoints including assistants, threads, runs, and state management operations.
+## Base URL
 
-## Resources
+```
+/api/v1
+```
 
-- [Getting Started](/docs/getting-started) — Quick start guide
-- [API Overview](/docs/api-reference/overview) — API reference overview
+## Assistants
+
+### Create Assistant
+
+```http
+POST /api/v1/assistants
+```
+
+Create a new AI assistant.
+
+**Request Body:**
+
+```json
+{
+  "name": "Customer Support Agent",
+  "config": {
+    "model": "gpt-4o-mini",
+    "temperature": 0.7,
+    "system_prompt": "You are a helpful assistant."
+  },
+  "metadata": {
+    "team": "support",
+    "version": "1.0"
+  }
+}
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "assistant_id": "223e4567-e89b-12d3-a456-426614174000",
+  "name": "Customer Support Agent",
+  "config": {},
+  "metadata": {},
+  "created_at": "2025-01-03T12:00:00Z",
+  "updated_at": "2025-01-03T12:00:00Z"
+}
+```
+
+### Get Assistant
+
+```http
+GET /api/v1/assistants/:assistant_id
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "assistant_id": "223e4567-e89b-12d3-a456-426614174000",
+  "name": "Customer Support Agent",
+  "config": {},
+  "metadata": {},
+  "created_at": "2025-01-03T12:00:00Z",
+  "updated_at": "2025-01-03T12:00:00Z"
+}
+```
+
+### List Assistants
+
+```http
+GET /api/v1/assistants?limit=50&cursor=xyz
+```
+
+**Query Parameters:**
+
+- `limit` (int, optional) - Items per page (default: 50, max: 100)
+- `cursor` (string, optional) - Pagination cursor
+
+**Response:** `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "assistant_id": "...",
+      "name": "..."
+    }
+  ],
+  "has_more": true,
+  "next_cursor": "eyJpZCI6NTB9"
+}
+```
+
+### Update Assistant
+
+```http
+PATCH /api/v1/assistants/:assistant_id
+```
+
+**Request Body:**
+
+```json
+{
+  "name": "Updated Name",
+  "config": {
+    "temperature": 0.8
+  }
+}
+```
+
+**Response:** `200 OK`
+
+### Delete Assistant
+
+```http
+DELETE /api/v1/assistants/:assistant_id
+```
+
+**Response:** `204 No Content`
+
+## Threads
+
+### Create Thread
+
+```http
+POST /api/v1/threads
+```
+
+**Request Body:**
+
+```json
+{
+  "metadata": {
+    "user_id": "user_123",
+    "session": "web"
+  }
+}
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "thread_id": "123e4567-e89b-12d3-a456-426614174000",
+  "metadata": {},
+  "created_at": "2025-01-03T12:00:00Z",
+  "updated_at": "2025-01-03T12:00:00Z"
+}
+```
+
+### Get Thread
+
+```http
+GET /api/v1/threads/:thread_id
+```
+
+**Response:** `200 OK`
+
+### List Threads
+
+```http
+GET /api/v1/threads?limit=50&cursor=xyz
+```
+
+**Response:** `200 OK`
+
+### Update Thread
+
+```http
+PATCH /api/v1/threads/:thread_id
+```
+
+**Request Body:**
+
+```json
+{
+  "metadata": {
+    "status": "active"
+  }
+}
+```
+
+**Response:** `200 OK`
+
+### Add Message
+
+```http
+POST /api/v1/threads/:thread_id/messages
+```
+
+**Request Body:**
+
+```json
+{
+  "role": "user",
+  "content": "Hello, assistant!"
+}
+```
+
+**Response:** `201 Created`
+
+## Runs
+
+### Create Run
+
+```http
+POST /api/v1/runs
+```
+
+**Request Body:**
+
+```json
+{
+  "thread_id": "123e4567-e89b-12d3-a456-426614174000",
+  "assistant_id": "223e4567-e89b-12d3-a456-426614174000",
+  "input": {
+    "message": "Process this request"
+  },
+  "config": {
+    "max_concurrency": 5
+  }
+}
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "run_id": "323e4567-e89b-12d3-a456-426614174000",
+  "thread_id": "123e4567-e89b-12d3-a456-426614174000",
+  "assistant_id": "223e4567-e89b-12d3-a456-426614174000",
+  "status": "queued",
+  "input": {},
+  "output": null,
+  "error": null,
+  "created_at": "2025-01-03T12:00:00Z",
+  "updated_at": "2025-01-03T12:00:00Z"
+}
+```
+
+**Run Status Values:**
+
+- `queued` - Waiting to start
+- `in_progress` - Currently executing
+- `requires_action` - Waiting for human input or tool outputs
+- `completed` - Successfully finished
+- `failed` - Execution failed
+- `cancelled` - Cancelled by user
+
+### Get Run
+
+```http
+GET /api/v1/runs/:run_id
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "run_id": "323e4567-e89b-12d3-a456-426614174000",
+  "thread_id": "123e4567-e89b-12d3-a456-426614174000",
+  "assistant_id": "223e4567-e89b-12d3-a456-426614174000",
+  "status": "completed",
+  "input": {},
+  "output": {
+    "result": "Task completed successfully"
+  },
+  "error": null,
+  "created_at": "2025-01-03T12:00:00Z",
+  "updated_at": "2025-01-03T12:00:30Z"
+}
+```
+
+### List Runs
+
+```http
+GET /api/v1/threads/:thread_id/runs?limit=50&cursor=xyz
+```
+
+**Response:** `200 OK`
+
+### Submit Tool Outputs
+
+```http
+POST /api/v1/runs/:run_id/submit_tool_outputs
+```
+
+When a run enters `requires_action` status with tool calls, submit results:
+
+**Request Body:**
+
+```json
+{
+  "tool_outputs": [
+    {
+      "tool_call_id": "call_abc123",
+      "output": {
+        "result": "Search completed",
+        "data": [...]
+      }
+    }
+  ]
+}
+```
+
+**Response:** `200 OK`
+
+## State Management
+
+### Get Thread State
+
+```http
+GET /api/v1/threads/:thread_id/state
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "values": {
+    "messages": [],
+    "context": {}
+  },
+  "checkpoint_id": "chk_abc123",
+  "created_at": "2025-01-03T12:00:00Z"
+}
+```
+
+### Update Thread State
+
+```http
+POST /api/v1/threads/:thread_id/state
+```
+
+**Request Body:**
+
+```json
+{
+  "values": {
+    "context": { "key": "value" }
+  },
+  "as_node": "node_name"
+}
+```
+
+**Response:** `200 OK`
+
+### Get Checkpoint History
+
+```http
+GET /api/v1/threads/:thread_id/history
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "checkpoints": [
+    {
+      "checkpoint_id": "chk_abc123",
+      "values": {},
+      "created_at": "2025-01-03T12:00:00Z"
+    }
+  ]
+}
+```
+
+## Worker Management
+
+### Register Worker
+
+```http
+POST /api/v1/workers/register
+```
+
+**Request Body:**
+
+```json
+{
+  "worker_id": "worker_001",
+  "capabilities": ["python", "llm"],
+  "metadata": {
+    "version": "1.0.0"
+  }
+}
+```
+
+**Response:** `201 Created`
+
+### Heartbeat
+
+```http
+POST /api/v1/workers/:worker_id/heartbeat
+```
+
+**Request Body:**
+
+```json
+{
+  "status": "active",
+  "metrics": {
+    "tasks_processed": 42
+  }
+}
+```
+
+**Response:** `200 OK`
+
+### Deregister Worker
+
+```http
+DELETE /api/v1/workers/:worker_id
+```
+
+**Response:** `204 No Content`
+
+## Streaming
+
+### Stream Events
+
+```http
+GET /api/v1/stream?run_id={run_id}
+```
+
+Server-Sent Events endpoint for real-time updates.
+
+See [SSE Streaming](/docs/api-reference/sse-streaming) for details.
+
+## Error Responses
+
+All errors follow this format:
+
+```json
+{
+  "error": "error_code",
+  "message": "Human-readable description",
+  "details": {
+    "field": "Additional context"
+  }
+}
+```
+
+**Common Errors:**
+
+| Status | Error Code            | Description             |
+| ------ | --------------------- | ----------------------- |
+| 400    | `invalid_request`     | Malformed request body  |
+| 400    | `validation_error`    | Field validation failed |
+| 401    | `unauthorized`        | Missing or invalid auth |
+| 404    | `resource_not_found`  | Resource doesn't exist  |
+| 409    | `resource_conflict`   | Resource already exists |
+| 429    | `rate_limit_exceeded` | Too many requests       |
+| 500    | `internal_error`      | Server error            |
+
+**Example:**
+
+```json
+{
+  "error": "validation_error",
+  "message": "Invalid input",
+  "details": {
+    "thread_id": "Must be a valid UUID"
+  }
+}
+```
+
+## Rate Limiting
+
+Rate limit headers included in all responses:
+
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+X-RateLimit-Reset: 1609459260
+```
+
+When rate limit exceeded:
+
+```json
+{
+  "error": "rate_limit_exceeded",
+  "message": "Too many requests",
+  "retry_after": 60
+}
+```
+
+## Examples
+
+### Complete Workflow
+
+```bash
+# 1. Create assistant
+ASSISTANT=$(curl -X POST http://localhost:8081/api/v1/assistants \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Assistant", "config": {}}' | jq -r .assistant_id)
+
+# 2. Create thread
+THREAD=$(curl -X POST http://localhost:8081/api/v1/threads \
+  -H "Content-Type: application/json" \
+  -d '{"metadata": {}}' | jq -r .thread_id)
+
+# 3. Create run
+RUN=$(curl -X POST http://localhost:8081/api/v1/runs \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"thread_id\": \"$THREAD\",
+    \"assistant_id\": \"$ASSISTANT\",
+    \"input\": {\"message\": \"Hello\"}
+  }" | jq -r .run_id)
+
+# 4. Stream events
+curl -N "http://localhost:8081/api/v1/stream?run_id=$RUN"
+
+# 5. Get final result
+curl "http://localhost:8081/api/v1/runs/$RUN"
+```
+
+### With Python
+
+```python
+import requests
+
+base_url = "http://localhost:8081/api/v1"
+
+# Create assistant
+assistant = requests.post(f"{base_url}/assistants", json={
+    "name": "My Assistant",
+    "config": {}
+}).json()
+
+# Create thread
+thread = requests.post(f"{base_url}/threads", json={
+    "metadata": {}
+}).json()
+
+# Create run
+run = requests.post(f"{base_url}/runs", json={
+    "thread_id": thread["thread_id"],
+    "assistant_id": assistant["assistant_id"],
+    "input": {"message": "Hello"}
+}).json()
+
+# Get result
+result = requests.get(f"{base_url}/runs/{run['run_id']}").json()
+print(result)
+```
+
+### With Go
+
+```go
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
+)
+
+const baseURL = "http://localhost:8081/api/v1"
+
+type Assistant struct {
+    AssistantID string                 `json:"assistant_id"`
+    Name        string                 `json:"name"`
+    Config      map[string]interface{} `json:"config"`
+}
+
+func createAssistant() (*Assistant, error) {
+    body := map[string]interface{}{
+        "name":   "My Assistant",
+        "config": map[string]interface{}{},
+    }
+
+    data, _ := json.Marshal(body)
+    resp, err := http.Post(baseURL+"/assistants", "application/json", bytes.NewBuffer(data))
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+
+    var assistant Assistant
+    json.NewDecoder(resp.Body).Decode(&assistant)
+    return &assistant, nil
+}
+```
+
+## Next Steps
+
+- [SSE Streaming](/docs/api-reference/sse-streaming) - Real-time events
+- [Webhooks](/docs/api-reference/webhooks) - Event notifications
+- [Python SDK](/docs/sdk/python) - Python client
+- [Go SDK](/docs/sdk/go) - Go client
