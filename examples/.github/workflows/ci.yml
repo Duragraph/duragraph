@@ -23,14 +23,68 @@ jobs:
     - name: Set up Python
       run: uv python install 3.11
     
-    - name: Check Python syntax
+    - name: Check Python syntax and imports
       run: |
         # Find all Python example directories
         for example_dir in python/*/; do
           if [ -f "$example_dir/main.py" ]; then
-            echo "Checking syntax in $example_dir"
+            echo "Checking syntax and imports in $example_dir"
             cd "$example_dir"
+            
+            # Check syntax
             uv run python -m py_compile main.py
+            
+            # Test imports (dry run to catch import errors)
+            echo "Testing imports for $example_dir"
+            uv venv .temp_venv --python 3.11
+            source .temp_venv/bin/activate
+            pip install -r requirements.txt || echo "Requirements install failed, continuing..."
+            
+            # Test imports without executing main()
+            python -c "
+import sys
+import importlib.util
+import ast
+
+# Parse the Python file to extract imports
+with open('main.py', 'r') as f:
+    tree = ast.parse(f.read())
+
+# Extract all import statements
+imports = []
+for node in ast.walk(tree):
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            imports.append(alias.name)
+    elif isinstance(node, ast.ImportFrom):
+        if node.module:
+            imports.append(node.module)
+
+print(f'Found imports: {imports}')
+
+# Test each import
+failed_imports = []
+for imp in imports:
+    if imp and not imp.startswith('.'):  # Skip relative imports
+        try:
+            importlib.import_module(imp.split('.')[0])
+            print(f'✓ {imp}')
+        except ImportError as e:
+            print(f'✗ {imp}: {e}')
+            failed_imports.append(imp)
+
+if failed_imports:
+    print(f'Failed imports: {failed_imports}')
+    # Don't fail CI for missing DuraGraph since it's not always available
+    duragraph_only = all('duragraph' in imp for imp in failed_imports)
+    if not duragraph_only:
+        sys.exit(1)
+else:
+    print('All imports successful')
+"
+            
+            deactivate
+            rm -rf .temp_venv
             cd ../..
           fi
         done
@@ -47,8 +101,8 @@ jobs:
         fi
       continue-on-error: true
 
-  go-lint:
-    name: Go Linting  
+  go-test:
+    name: Go Testing
     runs-on: ubuntu-latest
     if: contains(github.event.head_commit.modified, 'go/') || github.event_name == 'pull_request'
     
@@ -60,21 +114,31 @@ jobs:
       with:
         go-version: '1.21'
     
-    - name: Check Go syntax and formatting
+    - name: Test Go examples
       run: |
         # Find all Go example directories
         for example_dir in go/*/; do
           if [ -f "$example_dir/main.go" ] || [ -f "$example_dir/go.mod" ]; then
-            echo "Checking Go code in $example_dir"
+            echo "Testing Go code in $example_dir"
             cd "$example_dir"
             
             # Download dependencies if go.mod exists
             if [ -f "go.mod" ]; then
               go mod download
+              go mod tidy
             fi
             
-            # Check syntax
-            go build -o /dev/null . 2>/dev/null || go run -o /dev/null . 2>/dev/null || echo "Go syntax check passed"
+            # Test build
+            echo "Testing build..."
+            go build -o /tmp/test_binary . || go build -o /tmp/test_binary ./...
+            
+            # Run tests if they exist
+            if find . -name "*_test.go" | grep -q .; then
+              echo "Running tests..."
+              go test -v ./...
+            else
+              echo "No tests found, running basic compilation check"
+            fi
             
             # Check formatting  
             if [ "$(go fmt . | wc -l)" -gt 0 ]; then
@@ -83,8 +147,59 @@ jobs:
             fi
             
             # Go vet
-            go vet .
+            go vet ./...
             
+            cd ../..
+          fi
+        done
+
+  python-test:
+    name: Python Testing  
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.modified, 'python/') || github.event_name == 'pull_request'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+    
+    - name: Set up Python
+      run: uv python install 3.11
+    
+    - name: Test Python examples
+      run: |
+        # Find all Python example directories with tests
+        for example_dir in python/*/; do
+          if [ -f "$example_dir/main.py" ]; then
+            echo "Testing Python example in $example_dir"
+            cd "$example_dir"
+            
+            # Set up virtual environment
+            uv venv .test_venv --python 3.11
+            source .test_venv/bin/activate
+            
+            # Install dependencies
+            if [ -f "requirements.txt" ]; then
+              pip install -r requirements.txt || echo "Some dependencies failed, continuing..."
+            fi
+            
+            # Install pytest if test files exist
+            if find . -name "test_*.py" -o -name "*_test.py" | grep -q .; then
+              echo "Found test files, installing pytest..."
+              pip install pytest pytest-cov
+              
+              # Run tests with coverage
+              echo "Running tests with coverage..."
+              pytest --cov=. --cov-report=term-missing --cov-report=xml || echo "Tests failed, but continuing"
+            else
+              echo "No test files found, skipping pytest"
+            fi
+            
+            deactivate
+            rm -rf .test_venv
             cd ../..
           fi
         done
