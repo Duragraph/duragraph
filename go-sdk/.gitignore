@@ -33,5 +33,6 @@ Thumbs.db
 # Build
 dist/
 
-# Internal specs (not for public)
+# Local development files (not for public)
+CLAUDE.md
 specs/
