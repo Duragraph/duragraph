@@ -1,0 +1,232 @@
+name: Auto-update Issue Status
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main, develop]
+  pull_request_target:
+    types: [closed]
+    branches: [main, develop]
+
+jobs:
+  update-issue-status:
+    name: Update Issue Status
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update Issue Status on PR Open/Update
+        if: github.event.action != 'closed'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { pull_request } = context.payload;
+
+            // Extract issue numbers from PR body and title
+            const prBody = pull_request.body || '';
+            const prTitle = pull_request.title || '';
+            const text = `${prTitle} ${prBody}`;
+
+            // Look for issue references: fixes #123, closes #456, resolves #789, etc.
+            const issueRegex = /(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)[\s:]*#(\d+)/gi;
+            const matches = text.matchAll(issueRegex);
+
+            const issueNumbers = [...new Set([...matches].map(match => parseInt(match[1])))];
+
+            console.log(`Found issue references: ${issueNumbers}`);
+
+            for (const issueNumber of issueNumbers) {
+              try {
+                // Get current issue labels
+                const issue = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber
+                });
+
+                const currentLabels = issue.data.labels.map(label => label.name);
+                console.log(`Issue #${issueNumber} current labels: ${currentLabels}`);
+
+                // Check if issue is not already in-progress or completed
+                if (!currentLabels.includes('status:in-progress') &&
+                    !currentLabels.includes('status:completed') &&
+                    currentLabels.includes('status:ready')) {
+
+                  // Remove status:ready and add status:in-progress
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    name: 'status:ready'
+                  });
+
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    labels: ['status:in-progress']
+                  });
+
+                  console.log(`Updated issue #${issueNumber} to in-progress`);
+
+                  // Add comment to issue
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    body: `🔄 This issue is now in progress via PR #${pull_request.number}`
+                  });
+                }
+              } catch (error) {
+                console.error(`Error updating issue #${issueNumber}:`, error.message);
+              }
+            }
+
+      - name: Update Issue Status on PR Merge
+        if: github.event.action == 'closed' && github.event.pull_request.merged == true
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { pull_request } = context.payload;
+
+            // Extract issue numbers from PR body and title
+            const prBody = pull_request.body || '';
+            const prTitle = pull_request.title || '';
+            const text = `${prTitle} ${prBody}`;
+
+            // Look for issue references
+            const issueRegex = /(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)[\s:]*#(\d+)/gi;
+            const matches = text.matchAll(issueRegex);
+
+            const issueNumbers = [...new Set([...matches].map(match => parseInt(match[1])))];
+
+            console.log(`PR merged! Found issue references: ${issueNumbers}`);
+
+            for (const issueNumber of issueNumbers) {
+              try {
+                // Get current issue labels
+                const issue = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber
+                });
+
+                const currentLabels = issue.data.labels.map(label => label.name);
+                console.log(`Issue #${issueNumber} current labels: ${currentLabels}`);
+
+                // Remove all status labels
+                const statusLabels = currentLabels.filter(label => label.startsWith('status:'));
+                for (const label of statusLabels) {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issueNumber,
+                      name: label
+                    });
+                  } catch (error) {
+                    console.log(`Label ${label} not found, skipping removal`);
+                  }
+                }
+
+                // Add status:completed
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  labels: ['status:completed']
+                });
+
+                // Close the issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  state: 'closed'
+                });
+
+                console.log(`Closed issue #${issueNumber} with status:completed`);
+
+                // Add completion comment
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: `✅ Completed via PR #${pull_request.number}\n\nThis issue has been automatically closed and marked as \`status:completed\`.`
+                });
+
+              } catch (error) {
+                console.error(`Error completing issue #${issueNumber}:`, error.message);
+              }
+            }
+
+      - name: Update Issue Status on PR Close (not merged)
+        if: github.event.action == 'closed' && github.event.pull_request.merged == false
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { pull_request } = context.payload;
+
+            // Extract issue numbers from PR body and title
+            const prBody = pull_request.body || '';
+            const prTitle = pull_request.title || '';
+            const text = `${prTitle} ${prBody}`;
+
+            // Look for issue references
+            const issueRegex = /(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)[\s:]*#(\d+)/gi;
+            const matches = text.matchAll(issueRegex);
+
+            const issueNumbers = [...new Set([...matches].map(match => parseInt(match[1])))];
+
+            console.log(`PR closed without merge. Found issue references: ${issueNumbers}`);
+
+            for (const issueNumber of issueNumbers) {
+              try {
+                // Get current issue labels
+                const issue = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber
+                });
+
+                const currentLabels = issue.data.labels.map(label => label.name);
+
+                // If it was in-progress, move back to ready
+                if (currentLabels.includes('status:in-progress')) {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    name: 'status:in-progress'
+                  });
+
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    labels: ['status:ready']
+                  });
+
+                  console.log(`Moved issue #${issueNumber} back to ready`);
+
+                  // Add comment
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    body: `🔄 PR #${pull_request.number} was closed without merging. This issue is back to \`status:ready\` and available for work.`
+                  });
+                }
+              } catch (error) {
+                console.error(`Error updating issue #${issueNumber}:`, error.message);
+              }
+            }
