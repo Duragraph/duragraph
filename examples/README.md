@@ -29,31 +29,45 @@ Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/durag
 
 ## Examples
 
+### Implementation Progress
+
+**Milestone v0.5 (SDK & Studio MVP):**
+- ✅ Python Hello World
+- ✅ Chatbot with Memory  
+- 🚧 RAG Agent (next)
+- 🚧 Go Hello World (next)
+
+**Milestone v0.8 (Production Ready):**
+- 🚧 Multi-agent collaboration
+- 🚧 Human-in-the-loop workflows
+- 🚧 Tool use patterns  
+- 🚧 Evaluation framework
+
 ### Python
 
-| Example | Description | Difficulty |
-|---------|-------------|------------|
-| [01-hello-world](python/01-hello-world) | Minimal worker setup | Beginner |
-| [02-chatbot](python/02-chatbot) | Conversational agent with memory | Beginner |
-| [03-rag-agent](python/03-rag-agent) | RAG with vector store | Intermediate |
-| [04-multi-agent](python/04-multi-agent) | Agent collaboration | Advanced |
-| [05-human-in-loop](python/05-human-in-loop) | Approval workflows | Intermediate |
-| [06-tool-use](python/06-tool-use) | Function calling | Intermediate |
-| [07-evals](python/07-evals) | Running evaluations | Intermediate |
+| Example | Description | Difficulty | Status |
+|---------|-------------|------------|--------|
+| [01-hello-world](python/01-hello-world) | Minimal worker setup | Beginner | ✅ Complete |
+| [02-chatbot](python/02-chatbot) | Conversational agent with memory | Beginner | ✅ Complete |
+| [03-rag-agent](python/03-rag-agent) | RAG with vector store | Intermediate | 🚧 Planned |
+| [04-multi-agent](python/04-multi-agent) | Agent collaboration | Advanced | 🚧 Planned |
+| [05-human-in-loop](python/05-human-in-loop) | Approval workflows | Intermediate | 🚧 Planned |
+| [06-tool-use](python/06-tool-use) | Function calling | Intermediate | 🚧 Planned |
+| [07-evals](python/07-evals) | Running evaluations | Intermediate | 🚧 Planned |
 
 ### Go
 
-| Example | Description | Difficulty |
-|---------|-------------|------------|
-| [01-hello-world](go/01-hello-world) | Minimal Go worker | Beginner |
-| [02-data-pipeline](go/02-data-pipeline) | High-performance pipeline | Intermediate |
+| Example | Description | Difficulty | Status |
+|---------|-------------|------------|--------|
+| [01-hello-world](go/01-hello-world) | Minimal Go worker | Beginner | 🚧 Planned |
+| [02-data-pipeline](go/02-data-pipeline) | High-performance pipeline | Intermediate | 🚧 Planned |
 
 ### Docker Compose
 
-| Example | Description |
-|---------|-------------|
-| [local-dev](docker-compose/local-dev) | Complete local development stack |
-| [production](docker-compose/production) | Production-ready configuration |
+| Example | Description | Status |
+|---------|-------------|--------|
+| [local-dev](docker-compose/local-dev) | Complete local development stack | ✅ Complete |
+| [production](docker-compose/production) | Production-ready configuration | 🚧 Planned |
 
 ## Structure
 
