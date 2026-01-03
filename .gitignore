@@ -119,3 +119,5 @@ GOVERNANCE.md
 PROJECT_OVERVIEW.md
 STRATEGY.md
 spec/
+.e2e/go_worker/go_worker
+tests/e2e/go_worker/worker/go_worker

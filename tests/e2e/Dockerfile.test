@@ -1,0 +1,18 @@
+# Test runner Dockerfile
+FROM python:3.12-slim
+
+WORKDIR /tests
+
+# Install test dependencies
+RUN pip install --no-cache-dir \
+    pytest \
+    pytest-asyncio \
+    httpx \
+    requests \
+    playwright
+
+# Install Playwright browsers for dashboard tests
+RUN playwright install chromium && playwright install-deps
+
+# Default command
+CMD ["pytest", "-v"]

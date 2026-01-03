@@ -25,7 +25,7 @@ type Assistant struct {
 }
 
 // NewAssistant creates a new Assistant aggregate
-func NewAssistant(name, description, model, instructions string, tools []map[string]interface{}) (*Assistant, error) {
+func NewAssistant(name, description, model, instructions string, tools []map[string]interface{}, metadata map[string]interface{}) (*Assistant, error) {
 	if name == "" {
 		return nil, errors.InvalidInput("name", "name is required")
 	}
@@ -36,6 +36,9 @@ func NewAssistant(name, description, model, instructions string, tools []map[str
 	if tools == nil {
 		tools = make([]map[string]interface{}, 0)
 	}
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
 
 	assistant := &Assistant{
 		id:           assistantID,
@@ -44,7 +47,7 @@ func NewAssistant(name, description, model, instructions string, tools []map[str
 		model:        model,
 		instructions: instructions,
 		tools:        tools,
-		metadata:     make(map[string]interface{}),
+		metadata:     metadata,
 		createdAt:    now,
 		updatedAt:    now,
 		events:       make([]eventbus.Event, 0),

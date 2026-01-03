@@ -37,8 +37,7 @@ func (h *ListRunsHandler) Handle(ctx context.Context, query ListRuns) ([]*RunDTO
 	if query.ThreadID != "" {
 		runs, err = h.runRepo.FindByThreadID(ctx, query.ThreadID, query.Limit, query.Offset)
 	} else {
-		// TODO: Implement FindAll
-		return nil, nil
+		runs, err = h.runRepo.FindAll(ctx, query.Limit, query.Offset)
 	}
 
 	if err != nil {

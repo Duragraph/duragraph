@@ -14,6 +14,7 @@ import (
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
 	"github.com/duragraph/duragraph/internal/application/service"
+	"github.com/duragraph/duragraph/internal/domain/worker"
 	infra_exec "github.com/duragraph/duragraph/internal/infrastructure/execution"
 	"github.com/duragraph/duragraph/internal/infrastructure/graph"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers"
@@ -120,6 +121,21 @@ func main() {
 
 	fmt.Println("✅ Streaming bridge started")
 
+	// Initialize worker registry
+	workerRegistry := worker.NewRegistry()
+
+	fmt.Println("✅ Worker registry initialized")
+
+	// Initialize worker service
+	workerService := service.NewWorkerService(
+		workerRegistry,
+		runRepo,
+		assistantRepo,
+		30*time.Second, // Health threshold
+	)
+
+	fmt.Println("✅ Worker service initialized")
+
 	// Initialize Prometheus metrics
 	metrics := monitoring.NewMetrics("duragraph")
 
@@ -194,6 +210,11 @@ func main() {
 		eventBus,
 	)
 
+	// Wire up worker service for remote execution
+	runService.SetWorkerService(workerService)
+
+	fmt.Println("✅ Run service configured with worker dispatch")
+
 	// Initialize HTTP handlers
 	runHandler := handlers.NewRunHandler(
 		createRunHandler,
@@ -237,6 +258,12 @@ func main() {
 		updateThreadStateHandler,
 		createCheckpointHandler,
 		copyThreadHandler,
+	)
+	workerHandler := handlers.NewWorkerHandler(
+		workerRegistry,
+		workerService,
+		30*time.Second, // Health threshold
+		fmt.Sprintf("http://%s", cfg.ServerAddr()),
 	)
 
 	// Initialize Echo server
@@ -289,6 +316,8 @@ func main() {
 	api.DELETE("/threads/:thread_id/runs/:run_id", runHandler.DeleteRun)
 
 	// Stateless Run routes (LangGraph compatible)
+	api.GET("/runs", runHandler.ListAllRuns)
+	api.GET("/runs/:run_id", runHandler.GetRun)
 	api.POST("/runs", runHandler.CreateStatelessRun)
 	api.POST("/runs/wait", runHandler.CreateRunAndWait)
 	api.POST("/runs/stream", runHandler.CreateStatelessRunWithStream)
@@ -345,6 +374,16 @@ func main() {
 	api.GET("/threads/:thread_id/history", threadStateHandler.GetHistory)
 	api.POST("/threads/:thread_id/history", threadStateHandler.PostHistory)
 	api.POST("/threads/:thread_id/copy", threadStateHandler.CopyThread)
+
+	// Worker protocol routes
+	api.POST("/workers/register", workerHandler.Register)
+	api.GET("/workers", workerHandler.ListWorkers)
+	api.GET("/workers/:worker_id", workerHandler.GetWorker)
+	api.POST("/workers/:worker_id/heartbeat", workerHandler.Heartbeat)
+	api.POST("/workers/:worker_id/poll", workerHandler.Poll)
+	api.POST("/workers/:worker_id/deregister", workerHandler.Deregister)
+	api.POST("/workers/:worker_id/events", workerHandler.ReceiveEvent)
+	api.GET("/workers/graphs/:graph_id", workerHandler.GetGraphDefinition)
 
 	// Start server
 	go func() {

@@ -1,15 +1,24 @@
-import { sveltekit } from '@sveltejs/kit/vite';
-import { optimizeCss } from 'carbon-preprocess-svelte';
-import { defineConfig } from 'vite';
+import path from "path"
+import tailwindcss from "@tailwindcss/vite"
+import react from "@vitejs/plugin-react"
+import { TanStackRouterVite } from "@tanstack/router-vite-plugin"
+import { defineConfig } from "vite"
 
+// https://vite.dev/config/
 export default defineConfig({
-	plugins: [sveltekit(), optimizeCss()],
-	server: {
-		proxy: {
-			'/api': {
-				target: 'http://localhost:8081',
-				changeOrigin: true
-			}
-		}
-	}
-});
+  plugins: [react(), tailwindcss(), TanStackRouterVite()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  server: {
+    port: 3001,
+    proxy: {
+      "/api": {
+        target: "http://localhost:8081",
+        changeOrigin: true,
+      },
+    },
+  },
+})

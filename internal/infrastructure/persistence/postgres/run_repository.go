@@ -128,6 +128,72 @@ func (r *RunRepository) FindByID(ctx context.Context, id string) (*run.Run, erro
 	}), nil
 }
 
+// FindAll retrieves all runs with pagination
+func (r *RunRepository) FindAll(ctx context.Context, limit, offset int) ([]*run.Run, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, thread_id, assistant_id, status, input, output, error, metadata,
+		       kwargs, created_at, started_at, completed_at, updated_at
+		FROM runs
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+
+	if err != nil {
+		return nil, errors.Internal("failed to query runs", err)
+	}
+	defer rows.Close()
+
+	runs := make([]*run.Run, 0)
+
+	for rows.Next() {
+		var runID, threadID, assistantID, status string
+		var errorMsg *string
+		var inputJSON, outputJSON, metadataJSON, kwargsJSON []byte
+		var createdAt, updatedAt time.Time
+		var startedAt, completedAt *time.Time
+
+		err := rows.Scan(
+			&runID, &threadID, &assistantID, &status,
+			&inputJSON, &outputJSON, &errorMsg, &metadataJSON,
+			&kwargsJSON,
+			&createdAt, &startedAt, &completedAt, &updatedAt,
+		)
+		if err != nil {
+			return nil, errors.Internal("failed to scan run", err)
+		}
+
+		var input, output, metadata, kwargs map[string]interface{}
+		json.Unmarshal(inputJSON, &input)
+		json.Unmarshal(outputJSON, &output)
+		json.Unmarshal(metadataJSON, &metadata)
+		json.Unmarshal(kwargsJSON, &kwargs)
+
+		errStr := ""
+		if errorMsg != nil {
+			errStr = *errorMsg
+		}
+
+		runAgg := run.ReconstructFromData(run.RunData{
+			ID:          runID,
+			ThreadID:    threadID,
+			AssistantID: assistantID,
+			Status:      status,
+			Input:       input,
+			Output:      output,
+			Config:      kwargs, // Use kwargs as config
+			Error:       errStr,
+			Metadata:    metadata,
+			CreatedAt:   createdAt,
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			UpdatedAt:   updatedAt,
+		})
+		runs = append(runs, runAgg)
+	}
+
+	return runs, nil
+}
+
 // FindByThreadID retrieves runs for a specific thread
 func (r *RunRepository) FindByThreadID(ctx context.Context, threadID string, limit, offset int) ([]*run.Run, error) {
 	rows, err := r.pool.Query(ctx, `

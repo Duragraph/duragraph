@@ -85,6 +85,7 @@ func (h *AssistantHandler) Create(c echo.Context) error {
 		Model:        req.Model,
 		Instructions: req.Instructions,
 		Tools:        req.Tools,
+		Metadata:     req.Metadata,
 	})
 
 	if err != nil {

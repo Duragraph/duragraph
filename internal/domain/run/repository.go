@@ -12,6 +12,9 @@ type Repository interface {
 	// FindByID retrieves a run by ID
 	FindByID(ctx context.Context, id string) (*Run, error)
 
+	// FindAll retrieves all runs with pagination
+	FindAll(ctx context.Context, limit, offset int) ([]*Run, error)
+
 	// FindByThreadID retrieves runs for a specific thread
 	FindByThreadID(ctx context.Context, threadID string, limit, offset int) ([]*Run, error)
 
