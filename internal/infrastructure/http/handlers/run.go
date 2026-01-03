@@ -689,6 +689,37 @@ func (h *RunHandler) ListRuns(c echo.Context) error {
 	return c.JSON(http.StatusOK, responses)
 }
 
+// ListAllRuns handles GET /runs (list all runs across all threads)
+func (h *RunHandler) ListAllRuns(c echo.Context) error {
+	runDTOs, err := h.listRunsHandler.Handle(c.Request().Context(), query.ListRuns{
+		ThreadID: "", // Empty = all runs
+		Limit:    50,
+		Offset:   0,
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Error:   "internal_error",
+			Message: err.Error(),
+		})
+	}
+
+	// Convert to response format
+	responses := make([]dto.GetRunResponse, 0, len(runDTOs))
+	for _, runDTO := range runDTOs {
+		responses = append(responses, dto.GetRunResponse{
+			RunID:       runDTO.ID,
+			ThreadID:    runDTO.ThreadID,
+			AssistantID: runDTO.AssistantID,
+			Status:      runDTO.Status,
+			CreatedAt:   runDTO.CreatedAt,
+			UpdatedAt:   runDTO.UpdatedAt,
+		})
+	}
+
+	return c.JSON(http.StatusOK, responses)
+}
+
 // SubmitToolOutputs handles POST /runs/:id/submit_tool_outputs
 func (h *RunHandler) SubmitToolOutputs(c echo.Context) error {
 	runID := c.Param("id")

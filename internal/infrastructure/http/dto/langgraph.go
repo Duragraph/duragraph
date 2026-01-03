@@ -1,6 +1,31 @@
 package dto
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+// StringOrSlice is a type that can unmarshal from either a string or []string
+// This is needed for LangGraph SDK compatibility which sends stream_mode as a string
+type StringOrSlice []string
+
+// UnmarshalJSON implements json.Unmarshaler
+func (s *StringOrSlice) UnmarshalJSON(data []byte) error {
+	// Try to unmarshal as string first
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*s = []string{str}
+		return nil
+	}
+
+	// Try to unmarshal as []string
+	var slice []string
+	if err := json.Unmarshal(data, &slice); err != nil {
+		return err
+	}
+	*s = slice
+	return nil
+}
 
 // LangGraph API DTOs for compatibility with LangGraph Cloud API
 
@@ -12,7 +37,9 @@ type CreateRunRequest struct {
 	Metadata          map[string]interface{} `json:"metadata,omitempty"`
 	Config            map[string]interface{} `json:"config,omitempty"`
 	Kwargs            map[string]interface{} `json:"kwargs,omitempty"`
-	StreamMode        []string               `json:"stream_mode,omitempty"`
+	StreamMode        StringOrSlice          `json:"stream_mode,omitempty"`      // Can be string or []string
+	StreamSubgraphs   *bool                  `json:"stream_subgraphs,omitempty"` // LangGraph SDK sends this
+	StreamResumable   *bool                  `json:"stream_resumable,omitempty"` // LangGraph SDK sends this
 	OnCompletion      string                 `json:"on_completion,omitempty"`
 	InterruptBefore   []string               `json:"interrupt_before,omitempty"`   // Node IDs to interrupt before execution
 	InterruptAfter    []string               `json:"interrupt_after,omitempty"`    // Node IDs to interrupt after execution

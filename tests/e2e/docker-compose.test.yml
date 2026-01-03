@@ -1,0 +1,133 @@
+# Docker Compose for E2E testing
+# Usage: docker compose -f tests/e2e/docker-compose.test.yml up
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: duragraph_test
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d duragraph_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # NATS message broker
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["--jetstream", "--http_port", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # DuraGraph control plane (API server)
+  control-plane:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.server
+    environment:
+      PORT: "8081"
+      HOST: "0.0.0.0"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: testuser
+      DB_PASSWORD: testpass
+      DB_NAME: duragraph_test
+      DB_SSLMODE: disable
+      NATS_URL: nats://nats:4222
+      LOG_LEVEL: debug
+      AUTH_ENABLED: "false"
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Python Mock worker
+  mock-worker:
+    build:
+      context: mock_worker
+      dockerfile: Dockerfile
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:8081
+      MOCK_WORKER_GRAPH: simple_echo
+      MOCK_WORKER_DELAY_MS: "100"
+      LOG_LEVEL: debug
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+
+  # Go Mock worker (alternative to Python worker)
+  go-mock-worker:
+    build:
+      context: go_worker
+      dockerfile: Dockerfile
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:8081
+      MOCK_WORKER_GRAPH: simple_echo
+      MOCK_WORKER_DELAY_MS: "100"
+      LOG_LEVEL: debug
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    profiles:
+      - go-worker
+
+  # Dashboard (for dashboard integration tests)
+  dashboard:
+    build:
+      context: ../../dashboard
+      dockerfile: Dockerfile
+    environment:
+      PUBLIC_API_URL: http://control-plane:8081
+    ports:
+      - "3000:3000"
+    depends_on:
+      control-plane:
+        condition: service_healthy
+
+  # Test runner
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    environment:
+      API_BASE_URL: http://control-plane:8081/api/v1
+      DASHBOARD_URL: http://dashboard:3000
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      mock-worker:
+        condition: service_started
+    volumes:
+      - ../../tests:/tests
+      - test_results:/results
+    command: >
+      pytest /tests/e2e/infrastructure/ /tests/conformance/
+      -v --tb=short
+      --junitxml=/results/e2e-results.xml
+
+volumes:
+  postgres_test_data:
+  test_results:

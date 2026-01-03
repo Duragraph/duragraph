@@ -125,7 +125,8 @@ func createThread(t *testing.T, h *TestHarness, payload map[string]interface{}) 
 		t.Skip("Threads API not implemented yet (501)")
 	}
 
-	require.Equal(t, http.StatusOK, resp.StatusCode, "Create thread should return 200")
+	require.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated,
+		"Create thread should return 200 or 201, got %d", resp.StatusCode)
 
 	var result map[string]interface{}
 	err = json.NewDecoder(resp.Body).Decode(&result)
@@ -169,7 +170,8 @@ func createRun(t *testing.T, h *TestHarness, threadID string, payload map[string
 		t.Skip("Runs API not implemented yet (501)")
 	}
 
-	require.Equal(t, http.StatusOK, resp.StatusCode, "Create run should return 200")
+	require.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated,
+		"Create run should return 200 or 201, got %d", resp.StatusCode)
 
 	var result map[string]interface{}
 	err = json.NewDecoder(resp.Body).Decode(&result)

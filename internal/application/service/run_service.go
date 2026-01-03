@@ -21,6 +21,7 @@ type RunService struct {
 	interruptRepo humanloop.Repository
 	graphEngine   *graph.Engine
 	eventBus      *eventbus.EventBus
+	workerService *WorkerService // Optional: for dispatching runs to workers
 }
 
 // NewRunService creates a new RunService
@@ -40,6 +41,11 @@ func NewRunService(
 		graphEngine:   graphEngine,
 		eventBus:      eventBus,
 	}
+}
+
+// SetWorkerService sets the optional worker service for remote execution
+func (s *RunService) SetWorkerService(ws *WorkerService) {
+	s.workerService = ws
 }
 
 // CheckMultitaskStrategy checks if a new run can be created based on the multitask strategy
@@ -122,6 +128,27 @@ func (s *RunService) ExecuteRun(ctx context.Context, runID string) error {
 		return err
 	}
 
+	// Try to dispatch to worker first if worker service is configured
+	if s.workerService != nil {
+		workerID, dispatchErr := s.workerService.DispatchRun(ctx, runID)
+		if dispatchErr == nil && workerID != "" {
+			// Successfully dispatched to worker
+			// Start the run (worker will update status further)
+			if err := runAgg.Start(); err != nil {
+				return err
+			}
+			if err := s.runRepo.Update(ctx, runAgg); err != nil {
+				return err
+			}
+			fmt.Printf("Run %s dispatched to worker %s\n", runID, workerID)
+			return nil // Worker will execute and report back
+		}
+		// No worker available, fall back to local execution
+		if dispatchErr != nil {
+			fmt.Printf("Worker dispatch failed for run %s: %v, falling back to local execution\n", runID, dispatchErr)
+		}
+	}
+
 	// Start run
 	if err := runAgg.Start(); err != nil {
 		return err
@@ -154,7 +181,7 @@ func (s *RunService) ExecuteRun(ctx context.Context, runID string) error {
 	// Use the first/latest graph
 	graphDef := graphs[0]
 
-	// Execute graph
+	// Execute graph locally
 	output, err := s.graphEngine.Execute(ctx, runID, graphDef, runAgg.Input(), s.eventBus)
 	if err != nil {
 		// Fail the run

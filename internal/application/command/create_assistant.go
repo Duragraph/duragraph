@@ -14,6 +14,7 @@ type CreateAssistant struct {
 	Model        string
 	Instructions string
 	Tools        []map[string]interface{}
+	Metadata     map[string]interface{}
 }
 
 // CreateAssistantHandler handles the CreateAssistant command
@@ -37,6 +38,7 @@ func (h *CreateAssistantHandler) Handle(ctx context.Context, cmd CreateAssistant
 		cmd.Model,
 		cmd.Instructions,
 		cmd.Tools,
+		cmd.Metadata,
 	)
 	if err != nil {
 		return "", err
