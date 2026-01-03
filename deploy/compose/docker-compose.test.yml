@@ -68,5 +68,5 @@ services:
       test-api:
         condition: service_healthy
     command: >
-      sh -c "pip install -q pytest requests sseclient-py &&
+      sh -c "pip install -q -r tests/conformance/requirements.txt &&
              pytest -q tests/conformance --tb=short"

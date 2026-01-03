@@ -46,32 +46,33 @@ jobs:
       - name: Go Unit Tests
         run: go test ./... -cover -short
 
-  build_docs:
-    name: Build Docs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Install dependencies
-        working-directory: docs
-        run: pnpm install
-
-      - name: Build docs
-        working-directory: docs
-        run: pnpm build
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docs-site
-          path: docs/dist/
+  # Docs have been migrated to duragraph-docs repository
+  # build_docs:
+  #   name: Build Docs
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Set up Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '20'
+  #
+  #     - name: Install pnpm
+  #       uses: pnpm/action-setup@v4
+  #       with:
+  #         version: 9
+  #
+  #     - name: Install dependencies
+  #       working-directory: docs
+  #       run: pnpm install
+  #
+  #     - name: Build docs
+  #       working-directory: docs
+  #       run: pnpm build
+  #
+  #     - name: Upload artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: docs-site
+  #         path: docs/dist/
