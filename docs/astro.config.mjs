@@ -7,6 +7,9 @@ import mermaid from 'astro-mermaid';
 
 // https://astro.build/config
 export default defineConfig({
+  redirects: {
+    '/docs': '/docs/introduction/',
+  },
   vite: {
     plugins: [tailwindcss()],
   },
