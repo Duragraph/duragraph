@@ -25,6 +25,16 @@ try:
 except ImportError:
     AnthropicEmbeddingProvider = None  # type: ignore
 
+try:
+    from duragraph.embeddings.cohere import CohereEmbeddingProvider
+except ImportError:
+    CohereEmbeddingProvider = None  # type: ignore
+
+try:
+    from duragraph.embeddings.ollama import OllamaEmbeddingProvider
+except ImportError:
+    OllamaEmbeddingProvider = None  # type: ignore
+
 __all__ = [
     # Base classes
     "EmbeddingProvider",
@@ -40,4 +50,6 @@ __all__ = [
     # Provider classes (if available)
     "OpenAIEmbeddingProvider",
     "AnthropicEmbeddingProvider",
+    "CohereEmbeddingProvider",
+    "OllamaEmbeddingProvider",
 ]
