@@ -62,7 +62,7 @@ class AsyncWorkflow:
                 "metadata": {
                     "data_fetched": state.get("data_fetched"),
                     "timestamp": state.get("timestamp"),
-                }
+                },
             }
         }
 
@@ -90,9 +90,7 @@ async def main():
     print("🚀 Starting async execution...")
     print()
 
-    result = await workflow.arun(
-        {"query": "Explain the benefits of async/await in Python"}
-    )
+    result = await workflow.arun({"query": "Explain the benefits of async/await in Python"})
 
     print()
     print("=" * 60)

@@ -12,7 +12,7 @@ async def execute_llm_node(
     metadata: NodeMetadata,
     state: State,
 ) -> dict[str, Any]:
-    """Execute an LLM node.
+    """Execute an LLM node with optional tool calling.
 
     Args:
         node_name: Name of the node.
@@ -20,22 +20,23 @@ async def execute_llm_node(
         state: Current state.
 
     Returns:
-        State updates from the LLM.
+        State updates from the LLM, potentially including tool results.
     """
     from duragraph.llm import LLMRequest, get_provider
+    from duragraph.tools import resolve_tool_calls
 
     config = metadata.config
     model = config.get("model", "gpt-4o-mini")
     temperature = config.get("temperature", 0.7)
     max_tokens = config.get("max_tokens")
     system_prompt = config.get("system_prompt")
-    tools = config.get("tools", [])
+    tool_schemas = config.get("tool_schemas", [])
 
     # Build messages from state
     messages = []
     if "messages" in state:
         # State contains conversation messages
-        messages = state["messages"]
+        messages = state["messages"].copy()
     elif "input" in state:
         # Simple input
         messages = [{"role": "user", "content": str(state["input"])}]
@@ -51,7 +52,7 @@ async def execute_llm_node(
         temperature=temperature,
         max_tokens=max_tokens,
         system_prompt=system_prompt,
-        tools=tools,
+        tools=tool_schemas,  # Pass tool schemas instead of names
     )
 
     response = await provider.acomplete(request)
@@ -59,17 +60,52 @@ async def execute_llm_node(
     # Update state with response
     result: dict[str, Any] = {}
 
-    # Add AI message to messages list
-    if "messages" in state:
-        updated_messages = state["messages"].copy()
-        updated_messages.append({"role": "assistant", "content": response.content})
-        result["messages"] = updated_messages
-    else:
-        result["response"] = response.content
-
-    # Add tool calls if present
+    # Handle tool calls if present
     if response.tool_calls:
-        result["tool_calls"] = response.tool_calls
+        # Execute tools and get results
+        tool_results = resolve_tool_calls(response.tool_calls)
+
+        # Add assistant message with tool calls
+        if "messages" in state:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": response.content,
+                    "tool_calls": response.tool_calls,
+                }
+            )
+            # Add tool results
+            messages.extend(tool_results)
+
+            # Make another LLM call to process tool results
+            follow_up_request = LLMRequest(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                system_prompt=system_prompt,
+                tools=tool_schemas,
+            )
+
+            follow_up_response = await provider.acomplete(follow_up_request)
+
+            # Add final response
+            messages.append({"role": "assistant", "content": follow_up_response.content})
+
+            result["messages"] = messages
+            result["response"] = follow_up_response.content
+        else:
+            # For non-message mode, just store tool call info
+            result["tool_calls"] = response.tool_calls
+            result["tool_results"] = tool_results
+            result["response"] = response.content
+    else:
+        # No tool calls, handle normally
+        if "messages" in state:
+            messages.append({"role": "assistant", "content": response.content})
+            result["messages"] = messages
+        else:
+            result["response"] = response.content
 
     return result
 

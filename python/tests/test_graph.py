@@ -1,7 +1,6 @@
 """Tests for Graph decorator."""
 
-import pytest
-from duragraph import Graph, llm_node, node, entrypoint
+from duragraph import Graph, entrypoint, llm_node, node
 
 
 def test_graph_basic():

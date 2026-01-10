@@ -8,6 +8,54 @@ from typing import Any, TypeVar
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+class NodeDescriptor:
+    """A descriptor that enables >> operator at class definition time."""
+
+    # Class-level storage for edges created with >>
+    _all_edges: list[tuple[str, str]] = []
+
+    def __init__(self, func: Callable[..., Any], metadata: "NodeMetadata"):
+        self.func = func
+        self.metadata = metadata
+        self.name = func.__name__
+
+    def __rshift__(self, other: "NodeDescriptor") -> "NodeDescriptor":
+        """Enable >> operator between node descriptors at class definition time."""
+        # Store the edge definition at class level
+        NodeDescriptor._all_edges.append((self.name, other.name))
+        return other
+
+    def __get__(self, instance: Any, owner: type) -> Any:
+        """Descriptor protocol: return bound method when accessed on instance."""
+        if instance is None:
+            # Class-level access returns self (for >> operator)
+            return self
+        # Instance-level access returns wrapped bound method with metadata
+        bound_method = self.func.__get__(instance, owner)
+
+        # Create a wrapper that preserves both the method and metadata
+        if inspect.iscoroutinefunction(self.func):
+
+            @wraps(self.func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                return await bound_method(*args, **kwargs)
+
+            async_wrapper._node_metadata = self.metadata  # type: ignore
+            return async_wrapper
+        else:
+
+            @wraps(self.func)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                return bound_method(*args, **kwargs)
+
+            wrapper._node_metadata = self.metadata  # type: ignore
+            return wrapper
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        """Called when descriptor is assigned to a class attribute."""
+        self.name = name
+
+
 class NodeMetadata:
     """Metadata attached to node functions."""
 
@@ -30,7 +78,7 @@ def node(
     retry_on: list[str] | None = None,
     max_retries: int = 3,
     retry_delay: float = 1.0,
-) -> Callable[[F], F]:
+) -> Callable[[F], NodeDescriptor]:
     """Basic node decorator for custom logic.
 
     Args:
@@ -50,46 +98,23 @@ def node(
             return {"processed": True}
     """
 
-    def decorator(func: F) -> F:
+    def decorator(func: F) -> NodeDescriptor:
         # Check if the original function is async
         is_async = inspect.iscoroutinefunction(func)
 
-        if is_async:
+        metadata = NodeMetadata(
+            node_type="function",
+            name=name or func.__name__,
+            config={
+                "retry_on": retry_on or [],
+                "max_retries": max_retries,
+                "retry_delay": retry_delay,
+            },
+            is_async=is_async,
+        )
 
-            @wraps(func)
-            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                return await func(*args, **kwargs)
-
-            async_wrapper._node_metadata = NodeMetadata(  # type: ignore
-                node_type="function",
-                name=name or func.__name__,
-                config={
-                    "retry_on": retry_on or [],
-                    "max_retries": max_retries,
-                    "retry_delay": retry_delay,
-                },
-                is_async=True,
-            )
-            async_wrapper._original_func = func  # type: ignore
-            return async_wrapper  # type: ignore
-        else:
-
-            @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                return func(*args, **kwargs)
-
-            wrapper._node_metadata = NodeMetadata(  # type: ignore
-                node_type="function",
-                name=name or func.__name__,
-                config={
-                    "retry_on": retry_on or [],
-                    "max_retries": max_retries,
-                    "retry_delay": retry_delay,
-                },
-                is_async=False,
-            )
-            wrapper._original_func = func  # type: ignore
-            return wrapper  # type: ignore
+        # Return a NodeDescriptor instead of wrapped function
+        return NodeDescriptor(func, metadata)
 
     return decorator
 
@@ -101,9 +126,9 @@ def llm_node(
     temperature: float = 0.7,
     max_tokens: int | None = None,
     system_prompt: str | None = None,
-    tools: list[str] | None = None,
+    tools: list[Callable[..., Any]] | None = None,
     stream: bool = True,
-) -> Callable[[F], F]:
+) -> Callable[[F], NodeDescriptor]:
     """LLM node decorator for AI-powered processing.
 
     Args:
@@ -112,21 +137,45 @@ def llm_node(
         temperature: Sampling temperature (0.0 to 2.0).
         max_tokens: Maximum tokens in response.
         system_prompt: System prompt for the LLM.
-        tools: List of tool names available to the LLM.
+        tools: List of tool functions decorated with @tool.
         stream: Whether to stream responses.
 
     Example:
-        @llm_node(model="gpt-4o-mini", temperature=0.3)
-        def classify_intent(self, state):
+        @tool(description="Search the web")
+        def web_search(query: str) -> str:
+            return search_api(query)
+
+        @llm_node(model="gpt-4o-mini", tools=[web_search])
+        def process_with_tools(self, state):
             return state
     """
 
-    def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return func(*args, **kwargs)
+    def decorator(func: F) -> NodeDescriptor:
+        # Check if the original function is async
+        is_async = inspect.iscoroutinefunction(func)
 
-        wrapper._node_metadata = NodeMetadata(  # type: ignore
+        # Process tools and extract their metadata
+        tool_schemas = []
+        tool_names = []
+        if tools:
+            from duragraph.tools import get_tool_metadata
+
+            for tool_func in tools:
+                tool_meta = get_tool_metadata(tool_func)
+                if tool_meta:
+                    tool_schemas.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool_meta.name,
+                                "description": tool_meta.description,
+                                "parameters": tool_meta.parameters,
+                            },
+                        }
+                    )
+                    tool_names.append(tool_meta.name)
+
+        metadata = NodeMetadata(
             node_type="llm",
             name=name or func.__name__,
             config={
@@ -134,11 +183,14 @@ def llm_node(
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "system_prompt": system_prompt,
-                "tools": tools or [],
+                "tools": tool_names,  # Store tool names for reference
+                "tool_schemas": tool_schemas,  # Store full schemas for LLM
                 "stream": stream,
             },
+            is_async=is_async,
         )
-        return wrapper  # type: ignore
+
+        return NodeDescriptor(func, metadata)
 
     return decorator
 
@@ -149,7 +201,7 @@ def tool_node(
     timeout: float = 30.0,
     retry_on: list[str] | None = None,
     max_retries: int = 3,
-) -> Callable[[F], F]:
+) -> Callable[[F], NodeDescriptor]:
     """Tool node decorator for external tool execution.
 
     Args:
@@ -165,12 +217,11 @@ def tool_node(
             return {"results": results}
     """
 
-    def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return func(*args, **kwargs)
+    def decorator(func: F) -> NodeDescriptor:
+        # Check if the original function is async
+        is_async = inspect.iscoroutinefunction(func)
 
-        wrapper._node_metadata = NodeMetadata(  # type: ignore
+        metadata = NodeMetadata(
             node_type="tool",
             name=name or func.__name__,
             config={
@@ -178,15 +229,17 @@ def tool_node(
                 "retry_on": retry_on or [],
                 "max_retries": max_retries,
             },
+            is_async=is_async,
         )
-        return wrapper  # type: ignore
+
+        return NodeDescriptor(func, metadata)
 
     return decorator
 
 
 def router_node(
     name: str | None = None,
-) -> Callable[[F], F]:
+) -> Callable[[F], NodeDescriptor]:
     """Router node decorator for conditional branching.
 
     The decorated function should return the name of the next node to execute.
@@ -202,17 +255,18 @@ def router_node(
             return "general_handler"
     """
 
-    def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return func(*args, **kwargs)
+    def decorator(func: F) -> NodeDescriptor:
+        # Check if the original function is async
+        is_async = inspect.iscoroutinefunction(func)
 
-        wrapper._node_metadata = NodeMetadata(  # type: ignore
+        metadata = NodeMetadata(
             node_type="router",
             name=name or func.__name__,
             config={},
+            is_async=is_async,
         )
-        return wrapper  # type: ignore
+
+        return NodeDescriptor(func, metadata)
 
     return decorator
 
@@ -223,7 +277,7 @@ def human_node(
     name: str | None = None,
     timeout: float | None = None,
     interrupt_before: bool = True,
-) -> Callable[[F], F]:
+) -> Callable[[F], NodeDescriptor]:
     """Human-in-the-loop node decorator.
 
     Args:
@@ -238,12 +292,11 @@ def human_node(
             return state
     """
 
-    def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return func(*args, **kwargs)
+    def decorator(func: F) -> NodeDescriptor:
+        # Check if the original function is async
+        is_async = inspect.iscoroutinefunction(func)
 
-        wrapper._node_metadata = NodeMetadata(  # type: ignore
+        metadata = NodeMetadata(
             node_type="human",
             name=name or func.__name__,
             config={
@@ -251,13 +304,15 @@ def human_node(
                 "timeout": timeout,
                 "interrupt_before": interrupt_before,
             },
+            is_async=is_async,
         )
-        return wrapper  # type: ignore
+
+        return NodeDescriptor(func, metadata)
 
     return decorator
 
 
-def entrypoint(func: F) -> F:
+def entrypoint(func: F | NodeDescriptor) -> F | NodeDescriptor:
     """Mark a node as the graph entry point.
 
     Example:
@@ -266,20 +321,21 @@ def entrypoint(func: F) -> F:
         def start(self, state):
             return state
     """
-    # Check if already has node metadata
-    if hasattr(func, "_node_metadata"):
+    # Check if it's a NodeDescriptor
+    if isinstance(func, NodeDescriptor):
+        func.metadata.config["is_entrypoint"] = True
+        return func
+    # Check if already has node metadata (old-style decorator)
+    elif hasattr(func, "_node_metadata"):
         func._node_metadata.config["is_entrypoint"] = True  # type: ignore
+        return func
     else:
-        # Wrap as basic node
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return func(*args, **kwargs)
-
-        wrapper._node_metadata = NodeMetadata(  # type: ignore
+        # Create a NodeDescriptor for the function
+        is_async = inspect.iscoroutinefunction(func)
+        metadata = NodeMetadata(
             node_type="function",
-            name=func.__name__,
+            name=func.__name__,  # type: ignore
             config={"is_entrypoint": True},
+            is_async=is_async,
         )
-        return wrapper  # type: ignore
-
-    return func
+        return NodeDescriptor(func, metadata)  # type: ignore

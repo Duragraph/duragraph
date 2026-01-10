@@ -56,11 +56,7 @@ async def main():
     # First message
     print("User: Hello! What can you help me with?")
     result = await bot.arun(
-        {
-            "messages": [
-                {"role": "user", "content": "Hello! What can you help me with?"}
-            ]
-        }
+        {"messages": [{"role": "user", "content": "Hello! What can you help me with?"}]}
     )
     print(f"Assistant: {result.output['messages'][-1]['content']}")
     print()

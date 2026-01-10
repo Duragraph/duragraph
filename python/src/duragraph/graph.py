@@ -366,7 +366,14 @@ def Graph(
     """
 
     def decorator(cls: type[T]) -> type[T]:
+        from duragraph.nodes import NodeDescriptor
+
         original_init = cls.__init__
+
+        # Collect edges created at class definition time
+        # Reset the class-level edge storage first to avoid accumulation
+        class_edges = list(NodeDescriptor._all_edges)
+        NodeDescriptor._all_edges.clear()
 
         def new_init(self: Any, *args: Any, **kwargs: Any) -> None:
             original_init(self, *args, **kwargs)
@@ -374,6 +381,9 @@ def Graph(
             self._graph_description = description
             self._graph_version = version
             self._edges: list[Edge] = []
+            # Add edges defined at class level with >>
+            for source, target in class_edges:
+                self._edges.append(Edge(source, target))
             self._setup_node_proxies()
 
         def _setup_node_proxies(self: Any) -> None:
@@ -400,7 +410,17 @@ def Graph(
                 if name.startswith("_"):
                     continue
                 attr = getattr(self, name)
-                if callable(attr) and hasattr(attr, "_node_metadata"):
+                # Handle NodeDescriptor from class
+                if hasattr(type(self), name):
+                    class_attr = getattr(type(self), name)
+                    if hasattr(class_attr, "metadata"):
+                        # It's a NodeDescriptor
+                        meta: NodeMetadata = class_attr.metadata
+                        nodes[name] = meta
+                        if meta.config.get("is_entrypoint"):
+                            entrypoint = name
+                # Fallback to old style (bound methods with _node_metadata)
+                elif callable(attr) and hasattr(attr, "_node_metadata"):
                     meta: NodeMetadata = attr._node_metadata
                     nodes[name] = meta
                     if meta.config.get("is_entrypoint"):

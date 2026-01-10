@@ -47,16 +47,11 @@ class TestAsyncExecution:
         assert result.status == "completed"
         assert result.output["result"] == "sync_completed"
 
-    @pytest.mark.skip(reason="Requires >> operator in class body (issue #5)")
     async def test_mixed_sync_async_nodes(self) -> None:
         """Test mixing sync and async nodes."""
 
         @Graph(id="test_mixed")
         class TestGraph:
-            def __init__(self):
-                # Define edges in __init__ (>> operator not yet implemented in class body)
-                self.sync_start >> self.async_middle >> self.sync_end
-
             @entrypoint
             @node()
             def sync_start(self, state):
@@ -70,6 +65,9 @@ class TestAsyncExecution:
             @node()
             def sync_end(self, state):
                 return {"step3": "sync"}
+
+            # Define edges using >> operator in class body
+            sync_start >> async_middle >> sync_end
 
         graph = TestGraph()
         result = await graph.arun({"input": "test"})
