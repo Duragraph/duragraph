@@ -3,7 +3,15 @@ title: Server-Sent Events (SSE) Streaming
 description: Real-time event streaming documentation
 ---
 
+import { LinkCard } from '@astrojs/starlight/components';
+
 DuraGraph provides real-time updates via Server-Sent Events (SSE) for monitoring workflow execution, LLM token streaming, and system events.
+
+<LinkCard
+  title="Interactive API Reference"
+  description="Try streaming endpoints directly in your browser"
+  href="/api/reference"
+/>
 
 ## Overview
 
@@ -14,48 +22,71 @@ SSE allows clients to receive push notifications from the server over a single H
 - Live workflow progress monitoring
 - Event-driven UIs
 
-## Endpoint
+## Event Types
 
-```http
-GET /api/v1/stream?run_id={run_id}
+### Run Events
+
+| Event                 | Description                             |
+| --------------------- | --------------------------------------- |
+| `run.started`         | Run execution began                     |
+| `run.completed`       | Run finished successfully               |
+| `run.failed`          | Run failed with error                   |
+| `run.requires_action` | Waiting for human input or tool outputs |
+
+### Node Events
+
+| Event            | Description             |
+| ---------------- | ----------------------- |
+| `node.started`   | Node began execution    |
+| `node.completed` | Node finished execution |
+
+### LLM Events
+
+| Event            | Description                             |
+| ---------------- | --------------------------------------- |
+| `llm.token`      | Single token generated (streaming mode) |
+| `llm.completion` | LLM completed generation                |
+
+### Tool Events
+
+| Event         | Description              |
+| ------------- | ------------------------ |
+| `tool.call`   | Tool was called          |
+| `tool.result` | Tool execution completed |
+
+### System Events
+
+| Event              | Description                    |
+| ------------------ | ------------------------------ |
+| `checkpoint.saved` | Workflow state checkpointed    |
+| `heartbeat`        | Periodic keepalive (every 30s) |
+| `error`            | Non-fatal error occurred       |
+
+## Event Flow Example
+
+Typical event sequence for a successful run:
+
+```
+data: {"type":"run.started","run_id":"..."}
+data: {"type":"node.started","node_id":"input"}
+data: {"type":"node.completed","node_id":"input"}
+data: {"type":"checkpoint.saved","checkpoint_id":"chk_1"}
+data: {"type":"node.started","node_id":"llm"}
+data: {"type":"llm.token","token":"Hello"}
+data: {"type":"llm.token","token":" there"}
+data: {"type":"llm.token","token":"!"}
+data: {"type":"llm.completion","content":"Hello there!"}
+data: {"type":"node.completed","node_id":"llm"}
+data: {"type":"run.completed","output":{"result":"..."}}
 ```
 
-**Query Parameters:**
+## Client Examples
 
-- `run_id` (required) - The run ID to stream events for
-
-## Connection
-
-### cURL
-
-```bash
-curl -N http://localhost:8081/api/v1/stream?run_id={run_id}
-```
-
-The `-N` flag disables buffering for immediate event delivery.
-
-### Python
-
-```python
-import requests
-
-run_id = "323e4567-e89b-12d3-a456-426614174000"
-url = f"http://localhost:8081/api/v1/stream?run_id={run_id}"
-
-with requests.get(url, stream=True) as response:
-    for line in response.iter_lines():
-        if line:
-            decoded = line.decode('utf-8')
-            if decoded.startswith('data: '):
-                data = decoded[6:]  # Remove 'data: ' prefix
-                print(data)
-```
-
-### JavaScript
+### JavaScript (EventSource)
 
 ```javascript
 const runId = '323e4567-e89b-12d3-a456-426614174000';
-const eventSource = new EventSource(`http://localhost:8081/api/v1/stream?run_id=${runId}`);
+const eventSource = new EventSource(`/api/v1/stream?run_id=${runId}`);
 
 eventSource.onmessage = (event) => {
   const data = JSON.parse(event.data);
@@ -63,8 +94,7 @@ eventSource.onmessage = (event) => {
 };
 
 eventSource.addEventListener('run.completed', (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Run completed:', data);
+  console.log('Run completed:', JSON.parse(event.data));
   eventSource.close();
 });
 
@@ -74,18 +104,30 @@ eventSource.onerror = (error) => {
 };
 ```
 
+### Python
+
+```python
+import requests
+import json
+
+run_id = "323e4567-e89b-12d3-a456-426614174000"
+url = f"http://localhost:8081/api/v1/stream?run_id={run_id}"
+
+with requests.get(url, stream=True) as response:
+    for line in response.iter_lines():
+        if line:
+            decoded = line.decode('utf-8')
+            if decoded.startswith('data: '):
+                data = json.loads(decoded[6:])
+                print(f"Event: {data['type']}")
+
+                if data['type'] == 'run.completed':
+                    break
+```
+
 ### Go
 
 ```go
-package main
-
-import (
-    "bufio"
-    "fmt"
-    "net/http"
-    "strings"
-)
-
 func streamEvents(runID string) error {
     url := fmt.Sprintf("http://localhost:8081/api/v1/stream?run_id=%s", runID)
 
@@ -103,265 +145,13 @@ func streamEvents(runID string) error {
             fmt.Println("Event:", data)
         }
     }
-
     return scanner.Err()
 }
 ```
 
-## Event Types
-
-### Run Events
-
-#### `run.started`
-
-Emitted when run execution begins.
-
-```json
-{
-  "type": "run.started",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "timestamp": "2025-01-03T12:00:00Z"
-}
-```
-
-#### `run.completed`
-
-Emitted when run finishes successfully.
-
-```json
-{
-  "type": "run.completed",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "output": {
-    "result": "Task completed"
-  },
-  "timestamp": "2025-01-03T12:00:30Z"
-}
-```
-
-#### `run.failed`
-
-Emitted when run fails with an error.
-
-```json
-{
-  "type": "run.failed",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "error": {
-    "code": "execution_error",
-    "message": "Node execution failed",
-    "details": {}
-  },
-  "timestamp": "2025-01-03T12:00:15Z"
-}
-```
-
-#### `run.requires_action`
-
-Emitted when run needs human input or tool outputs.
-
-```json
-{
-  "type": "run.requires_action",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "required_action": {
-    "type": "submit_tool_outputs",
-    "submit_tool_outputs": {
-      "tool_calls": [
-        {
-          "id": "call_abc123",
-          "type": "function",
-          "function": {
-            "name": "web_search",
-            "arguments": "{\"query\": \"AI agents\"}"
-          }
-        }
-      ]
-    }
-  },
-  "timestamp": "2025-01-03T12:00:10Z"
-}
-```
-
-### Node Events
-
-#### `node.started`
-
-Emitted when a node begins execution.
-
-```json
-{
-  "type": "node.started",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "node_id": "process_input",
-  "node_type": "llm",
-  "timestamp": "2025-01-03T12:00:05Z"
-}
-```
-
-#### `node.completed`
-
-Emitted when a node finishes execution.
-
-```json
-{
-  "type": "node.completed",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "node_id": "process_input",
-  "output": {
-    "result": "Processed"
-  },
-  "timestamp": "2025-01-03T12:00:08Z"
-}
-```
-
-### LLM Events
-
-#### `llm.token`
-
-Emitted for each token generated by LLM (streaming mode).
-
-```json
-{
-  "type": "llm.token",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "node_id": "generate_response",
-  "token": "Hello",
-  "timestamp": "2025-01-03T12:00:06.123Z"
-}
-```
-
-#### `llm.completion`
-
-Emitted when LLM completes generation.
-
-```json
-{
-  "type": "llm.completion",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "node_id": "generate_response",
-  "content": "Hello! How can I help you today?",
-  "model": "gpt-4o-mini",
-  "usage": {
-    "prompt_tokens": 10,
-    "completion_tokens": 8,
-    "total_tokens": 18
-  },
-  "timestamp": "2025-01-03T12:00:08Z"
-}
-```
-
-### Tool Events
-
-#### `tool.call`
-
-Emitted when a tool is called.
-
-```json
-{
-  "type": "tool.call",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "tool_call_id": "call_abc123",
-  "tool_name": "web_search",
-  "arguments": {
-    "query": "AI agents"
-  },
-  "timestamp": "2025-01-03T12:00:10Z"
-}
-```
-
-#### `tool.result`
-
-Emitted when tool execution completes.
-
-```json
-{
-  "type": "tool.result",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "tool_call_id": "call_abc123",
-  "result": {
-    "results": [...]
-  },
-  "timestamp": "2025-01-03T12:00:12Z"
-}
-```
-
-### Checkpoint Events
-
-#### `checkpoint.saved`
-
-Emitted when workflow state is checkpointed.
-
-```json
-{
-  "type": "checkpoint.saved",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "checkpoint_id": "chk_abc123",
-  "timestamp": "2025-01-03T12:00:10Z"
-}
-```
-
-### System Events
-
-#### `heartbeat`
-
-Periodic keepalive event (every 30 seconds).
-
-```json
-{
-  "type": "heartbeat",
-  "timestamp": "2025-01-03T12:00:30Z"
-}
-```
-
-#### `error`
-
-Emitted for non-fatal errors.
-
-```json
-{
-  "type": "error",
-  "run_id": "323e4567-e89b-12d3-a456-426614174000",
-  "error": {
-    "message": "Warning: Rate limit approaching"
-  },
-  "timestamp": "2025-01-03T12:00:15Z"
-}
-```
-
-## Event Flow Example
-
-Typical event sequence for a successful run:
-
-```
-data: {"type":"run.started","run_id":"..."}
-
-data: {"type":"node.started","node_id":"input"}
-
-data: {"type":"node.completed","node_id":"input"}
-
-data: {"type":"checkpoint.saved","checkpoint_id":"chk_1"}
-
-data: {"type":"node.started","node_id":"llm"}
-
-data: {"type":"llm.token","token":"Hello"}
-data: {"type":"llm.token","token":" there"}
-data: {"type":"llm.token","token":"!"}
-
-data: {"type":"llm.completion","content":"Hello there!"}
-
-data: {"type":"node.completed","node_id":"llm"}
-
-data: {"type":"checkpoint.saved","checkpoint_id":"chk_2"}
-
-data: {"type":"run.completed","output":{"result":"..."}}
-```
-
 ## Best Practices
 
-### Reconnection
-
-Implement automatic reconnection with exponential backoff:
+### Reconnection with Exponential Backoff
 
 ```javascript
 class SSEClient {
@@ -376,7 +166,6 @@ class SSEClient {
 
     this.eventSource.onerror = () => {
       this.eventSource.close();
-
       setTimeout(() => {
         this.retryDelay = Math.min(this.retryDelay * 2, this.maxRetryDelay);
         this.connect();
@@ -384,115 +173,13 @@ class SSEClient {
     };
 
     this.eventSource.onopen = () => {
-      this.retryDelay = 1000; // Reset on successful connection
+      this.retryDelay = 1000; // Reset on success
     };
   }
 }
 ```
 
-### Event Filtering
-
-Filter events client-side for specific types:
-
-```python
-def stream_llm_tokens(run_id):
-    url = f"http://localhost:8081/api/v1/stream?run_id={run_id}"
-
-    with requests.get(url, stream=True) as response:
-        for line in response.iter_lines():
-            if line:
-                decoded = line.decode('utf-8')
-                if decoded.startswith('data: '):
-                    data = json.loads(decoded[6:])
-
-                    # Only process LLM tokens
-                    if data.get('type') == 'llm.token':
-                        print(data['token'], end='', flush=True)
-```
-
-### Timeout Handling
-
-Set appropriate timeouts:
-
-```python
-import requests
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
-
-session = requests.Session()
-retry = Retry(total=3, backoff_factor=1)
-adapter = HTTPAdapter(max_retries=retry)
-session.mount('http://', adapter)
-
-response = session.get(
-    url,
-    stream=True,
-    timeout=(5, None)  # 5s connect timeout, no read timeout
-)
-```
-
-### Resource Cleanup
-
-Always close connections when done:
-
-```javascript
-const eventSource = new EventSource(url);
-
-// Close on completion
-eventSource.addEventListener('run.completed', () => {
-  eventSource.close();
-});
-
-// Close on page unload
-window.addEventListener('beforeunload', () => {
-  eventSource.close();
-});
-```
-
-## Error Handling
-
-### Connection Errors
-
-```javascript
-eventSource.onerror = (error) => {
-  if (eventSource.readyState === EventSource.CLOSED) {
-    console.error('Connection closed');
-    // Implement reconnection logic
-  } else {
-    console.error('SSE error:', error);
-  }
-};
-```
-
-### Invalid Run ID
-
-```
-HTTP/1.1 404 Not Found
-Content-Type: application/json
-
-{
-  "error": "resource_not_found",
-  "message": "Run not found"
-}
-```
-
-### Authentication Error
-
-```
-HTTP/1.1 401 Unauthorized
-Content-Type: application/json
-
-{
-  "error": "unauthorized",
-  "message": "Missing or invalid API key"
-}
-```
-
-## Performance Considerations
-
-### Client-Side Buffering
-
-For token streaming, buffer tokens for smoother rendering:
+### Token Buffering for Smooth UI
 
 ```javascript
 let buffer = '';
@@ -510,79 +197,41 @@ eventSource.addEventListener('llm.token', (event) => {
 });
 ```
 
-### Memory Management
+### Resource Cleanup
 
-Limit event history to prevent memory leaks:
+```javascript
+// Close on completion
+eventSource.addEventListener('run.completed', () => {
+  eventSource.close();
+});
+
+// Close on page unload
+window.addEventListener('beforeunload', () => {
+  eventSource.close();
+});
+```
+
+### Memory Management
 
 ```javascript
 const MAX_EVENTS = 1000;
 const events = [];
 
 eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  events.push(data);
-
+  events.push(JSON.parse(event.data));
   if (events.length > MAX_EVENTS) {
-    events.shift(); // Remove oldest event
+    events.shift(); // Remove oldest
   }
 };
 ```
 
-## Testing
-
-### Manual Testing
-
-```bash
-# Test basic connection
-curl -N http://localhost:8081/api/v1/stream?run_id={run_id}
-
-# Test with timeout
-timeout 30s curl -N http://localhost:8081/api/v1/stream?run_id={run_id}
-
-# Save events to file
-curl -N http://localhost:8081/api/v1/stream?run_id={run_id} > events.log
-```
-
-### Integration Testing
-
-```python
-import pytest
-import requests
-
-def test_sse_stream():
-    # Create run
-    run = create_test_run()
-
-    # Stream events
-    url = f"http://localhost:8081/api/v1/stream?run_id={run['run_id']}"
-    events = []
-
-    with requests.get(url, stream=True, timeout=30) as response:
-        for line in response.iter_lines():
-            if line:
-                decoded = line.decode('utf-8')
-                if decoded.startswith('data: '):
-                    data = json.loads(decoded[6:])
-                    events.append(data)
-
-                    # Stop after completion
-                    if data.get('type') == 'run.completed':
-                        break
-
-    # Verify event sequence
-    assert events[0]['type'] == 'run.started'
-    assert events[-1]['type'] == 'run.completed'
-```
-
-## Examples
-
-### Real-time Chat UI
+## Real-time Chat UI Example
 
 ```javascript
 class ChatStream {
   constructor(runId) {
     this.runId = runId;
-    this.messageContainer = document.getElementById('messages');
+    this.container = document.getElementById('messages');
     this.currentMessage = '';
   }
 
@@ -593,56 +242,19 @@ class ChatStream {
     this.eventSource.addEventListener('llm.token', (event) => {
       const data = JSON.parse(event.data);
       this.currentMessage += data.token;
-      this.updateMessageDisplay();
+      this.container.textContent = this.currentMessage;
     });
 
-    this.eventSource.addEventListener('llm.completion', (event) => {
-      this.finalizeMessage();
-    });
-
-    this.eventSource.addEventListener('run.completed', (event) => {
+    this.eventSource.addEventListener('run.completed', () => {
+      this.container.classList.add('complete');
       this.eventSource.close();
     });
-  }
-
-  updateMessageDisplay() {
-    // Update UI with streaming text
-    this.messageContainer.textContent = this.currentMessage;
-  }
-
-  finalizeMessage() {
-    // Finalize message display
-    this.messageContainer.classList.add('complete');
   }
 }
 ```
 
-### Progress Tracking
-
-```python
-def track_progress(run_id):
-    url = f"http://localhost:8081/api/v1/stream?run_id={run_id}"
-    nodes_completed = set()
-
-    with requests.get(url, stream=True) as response:
-        for line in response.iter_lines():
-            if line:
-                decoded = line.decode('utf-8')
-                if decoded.startswith('data: '):
-                    data = json.loads(decoded[6:])
-
-                    if data.get('type') == 'node.completed':
-                        node_id = data['node_id']
-                        nodes_completed.add(node_id)
-                        print(f"Progress: {len(nodes_completed)} nodes completed")
-
-                    elif data.get('type') == 'run.completed':
-                        print("Run completed!")
-                        break
-```
-
 ## Next Steps
 
-- [REST API Reference](/docs/api-reference/rest-api) - Complete endpoint docs
+- [Interactive API Reference](/api/reference) - Try streaming endpoints
+- [REST API Reference](/docs/api-reference/rest-api) - Code examples
 - [Webhooks](/docs/api-reference/webhooks) - Alternative event delivery
-- [Examples](/docs/api-reference/examples) - More code samples

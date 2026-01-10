@@ -81,13 +81,13 @@ Content here...
 
 ## Related Repositories
 
-| Repository | Description |
-|------------|-------------|
-| [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
-| [duragraph-python](https://github.com/Duragraph/duragraph-python) | Python SDK |
-| [duragraph-go](https://github.com/Duragraph/duragraph-go) | Go SDK |
+| Repository                                                            | Description      |
+| --------------------------------------------------------------------- | ---------------- |
+| [duragraph](https://github.com/Duragraph/duragraph)                   | Core API server  |
+| [duragraph-python](https://github.com/Duragraph/duragraph-python)     | Python SDK       |
+| [duragraph-go](https://github.com/Duragraph/duragraph-go)             | Go SDK           |
 | [duragraph-examples](https://github.com/Duragraph/duragraph-examples) | Example projects |
-| [duragraph-studio](https://github.com/Duragraph/duragraph-studio) | Interactive UI |
+| [duragraph-studio](https://github.com/Duragraph/duragraph-studio)     | Interactive UI   |
 
 ## Contributing
 

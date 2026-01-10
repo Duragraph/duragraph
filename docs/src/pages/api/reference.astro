@@ -1,0 +1,80 @@
+---
+import { ScalarComponent } from '@scalar/astro';
+---
+
+<ScalarComponent
+  configuration={{
+    url: '/openapi.yaml',
+    pageTitle: 'DuraGraph API Reference',
+    theme: 'default',
+    hideModels: false,
+    hideDownloadButton: false,
+    withDefaultFonts: false,
+    metaData: {
+      title: 'DuraGraph API Reference',
+      description:
+        'Interactive API documentation for DuraGraph - LangGraph Cloud-compatible AI workflow orchestration',
+    },
+    customCss: `
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+      /* Base styles */
+      .scalar-app {
+        --scalar-font: 'Space Grotesk', system-ui, sans-serif;
+        --scalar-font-code: 'JetBrains Mono', ui-monospace, monospace;
+        --scalar-radius: 0;
+        --scalar-radius-lg: 0;
+        --scalar-radius-xl: 0;
+      }
+
+      /* Light mode */
+      .light-mode {
+        --scalar-background-1: #ffffff;
+        --scalar-background-2: #f4f5f5;
+        --scalar-background-3: #e9eaea;
+        --scalar-color-1: #1e2330;
+        --scalar-color-2: #495466;
+        --scalar-color-3: #68778d;
+        --scalar-color-accent: #ea580c;
+        --scalar-border-color: #e0e2e3;
+      }
+
+      .light-mode .sidebar {
+        --scalar-sidebar-background-1: #f4f5f5;
+        --scalar-sidebar-color-1: #1e2330;
+        --scalar-sidebar-color-2: #495466;
+        --scalar-sidebar-color-active: #ea580c;
+        --scalar-sidebar-border-color: #e0e2e3;
+        --scalar-sidebar-item-active-background: rgba(234, 88, 12, 0.1);
+      }
+
+      /* Dark mode - matching Starlight exactly */
+      .dark-mode {
+        --scalar-background-1: #181a1b;
+        --scalar-background-2: #1f2123;
+        --scalar-background-3: #272a2c;
+        --scalar-color-1: #e0e2e4;
+        --scalar-color-2: #a8adb3;
+        --scalar-color-3: #6b7280;
+        --scalar-color-accent: #fb923c;
+        --scalar-border-color: #2e3133;
+      }
+
+      .dark-mode .sidebar {
+        --scalar-sidebar-background-1: #181a1b;
+        --scalar-sidebar-color-1: #e0e2e4;
+        --scalar-sidebar-color-2: #a8adb3;
+        --scalar-sidebar-color-active: #fb923c;
+        --scalar-sidebar-border-color: #2e3133;
+        --scalar-sidebar-item-active-background: rgba(251, 146, 60, 0.15);
+      }
+
+      /* Force sharp corners */
+      .scalar-app *,
+      .scalar-app button,
+      .scalar-app input {
+        border-radius: 0 !important;
+      }
+    `,
+  }}
+/>
