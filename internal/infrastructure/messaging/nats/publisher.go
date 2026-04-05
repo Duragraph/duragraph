@@ -90,6 +90,10 @@ func ensureStreams(js natsgo.JetStreamContext) error {
 			name:     "duragraph-runs",
 			subjects: []string{"duragraph.runs.>"},
 		},
+		{
+			name:     "duragraph-stream",
+			subjects: []string{"duragraph.stream.>"},
+		},
 	}
 
 	for _, stream := range streams {

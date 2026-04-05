@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -9,7 +11,10 @@ import (
 	"github.com/duragraph/duragraph/internal/application/query"
 	"github.com/duragraph/duragraph/internal/application/service"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/dto"
+	"github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
+	"github.com/duragraph/duragraph/internal/infrastructure/streaming"
 	"github.com/duragraph/duragraph/internal/pkg/errors"
+	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 	"github.com/labstack/echo/v4"
 )
 
@@ -22,6 +27,8 @@ type RunHandler struct {
 	getRunHandler            *query.GetRunHandler
 	listRunsHandler          *query.ListRunsHandler
 	runService               *service.RunService
+	subscriber               *nats.Subscriber
+	eventBus                 *eventbus.EventBus
 }
 
 // NewRunHandler creates a new RunHandler
@@ -33,6 +40,8 @@ func NewRunHandler(
 	getRunHandler *query.GetRunHandler,
 	listRunsHandler *query.ListRunsHandler,
 	runService *service.RunService,
+	subscriber *nats.Subscriber,
+	eventBus *eventbus.EventBus,
 ) *RunHandler {
 	return &RunHandler{
 		createRunHandler:         createRunHandler,
@@ -42,6 +51,8 @@ func NewRunHandler(
 		getRunHandler:            getRunHandler,
 		listRunsHandler:          listRunsHandler,
 		runService:               runService,
+		subscriber:               subscriber,
+		eventBus:                 eventBus,
 	}
 }
 
@@ -457,21 +468,98 @@ func (h *RunHandler) CreateRunWithStream(c echo.Context) error {
 		h.runService.ExecuteRun(context.Background(), runID)
 	}()
 
-	// Set up SSE headers
+	// Emit metadata event for LangGraph compatibility
+	streaming.EmitMetadataEvent(h.eventBus, c.Request().Context(), runID, threadID, req.AssistantID, "")
+
+	return h.streamRunEvents(c, runID, threadID, req.StreamMode)
+}
+
+// streamRunEvents subscribes to run-specific NATS events and streams them as SSE.
+// Shared by CreateRunWithStream and CreateStatelessRunWithStream.
+func (h *RunHandler) streamRunEvents(c echo.Context, runID, threadID string, streamModes []string) error {
+	modes := streaming.ParseStreamModes(streamModes)
+	formatter := streaming.NewEventFormatter(modes)
+
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
 
-	// Stream initial event
-	c.Response().Write([]byte("event: run_created\n"))
-	c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\", \"thread_id\": \"" + threadID + "\", \"status\": \"pending\"}\n\n"))
+	metaData, _ := formatter.FormatSSE("metadata", map[string]interface{}{
+		"run_id":    runID,
+		"thread_id": threadID,
+	})
+	c.Response().Write(metaData)
 	c.Response().Flush()
 
-	// Poll for updates
 	timeout := 5 * time.Minute
 	ctx, cancel := context.WithTimeout(c.Request().Context(), timeout)
 	defer cancel()
 
+	topic := fmt.Sprintf("duragraph.stream.%s.>", runID)
+	messages, err := h.subscriber.SubscribeWithContext(ctx, topic)
+	if err != nil {
+		return h.streamFallback(c, ctx, runID, formatter)
+	}
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			endData, _ := formatter.FormatEnd(runID)
+			c.Response().Write(endData)
+			c.Response().Flush()
+			return nil
+
+		case <-ticker.C:
+			if _, err := fmt.Fprintf(c.Response(), ": keepalive\n\n"); err != nil {
+				return nil
+			}
+			c.Response().Flush()
+
+		case msg, ok := <-messages:
+			if !ok {
+				return nil
+			}
+
+			var event map[string]interface{}
+			if err := json.Unmarshal(msg.Payload, &event); err != nil {
+				msg.Ack()
+				continue
+			}
+
+			eventType, _ := event["event_type"].(string)
+			mappedType := mapEventType(eventType)
+
+			if !formatter.ShouldSend(mappedType) {
+				msg.Ack()
+				continue
+			}
+
+			payload := event["payload"]
+			data, _ := formatter.FormatSSE(mappedType, payload)
+			if _, err := c.Response().Write(data); err != nil {
+				msg.Ack()
+				return nil
+			}
+			c.Response().Flush()
+
+			msg.Ack()
+
+			if isTerminalEvent(eventType) {
+				endData, _ := formatter.FormatEnd(runID)
+				c.Response().Write(endData)
+				c.Response().Flush()
+				return nil
+			}
+		}
+	}
+}
+
+// streamFallback reverts to polling when NATS subscription fails.
+func (h *RunHandler) streamFallback(c echo.Context, ctx context.Context, runID string, formatter *streaming.EventFormatter) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -479,8 +567,8 @@ func (h *RunHandler) CreateRunWithStream(c echo.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			c.Response().Write([]byte("event: timeout\n"))
-			c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\"}\n\n"))
+			endData, _ := formatter.FormatEnd(runID)
+			c.Response().Write(endData)
 			c.Response().Flush()
 			return nil
 		case <-ticker.C:
@@ -492,13 +580,16 @@ func (h *RunHandler) CreateRunWithStream(c echo.Context) error {
 			status := runAgg.Status().Normalize().String()
 			if status != lastStatus {
 				lastStatus = status
-				c.Response().Write([]byte("event: status_update\n"))
-				c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\", \"status\": \"" + status + "\"}\n\n"))
+				data, _ := formatter.FormatSSE("values", map[string]interface{}{
+					"run_id": runID,
+					"status": status,
+				})
+				c.Response().Write(data)
 				c.Response().Flush()
 
 				if runAgg.Status().IsTerminal() {
-					c.Response().Write([]byte("event: end\n"))
-					c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\"}\n\n"))
+					endData, _ := formatter.FormatEnd(runID)
+					c.Response().Write(endData)
 					c.Response().Flush()
 					return nil
 				}
@@ -901,54 +992,10 @@ func (h *RunHandler) CreateStatelessRunWithStream(c echo.Context) error {
 		h.runService.ExecuteRun(context.Background(), runID)
 	}()
 
-	// Set up SSE headers
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("Connection", "keep-alive")
+	// Emit metadata event for LangGraph compatibility
+	streaming.EmitMetadataEvent(h.eventBus, c.Request().Context(), runID, threadID, req.AssistantID, "")
 
-	// Stream initial event
-	c.Response().Write([]byte("event: run_created\n"))
-	c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\", \"thread_id\": \"" + threadID + "\", \"status\": \"pending\"}\n\n"))
-	c.Response().Flush()
-
-	// Poll for updates (simplified - production would use event bus)
-	timeout := 5 * time.Minute
-	ctx, cancel := context.WithTimeout(c.Request().Context(), timeout)
-	defer cancel()
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	lastStatus := ""
-	for {
-		select {
-		case <-ctx.Done():
-			c.Response().Write([]byte("event: timeout\n"))
-			c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\"}\n\n"))
-			c.Response().Flush()
-			return nil
-		case <-ticker.C:
-			runAgg, err := h.runService.WaitForRun(ctx, runID, 100*time.Millisecond)
-			if err != nil {
-				continue
-			}
-
-			status := runAgg.Status().Normalize().String()
-			if status != lastStatus {
-				lastStatus = status
-				c.Response().Write([]byte("event: status_update\n"))
-				c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\", \"status\": \"" + status + "\"}\n\n"))
-				c.Response().Flush()
-
-				if runAgg.Status().IsTerminal() {
-					c.Response().Write([]byte("event: end\n"))
-					c.Response().Write([]byte("data: {\"run_id\": \"" + runID + "\"}\n\n"))
-					c.Response().Flush()
-					return nil
-				}
-			}
-		}
-	}
+	return h.streamRunEvents(c, runID, threadID, req.StreamMode)
 }
 
 // CreateBatchRuns handles POST /runs/batch

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,7 +30,6 @@ func NewStreamHandler(subscriber *nats.Subscriber) *StreamHandler {
 func parseStreamModes(c echo.Context) []streaming.StreamMode {
 	modes := c.QueryParams()["stream_mode"]
 	if len(modes) == 0 {
-		// Check for comma-separated value in single param
 		if modeParam := c.QueryParam("stream_mode"); modeParam != "" {
 			modes = strings.Split(modeParam, ",")
 		}
@@ -64,26 +64,25 @@ func (h *StreamHandler) Stream(c echo.Context) error {
 	return h.streamByRunID(c, runID)
 }
 
-// streamByRunID is the common streaming implementation
+// streamByRunID subscribes to run-specific NATS topics and streams events to the client.
 func (h *StreamHandler) streamByRunID(c echo.Context, runID string) error {
-	// Parse stream modes
 	modes := parseStreamModes(c)
 	formatter := streaming.NewEventFormatter(modes)
 
-	// Set SSE headers
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().WriteHeader(http.StatusOK)
 
-	// Subscribe to run events
-	topic := fmt.Sprintf("duragraph.runs.run.>")
-	messages, err := h.subscriber.Subscribe(topic)
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	defer cancel()
+
+	topic := fmt.Sprintf("duragraph.stream.%s.>", runID)
+	messages, err := h.subscriber.SubscribeWithContext(ctx, topic)
 	if err != nil {
 		return err
 	}
 
-	ctx := c.Request().Context()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -93,45 +92,41 @@ func (h *StreamHandler) streamByRunID(c echo.Context, runID string) error {
 			return nil
 
 		case <-ticker.C:
-			// Send keepalive
-			fmt.Fprintf(c.Response(), ": keepalive\n\n")
+			if _, err := fmt.Fprintf(c.Response(), ": keepalive\n\n"); err != nil {
+				return nil
+			}
 			c.Response().Flush()
 
-		case msg := <-messages:
-			// Parse message
+		case msg, ok := <-messages:
+			if !ok {
+				return nil
+			}
+
 			var event map[string]interface{}
 			if err := json.Unmarshal(msg.Payload, &event); err != nil {
+				msg.Ack()
 				continue
 			}
 
-			// Filter by run ID
-			if aggregateID, ok := event["aggregate_id"].(string); !ok || aggregateID != runID {
-				continue
-			}
-
-			// Get event type
 			eventType, _ := event["event_type"].(string)
-
-			// Map internal event types to stream mode compatible types
 			mappedType := mapEventType(eventType)
 
-			// Check if event should be sent based on stream mode
 			if !formatter.ShouldSend(mappedType) {
 				msg.Ack()
 				continue
 			}
 
-			// Format and send event
 			payload := event["payload"]
 			data, _ := formatter.FormatSSE(mappedType, payload)
-			c.Response().Write(data)
+			if _, err := c.Response().Write(data); err != nil {
+				msg.Ack()
+				return nil
+			}
 			c.Response().Flush()
 
-			// Acknowledge message
 			msg.Ack()
 
-			// Check if run completed or failed
-			if eventType == "run.completed" || eventType == "run.failed" || eventType == "run.cancelled" {
+			if isTerminalEvent(eventType) {
 				endData, _ := formatter.FormatEnd(runID)
 				c.Response().Write(endData)
 				c.Response().Flush()
@@ -142,7 +137,6 @@ func (h *StreamHandler) streamByRunID(c echo.Context, runID string) error {
 }
 
 // JoinThreadStream handles GET /threads/:thread_id/stream (LangGraph compatible)
-// This streams output from all runs on a thread in real-time
 func (h *StreamHandler) JoinThreadStream(c echo.Context) error {
 	threadID := c.Param("thread_id")
 	if threadID == "" {
@@ -155,26 +149,27 @@ func (h *StreamHandler) JoinThreadStream(c echo.Context) error {
 	return h.streamByThreadID(c, threadID)
 }
 
-// streamByThreadID streams all run events for a thread
+// streamByThreadID streams all run events for a thread.
+// Thread streams subscribe to the global topic and filter by thread_id in the
+// payload, since thread_id is not part of the NATS subject hierarchy.
 func (h *StreamHandler) streamByThreadID(c echo.Context, threadID string) error {
-	// Parse stream modes
 	modes := parseStreamModes(c)
 	formatter := streaming.NewEventFormatter(modes)
 
-	// Set SSE headers
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().WriteHeader(http.StatusOK)
 
-	// Subscribe to all run events
-	topic := fmt.Sprintf("duragraph.runs.run.>")
-	messages, err := h.subscriber.Subscribe(topic)
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	defer cancel()
+
+	topic := "duragraph.runs.run.>"
+	messages, err := h.subscriber.SubscribeWithContext(ctx, topic)
 	if err != nil {
 		return err
 	}
 
-	ctx := c.Request().Context()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -184,18 +179,22 @@ func (h *StreamHandler) streamByThreadID(c echo.Context, threadID string) error 
 			return nil
 
 		case <-ticker.C:
-			// Send keepalive
-			fmt.Fprintf(c.Response(), ": keepalive\n\n")
+			if _, err := fmt.Fprintf(c.Response(), ": keepalive\n\n"); err != nil {
+				return nil
+			}
 			c.Response().Flush()
 
-		case msg := <-messages:
-			// Parse message
+		case msg, ok := <-messages:
+			if !ok {
+				return nil
+			}
+
 			var event map[string]interface{}
 			if err := json.Unmarshal(msg.Payload, &event); err != nil {
+				msg.Ack()
 				continue
 			}
 
-			// Filter by thread ID from payload
 			payload, _ := event["payload"].(map[string]interface{})
 			eventThreadID, _ := payload["thread_id"].(string)
 			if eventThreadID != threadID {
@@ -203,48 +202,61 @@ func (h *StreamHandler) streamByThreadID(c echo.Context, threadID string) error 
 				continue
 			}
 
-			// Get event type
 			eventType, _ := event["event_type"].(string)
-
-			// Map internal event types to stream mode compatible types
 			mappedType := mapEventType(eventType)
 
-			// Check if event should be sent based on stream mode
 			if !formatter.ShouldSend(mappedType) {
 				msg.Ack()
 				continue
 			}
 
-			// Format and send event
 			data, _ := formatter.FormatSSE(mappedType, payload)
-			c.Response().Write(data)
+			if _, err := c.Response().Write(data); err != nil {
+				msg.Ack()
+				return nil
+			}
 			c.Response().Flush()
 
-			// Acknowledge message
 			msg.Ack()
-
-			// Note: Thread streams remain open indefinitely, client must close
 		}
+	}
+}
+
+// isTerminalEvent returns true if the event type indicates the run has ended.
+func isTerminalEvent(eventType string) bool {
+	switch eventType {
+	case "run.completed", "run.failed", "run.cancelled":
+		return true
+	default:
+		return false
 	}
 }
 
 // mapEventType maps internal event types to streaming mode compatible types
 func mapEventType(eventType string) string {
 	switch eventType {
+	case "metadata":
+		return "metadata"
 	case "run.started", "run.in_progress":
 		return "values"
 	case "run.completed", "run.success":
 		return "values"
 	case "run.failed", "run.error":
 		return "error"
-	case "node.started":
+	case "node.started", "node_start":
 		return "updates"
-	case "node.completed":
+	case "node.completed", "node_end":
 		return "values"
-	case "message.chunk":
+	case "message.chunk", "message_chunk":
 		return "message_chunk"
-	case "message.completed":
+	case "message.completed", "message":
 		return "message"
+	case "values":
+		return "values"
+	case "updates":
+		return "updates"
+	case "debug":
+		return "debug"
 	default:
 		return eventType
 	}

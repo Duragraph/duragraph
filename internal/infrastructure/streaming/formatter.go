@@ -19,6 +19,9 @@ func NewEventFormatter(modes []StreamMode) *EventFormatter {
 
 // ShouldSend checks if an event should be sent based on configured modes
 func (f *EventFormatter) ShouldSend(eventType string) bool {
+	if eventType == "metadata" {
+		return true
+	}
 	for _, mode := range f.modes {
 		switch mode {
 		case ModeEvents:
