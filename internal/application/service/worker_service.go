@@ -4,78 +4,68 @@ package service
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/run"
 	"github.com/duragraph/duragraph/internal/domain/worker"
 	"github.com/duragraph/duragraph/internal/domain/workflow"
+	"github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
 )
 
-// WorkerTask represents a task to be executed by a worker.
-type WorkerTask struct {
-	TaskID      string
-	RunID       string
-	ThreadID    string
-	AssistantID string
-	GraphID     string
-	Input       map[string]interface{}
-	Config      map[string]interface{}
-	CreatedAt   time.Time
-}
-
-// WorkerService manages worker-based run execution.
+// WorkerService manages worker-based run execution using persistent storage and NATS.
 type WorkerService struct {
-	registry        *worker.Registry
+	workerRepo      worker.Repository
+	taskRepo        worker.TaskRepository
 	runRepo         run.Repository
 	assistantRepo   workflow.AssistantRepository
+	taskQueue       *nats.TaskQueue
 	healthThreshold time.Duration
-
-	// Pending tasks per worker
-	mu           sync.RWMutex
-	pendingTasks map[string][]WorkerTask // workerID -> tasks
-
-	// Run to worker mapping for status updates
-	runWorkerMap sync.Map // runID -> workerID
+	leaseDuration   time.Duration
 }
 
 // NewWorkerService creates a new WorkerService.
 func NewWorkerService(
-	registry *worker.Registry,
+	workerRepo worker.Repository,
+	taskRepo worker.TaskRepository,
 	runRepo run.Repository,
 	assistantRepo workflow.AssistantRepository,
+	taskQueue *nats.TaskQueue,
 	healthThreshold time.Duration,
 ) *WorkerService {
 	return &WorkerService{
-		registry:        registry,
+		workerRepo:      workerRepo,
+		taskRepo:        taskRepo,
 		runRepo:         runRepo,
 		assistantRepo:   assistantRepo,
+		taskQueue:       taskQueue,
 		healthThreshold: healthThreshold,
-		pendingTasks:    make(map[string][]WorkerTask),
+		leaseDuration:   2 * time.Minute,
 	}
 }
 
-// Registry returns the worker registry.
-func (s *WorkerService) Registry() *worker.Registry {
-	return s.registry
+// WorkerRepo returns the worker repository.
+func (s *WorkerService) WorkerRepo() worker.Repository {
+	return s.workerRepo
 }
 
-// DispatchRun assigns a run to an available worker.
-// Returns the worker ID if assigned, or empty string if no worker available.
+// TaskRepo returns the task repository.
+func (s *WorkerService) TaskRepo() worker.TaskRepository {
+	return s.taskRepo
+}
+
+// DispatchRun creates a task assignment in PostgreSQL and notifies via NATS.
+// Returns the worker ID if a suitable worker exists, or empty string if none available.
 func (s *WorkerService) DispatchRun(ctx context.Context, runID string) (string, error) {
-	// Load the run
 	runAgg, err := s.runRepo.FindByID(ctx, runID)
 	if err != nil {
 		return "", fmt.Errorf("load run: %w", err)
 	}
 
-	// Load assistant to determine graph ID
 	assistant, err := s.assistantRepo.FindByID(ctx, runAgg.AssistantID())
 	if err != nil {
 		return "", fmt.Errorf("load assistant: %w", err)
 	}
 
-	// Check metadata for graph_id, otherwise use assistant ID
 	graphID := assistant.ID()
 	if metadata := assistant.Metadata(); metadata != nil {
 		if gid, ok := metadata["graph_id"].(string); ok && gid != "" {
@@ -83,56 +73,49 @@ func (s *WorkerService) DispatchRun(ctx context.Context, runID string) (string, 
 		}
 	}
 
-	// Find a healthy worker for this graph
-	w := s.registry.FindWorkerForGraph(graphID, s.healthThreshold)
+	w, err := s.workerRepo.FindForGraph(ctx, graphID, s.healthThreshold)
+	if err != nil {
+		return "", fmt.Errorf("find worker: %w", err)
+	}
 	if w == nil {
-		// No worker available - could fall back to local execution
 		return "", nil
 	}
 
-	// Create task
-	task := WorkerTask{
-		TaskID:      fmt.Sprintf("task-%s", runID),
+	task := &worker.TaskAssignment{
 		RunID:       runID,
+		GraphID:     graphID,
 		ThreadID:    runAgg.ThreadID(),
 		AssistantID: runAgg.AssistantID(),
-		GraphID:     graphID,
 		Input:       runAgg.Input(),
 		Config:      runAgg.Config(),
-		CreatedAt:   time.Now(),
+		MaxRetries:  3,
 	}
 
-	// Add to pending tasks for this worker
-	s.mu.Lock()
-	s.pendingTasks[w.ID] = append(s.pendingTasks[w.ID], task)
-	s.mu.Unlock()
+	if err := s.taskRepo.Create(ctx, task); err != nil {
+		return "", fmt.Errorf("create task: %w", err)
+	}
 
-	// Track which worker has this run
-	s.runWorkerMap.Store(runID, w.ID)
+	if s.taskQueue != nil {
+		if err := s.taskQueue.Publish(ctx, nats.TaskMessage{
+			TaskID:      task.ID,
+			RunID:       runID,
+			GraphID:     graphID,
+			ThreadID:    runAgg.ThreadID(),
+			AssistantID: runAgg.AssistantID(),
+			Input:       runAgg.Input(),
+			Config:      runAgg.Config(),
+			CreatedAt:   task.CreatedAt,
+		}); err != nil {
+			fmt.Printf("NATS task notification failed (PostgreSQL task persisted): %v\n", err)
+		}
+	}
 
 	return w.ID, nil
 }
 
-// PollTasks returns pending tasks for a worker.
-func (s *WorkerService) PollTasks(workerID string, maxTasks int) []WorkerTask {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tasks, ok := s.pendingTasks[workerID]
-	if !ok || len(tasks) == 0 {
-		return []WorkerTask{}
-	}
-
-	// Get up to maxTasks
-	count := len(tasks)
-	if count > maxTasks {
-		count = maxTasks
-	}
-
-	result := tasks[:count]
-	s.pendingTasks[workerID] = tasks[count:]
-
-	return result
+// PollTasks claims pending tasks for a worker from PostgreSQL using FOR UPDATE SKIP LOCKED.
+func (s *WorkerService) PollTasks(ctx context.Context, workerID string, graphIDs []string, maxTasks int) ([]*worker.TaskAssignment, error) {
+	return s.taskRepo.Claim(ctx, workerID, graphIDs, s.leaseDuration, maxTasks)
 }
 
 // UpdateRunStatus updates a run's status from worker feedback.
@@ -151,10 +134,17 @@ func (s *WorkerService) UpdateRunStatus(ctx context.Context, runID, status strin
 		if err := runAgg.Complete(output); err != nil {
 			return err
 		}
+		task, findErr := s.taskRepo.FindByRunID(ctx, runID)
+		if findErr == nil && task != nil {
+			s.taskRepo.Complete(ctx, task.ID)
+		}
 	case "error", "failed":
 		runAgg.Fail(errMsg)
+		task, findErr := s.taskRepo.FindByRunID(ctx, runID)
+		if findErr == nil && task != nil {
+			s.taskRepo.Fail(ctx, task.ID, errMsg)
+		}
 	case "interrupted", "requires_action":
-		// Handle interrupt - simplified for now
 		if err := runAgg.RequiresAction("", "worker interrupt", nil); err != nil {
 			return err
 		}
@@ -164,15 +154,78 @@ func (s *WorkerService) UpdateRunStatus(ctx context.Context, runID, status strin
 		}
 	}
 
+	if s.taskQueue != nil {
+		s.taskQueue.PublishRunEvent(ctx, runID, status, output)
+	}
+
 	return s.runRepo.Update(ctx, runAgg)
 }
 
 // HasWorkers returns true if there are any registered workers.
-func (s *WorkerService) HasWorkers() bool {
-	return len(s.registry.GetAllWorkers()) > 0
+func (s *WorkerService) HasWorkers(ctx context.Context) bool {
+	workers, err := s.workerRepo.FindAll(ctx)
+	if err != nil {
+		return false
+	}
+	return len(workers) > 0
 }
 
 // HasHealthyWorkerForGraph returns true if there's a healthy worker for the graph.
-func (s *WorkerService) HasHealthyWorkerForGraph(graphID string) bool {
-	return s.registry.FindWorkerForGraph(graphID, s.healthThreshold) != nil
+func (s *WorkerService) HasHealthyWorkerForGraph(ctx context.Context, graphID string) bool {
+	w, err := s.workerRepo.FindForGraph(ctx, graphID, s.healthThreshold)
+	if err != nil {
+		return false
+	}
+	return w != nil
+}
+
+// MonitorExpiredLeases checks for expired leases and retries or fails tasks.
+// Should be called periodically (e.g., every 30 seconds) from a background goroutine.
+func (s *WorkerService) MonitorExpiredLeases(ctx context.Context) error {
+	expired, err := s.taskRepo.FindExpiredLeases(ctx)
+	if err != nil {
+		return fmt.Errorf("find expired leases: %w", err)
+	}
+
+	for _, task := range expired {
+		if err := s.taskRepo.RetryOrFail(ctx, task.ID); err != nil {
+			fmt.Printf("failed to retry/fail task %d: %v\n", task.ID, err)
+			continue
+		}
+
+		updatedTask, err := s.taskRepo.FindByRunID(ctx, task.RunID)
+		if err != nil {
+			continue
+		}
+
+		if updatedTask.Status == worker.TaskStatusFailed {
+			runAgg, err := s.runRepo.FindByID(ctx, task.RunID)
+			if err != nil {
+				continue
+			}
+			runAgg.Fail("worker lease expired after max retries")
+			s.runRepo.Update(ctx, runAgg)
+
+			if s.taskQueue != nil {
+				s.taskQueue.PublishRunEvent(ctx, task.RunID, "failed", map[string]interface{}{
+					"error": "worker lease expired after max retries",
+				})
+			}
+		} else if updatedTask.Status == worker.TaskStatusPending {
+			if s.taskQueue != nil {
+				s.taskQueue.Publish(ctx, nats.TaskMessage{
+					TaskID:      task.ID,
+					RunID:       task.RunID,
+					GraphID:     task.GraphID,
+					ThreadID:    task.ThreadID,
+					AssistantID: task.AssistantID,
+					Input:       task.Input,
+					Config:      task.Config,
+					CreatedAt:   task.CreatedAt,
+				})
+			}
+		}
+	}
+
+	return nil
 }

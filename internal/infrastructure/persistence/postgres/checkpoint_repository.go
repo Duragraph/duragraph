@@ -11,12 +11,18 @@ import (
 
 // CheckpointRepository implements checkpoint.Repository using PostgreSQL
 type CheckpointRepository struct {
-	pool *pgxpool.Pool
+	writePool *pgxpool.Pool
+	readPool  *pgxpool.Pool
 }
 
 // NewCheckpointRepository creates a new checkpoint repository
 func NewCheckpointRepository(pool *pgxpool.Pool) *CheckpointRepository {
-	return &CheckpointRepository{pool: pool}
+	return &CheckpointRepository{writePool: pool, readPool: pool}
+}
+
+// NewCheckpointRepositoryWithPools creates a checkpoint repository with separate read/write pools
+func NewCheckpointRepositoryWithPools(writePool, readPool *pgxpool.Pool) *CheckpointRepository {
+	return &CheckpointRepository{writePool: writePool, readPool: readPool}
 }
 
 // Save persists a checkpoint
@@ -39,7 +45,7 @@ func (r *CheckpointRepository) Save(ctx context.Context, cp *checkpoint.Checkpoi
 			pending_sends = $9
 	`
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err := r.writePool.Exec(ctx, query,
 		cp.ID(),
 		cp.ThreadID(),
 		cp.CheckpointNS(),
@@ -120,7 +126,7 @@ func (r *CheckpointRepository) FindHistory(ctx context.Context, threadID string,
 		args = []interface{}{threadID, checkpointNS, limit}
 	}
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := r.writePool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +146,7 @@ func (r *CheckpointRepository) FindHistory(ctx context.Context, threadID string,
 
 // Delete removes a checkpoint
 func (r *CheckpointRepository) Delete(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, "DELETE FROM checkpoints WHERE id = $1", id)
+	_, err := r.writePool.Exec(ctx, "DELETE FROM checkpoints WHERE id = $1", id)
 	return err
 }
 
@@ -154,7 +160,7 @@ func (r *CheckpointRepository) SaveWrite(ctx context.Context, write *checkpoint.
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err := r.writePool.Exec(ctx, query,
 		write.ID(),
 		write.ThreadID(),
 		write.CheckpointNS(),
@@ -179,7 +185,7 @@ func (r *CheckpointRepository) FindWritesByCheckpoint(ctx context.Context, threa
 		ORDER BY idx
 	`
 
-	rows, err := r.pool.Query(ctx, query, threadID, checkpointNS, checkpointID)
+	rows, err := r.writePool.Query(ctx, query, threadID, checkpointNS, checkpointID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +213,7 @@ func (r *CheckpointRepository) FindWritesByCheckpoint(ctx context.Context, threa
 }
 
 func (r *CheckpointRepository) scanCheckpoint(ctx context.Context, query string, args ...interface{}) (*checkpoint.Checkpoint, error) {
-	row := r.pool.QueryRow(ctx, query, args...)
+	row := r.writePool.QueryRow(ctx, query, args...)
 	return r.scanSingleRow(row)
 }
 

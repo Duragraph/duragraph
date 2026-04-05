@@ -8,9 +8,10 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	NATS     NATSConfig
+	Server       ServerConfig
+	Database     DatabaseConfig
+	ReadDatabase *DatabaseConfig
+	NATS         NATSConfig
 }
 
 // ServerConfig holds server configuration
@@ -52,6 +53,17 @@ func Load() (*Config, error) {
 		NATS: NATSConfig{
 			URL: getEnv("NATS_URL", "nats://localhost:4222"),
 		},
+	}
+
+	if readHost := os.Getenv("DB_READ_HOST"); readHost != "" {
+		cfg.ReadDatabase = &DatabaseConfig{
+			Host:     readHost,
+			Port:     getEnvInt("DB_READ_PORT", cfg.Database.Port),
+			User:     getEnv("DB_READ_USER", cfg.Database.User),
+			Password: getEnv("DB_READ_PASSWORD", cfg.Database.Password),
+			Database: getEnv("DB_READ_NAME", cfg.Database.Database),
+			SSLMode:  getEnv("DB_READ_SSLMODE", cfg.Database.SSLMode),
+		}
 	}
 
 	return cfg, nil

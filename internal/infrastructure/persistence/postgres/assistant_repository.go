@@ -14,14 +14,25 @@ import (
 
 // AssistantRepository implements the workflow.AssistantRepository interface
 type AssistantRepository struct {
-	pool       *pgxpool.Pool
+	writePool  *pgxpool.Pool
+	readPool   *pgxpool.Pool
 	eventStore *EventStore
 }
 
 // NewAssistantRepository creates a new assistant repository
 func NewAssistantRepository(pool *pgxpool.Pool, eventStore *EventStore) *AssistantRepository {
 	return &AssistantRepository{
-		pool:       pool,
+		writePool:  pool,
+		readPool:   pool,
+		eventStore: eventStore,
+	}
+}
+
+// NewAssistantRepositoryWithPools creates an assistant repository with separate read/write pools
+func NewAssistantRepositoryWithPools(writePool, readPool *pgxpool.Pool, eventStore *EventStore) *AssistantRepository {
+	return &AssistantRepository{
+		writePool:  writePool,
+		readPool:   readPool,
 		eventStore: eventStore,
 	}
 }
@@ -32,7 +43,7 @@ func (r *AssistantRepository) Save(ctx context.Context, assistant *workflow.Assi
 	toolsJSON, _ := json.Marshal(assistant.Tools())
 	metadataJSON, _ := json.Marshal(assistant.Metadata())
 
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.writePool.Exec(ctx, `
 		INSERT INTO assistants (id, name, description, model, instructions, tools, metadata, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`,
@@ -71,7 +82,7 @@ func (r *AssistantRepository) FindByID(ctx context.Context, id string) (*workflo
 	var toolsJSON, metadataJSON []byte
 	var createdAt, updatedAt time.Time
 
-	err := r.pool.QueryRow(ctx, `
+	err := r.writePool.QueryRow(ctx, `
 		SELECT id, name, description, model, instructions, tools, metadata, created_at, updated_at
 		FROM assistants
 		WHERE id = $1
@@ -104,7 +115,7 @@ func (r *AssistantRepository) FindByID(ctx context.Context, id string) (*workflo
 
 // List retrieves assistants with pagination
 func (r *AssistantRepository) List(ctx context.Context, limit, offset int) ([]*workflow.Assistant, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.writePool.Query(ctx, `
 		SELECT id, name, description, model, instructions, tools, metadata, created_at, updated_at
 		FROM assistants
 		ORDER BY created_at DESC
@@ -150,7 +161,7 @@ func (r *AssistantRepository) Update(ctx context.Context, assistant *workflow.As
 	toolsJSON, _ := json.Marshal(assistant.Tools())
 	metadataJSON, _ := json.Marshal(assistant.Metadata())
 
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.writePool.Exec(ctx, `
 		UPDATE assistants
 		SET name = $1, description = $2, model = $3, instructions = $4,
 		    tools = $5, metadata = $6, updated_at = $7
@@ -185,7 +196,7 @@ func (r *AssistantRepository) Update(ctx context.Context, assistant *workflow.As
 
 // Delete removes an assistant
 func (r *AssistantRepository) Delete(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM assistants WHERE id = $1`, id)
+	_, err := r.writePool.Exec(ctx, `DELETE FROM assistants WHERE id = $1`, id)
 	if err != nil {
 		return errors.Internal("failed to delete assistant", err)
 	}
@@ -228,7 +239,7 @@ func (r *AssistantRepository) Search(ctx context.Context, filters workflow.Assis
 		args = append(args, filters.Offset)
 	}
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := r.writePool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, errors.Internal("failed to search assistants", err)
 	}
@@ -282,7 +293,7 @@ func (r *AssistantRepository) Count(ctx context.Context, filters workflow.Assist
 	}
 
 	var count int
-	err := r.pool.QueryRow(ctx, query, args...).Scan(&count)
+	err := r.writePool.QueryRow(ctx, query, args...).Scan(&count)
 	if err != nil {
 		return 0, errors.Internal("failed to count assistants", err)
 	}
@@ -304,7 +315,7 @@ func (r *AssistantRepository) FindVersions(ctx context.Context, assistantID stri
 		LIMIT $2
 	`
 
-	rows, err := r.pool.Query(ctx, query, assistantID, limit)
+	rows, err := r.writePool.Query(ctx, query, assistantID, limit)
 	if err != nil {
 		return nil, errors.Internal("failed to find assistant versions", err)
 	}
@@ -350,7 +361,7 @@ func (r *AssistantRepository) SaveVersion(ctx context.Context, version workflow.
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err := r.writePool.Exec(ctx, query,
 		version.ID,
 		version.AssistantID,
 		version.Version,
@@ -377,7 +388,7 @@ func (r *AssistantRepository) SetLatestVersion(ctx context.Context, assistantID 
 		FROM assistant_versions
 		WHERE assistant_id = $1 AND version = $2
 	`
-	err := r.pool.QueryRow(ctx, query, assistantID, version).Scan(&graphID, &configJSON, &contextJSON)
+	err := r.writePool.QueryRow(ctx, query, assistantID, version).Scan(&graphID, &configJSON, &contextJSON)
 	if err != nil {
 		return errors.Internal("failed to find assistant version", err)
 	}
@@ -388,7 +399,7 @@ func (r *AssistantRepository) SetLatestVersion(ctx context.Context, assistantID 
 		SET version = $1, graph_id = $2, updated_at = $3
 		WHERE id = $4
 	`
-	_, err = r.pool.Exec(ctx, updateQuery, version, graphID, time.Now(), assistantID)
+	_, err = r.writePool.Exec(ctx, updateQuery, version, graphID, time.Now(), assistantID)
 	if err != nil {
 		return errors.Internal("failed to update assistant version", err)
 	}

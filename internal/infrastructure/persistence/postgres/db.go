@@ -17,6 +17,12 @@ type Config struct {
 	SSLMode  string
 }
 
+// Pools holds write and read connection pools for CQRS split.
+type Pools struct {
+	Write *pgxpool.Pool
+	Read  *pgxpool.Pool
+}
+
 // NewPool creates a new PostgreSQL connection pool
 func NewPool(ctx context.Context, config Config) (*pgxpool.Pool, error) {
 	connString := fmt.Sprintf(
@@ -51,9 +57,47 @@ func NewPool(ctx context.Context, config Config) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
+// NewPools creates write and read connection pools.
+// If readConfig is nil, both pools point to the same (write) database.
+func NewPools(ctx context.Context, writeConfig Config, readConfig *Config) (*Pools, error) {
+	writePool, err := NewPool(ctx, writeConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create write pool: %w", err)
+	}
+
+	var readPool *pgxpool.Pool
+	if readConfig != nil {
+		readPool, err = NewPool(ctx, *readConfig)
+		if err != nil {
+			writePool.Close()
+			return nil, fmt.Errorf("failed to create read pool: %w", err)
+		}
+	} else {
+		readPool = writePool
+	}
+
+	return &Pools{
+		Write: writePool,
+		Read:  readPool,
+	}, nil
+}
+
 // Close closes the connection pool
 func Close(pool *pgxpool.Pool) {
 	if pool != nil {
 		pool.Close()
+	}
+}
+
+// ClosePools closes both write and read pools.
+func ClosePools(pools *Pools) {
+	if pools == nil {
+		return
+	}
+	if pools.Write != nil {
+		pools.Write.Close()
+	}
+	if pools.Read != nil && pools.Read != pools.Write {
+		pools.Read.Close()
 	}
 }

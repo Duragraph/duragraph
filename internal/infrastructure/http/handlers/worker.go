@@ -13,16 +13,14 @@ import (
 
 // WorkerHandler handles worker-related HTTP requests
 type WorkerHandler struct {
-	registry        *worker.Registry
 	workerService   *service.WorkerService
 	healthThreshold time.Duration
 	baseURL         string
 }
 
 // NewWorkerHandler creates a new WorkerHandler
-func NewWorkerHandler(registry *worker.Registry, workerService *service.WorkerService, healthThreshold time.Duration, baseURL string) *WorkerHandler {
+func NewWorkerHandler(workerService *service.WorkerService, healthThreshold time.Duration, baseURL string) *WorkerHandler {
 	return &WorkerHandler{
-		registry:        registry,
 		workerService:   workerService,
 		healthThreshold: healthThreshold,
 		baseURL:         baseURL,
@@ -44,7 +42,6 @@ func (h *WorkerHandler) Register(c echo.Context) error {
 		req.Name = req.WorkerID
 	}
 
-	// Convert DTO graph definitions to domain model
 	graphDefs := make([]worker.GraphDefinition, len(req.GraphDefinitions))
 	for i, gd := range req.GraphDefinitions {
 		nodes := make([]worker.NodeDefinition, len(gd.Nodes))
@@ -73,7 +70,7 @@ func (h *WorkerHandler) Register(c echo.Context) error {
 		}
 	}
 
-	// Create and register worker
+	now := time.Now()
 	w := &worker.Worker{
 		ID:     req.WorkerID,
 		Name:   req.Name,
@@ -83,9 +80,13 @@ func (h *WorkerHandler) Register(c echo.Context) error {
 			MaxConcurrentRuns: req.Capabilities.MaxConcurrentRuns,
 		},
 		GraphDefinitions: graphDefs,
+		LastHeartbeat:    now,
+		RegisteredAt:     now,
 	}
 
-	h.registry.Register(w)
+	if err := h.workerService.WorkerRepo().Save(c.Request().Context(), w); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to register worker")
+	}
 
 	return c.JSON(http.StatusOK, dto.RegisterWorkerResponse{
 		WorkerID:       req.WorkerID,
@@ -106,7 +107,6 @@ func (h *WorkerHandler) Heartbeat(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	// Map status string to domain status
 	var status worker.Status
 	switch req.Status {
 	case "ready":
@@ -121,8 +121,8 @@ func (h *WorkerHandler) Heartbeat(c echo.Context) error {
 		status = worker.StatusReady
 	}
 
-	ok := h.registry.Heartbeat(workerID, status, req.ActiveRuns, req.TotalRuns, req.FailedRuns)
-	if !ok {
+	err := h.workerService.WorkerRepo().Heartbeat(c.Request().Context(), workerID, status, req.ActiveRuns, req.TotalRuns, req.FailedRuns)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "worker not found")
 	}
 
@@ -137,7 +137,6 @@ func (h *WorkerHandler) Poll(c echo.Context) error {
 
 	var req dto.PollRequest
 	if err := c.Bind(&req); err != nil {
-		// Allow empty body for simple poll
 		req.MaxTasks = 1
 	}
 
@@ -145,26 +144,26 @@ func (h *WorkerHandler) Poll(c echo.Context) error {
 		req.MaxTasks = 1
 	}
 
-	w, ok := h.registry.Get(workerID)
-	if !ok {
+	w, err := h.workerService.WorkerRepo().FindByID(c.Request().Context(), workerID)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "worker not found")
 	}
 
-	// Check if worker has capacity
 	if !w.HasCapacity() {
 		return c.JSON(http.StatusOK, dto.PollResponse{
 			Tasks: []dto.WorkerTask{},
 		})
 	}
 
-	// Get pending tasks from worker service
-	serviceTasks := h.workerService.PollTasks(workerID, req.MaxTasks)
+	claimed, err := h.workerService.PollTasks(c.Request().Context(), workerID, w.Capabilities.Graphs, req.MaxTasks)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to poll tasks")
+	}
 
-	// Convert to DTO
-	tasks := make([]dto.WorkerTask, len(serviceTasks))
-	for i, t := range serviceTasks {
+	tasks := make([]dto.WorkerTask, len(claimed))
+	for i, t := range claimed {
 		tasks[i] = dto.WorkerTask{
-			TaskID:      t.TaskID,
+			TaskID:      fmt.Sprintf("task-%d", t.ID),
 			RunID:       t.RunID,
 			ThreadID:    t.ThreadID,
 			AssistantID: t.AssistantID,
@@ -184,11 +183,12 @@ func (h *WorkerHandler) Poll(c echo.Context) error {
 func (h *WorkerHandler) Deregister(c echo.Context) error {
 	workerID := c.Param("worker_id")
 
-	ok := h.registry.Deregister(workerID)
+	err := h.workerService.WorkerRepo().Delete(c.Request().Context(), workerID)
+	deregistered := err == nil
 
 	return c.JSON(http.StatusOK, dto.DeregisterWorkerResponse{
 		WorkerID:     workerID,
-		Deregistered: ok,
+		Deregistered: deregistered,
 	})
 }
 
@@ -196,8 +196,8 @@ func (h *WorkerHandler) Deregister(c echo.Context) error {
 func (h *WorkerHandler) GetWorker(c echo.Context) error {
 	workerID := c.Param("worker_id")
 
-	w, ok := h.registry.Get(workerID)
-	if !ok {
+	w, err := h.workerService.WorkerRepo().FindByID(c.Request().Context(), workerID)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "worker not found")
 	}
 
@@ -206,14 +206,18 @@ func (h *WorkerHandler) GetWorker(c echo.Context) error {
 
 // ListWorkers handles GET /workers
 func (h *WorkerHandler) ListWorkers(c echo.Context) error {
-	// Check for health filter
+	ctx := c.Request().Context()
 	healthyOnly := c.QueryParam("healthy") == "true"
 
 	var workers []*worker.Worker
+	var err error
 	if healthyOnly {
-		workers = h.registry.GetHealthyWorkers(h.healthThreshold)
+		workers, err = h.workerService.WorkerRepo().FindHealthy(ctx, h.healthThreshold)
 	} else {
-		workers = h.registry.GetAllWorkers()
+		workers, err = h.workerService.WorkerRepo().FindAll(ctx)
+	}
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list workers")
 	}
 
 	responses := make([]dto.WorkerStatusResponse, len(workers))
@@ -231,8 +235,8 @@ func (h *WorkerHandler) ListWorkers(c echo.Context) error {
 func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 	workerID := c.Param("worker_id")
 
-	_, ok := h.registry.Get(workerID)
-	if !ok {
+	_, err := h.workerService.WorkerRepo().FindByID(c.Request().Context(), workerID)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "worker not found")
 	}
 
@@ -241,7 +245,6 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	// Process run status events
 	if req.EventType == "run_completed" || req.EventType == "run_failed" {
 		status := "success"
 		errMsg := ""
@@ -254,7 +257,6 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 
 		output, _ := req.Data["output"].(map[string]interface{})
 		if err := h.workerService.UpdateRunStatus(c.Request().Context(), req.RunID, status, output, errMsg); err != nil {
-			// Log but don't fail - best effort
 			c.Logger().Warnf("failed to update run status: %v", err)
 		}
 	}
@@ -268,12 +270,11 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 func (h *WorkerHandler) GetGraphDefinition(c echo.Context) error {
 	graphID := c.Param("graph_id")
 
-	graphDef, ok := h.registry.GetGraphDefinition(graphID)
-	if !ok {
+	graphDef, err := h.workerService.WorkerRepo().FindGraphDefinition(c.Request().Context(), graphID)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "graph not found")
 	}
 
-	// Convert domain model to DTO
 	nodes := make([]dto.NodeDefinition, len(graphDef.Nodes))
 	for i, n := range graphDef.Nodes {
 		nodes[i] = dto.NodeDefinition{
@@ -305,8 +306,6 @@ func (h *WorkerHandler) GetGraphDefinition(c echo.Context) error {
 func (h *WorkerHandler) WorkerService() *service.WorkerService {
 	return h.workerService
 }
-
-// Helper methods
 
 func (h *WorkerHandler) workerToResponse(w *worker.Worker) dto.WorkerStatusResponse {
 	return dto.WorkerStatusResponse{

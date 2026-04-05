@@ -14,7 +14,6 @@ import (
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
 	"github.com/duragraph/duragraph/internal/application/service"
-	"github.com/duragraph/duragraph/internal/domain/worker"
 	infra_exec "github.com/duragraph/duragraph/internal/infrastructure/execution"
 	"github.com/duragraph/duragraph/internal/infrastructure/graph"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers"
@@ -43,40 +42,63 @@ func main() {
 	fmt.Printf("🗄️  Database: %s:%d/%s\n", cfg.Database.Host, cfg.Database.Port, cfg.Database.Database)
 	fmt.Printf("📨 NATS: %s\n", cfg.NATS.URL)
 
-	ctx := context.Background()
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	defer ctxCancel()
 
-	// Initialize PostgreSQL connection pool
-	pool, err := postgres.NewPool(ctx, postgres.Config{
+	// Initialize PostgreSQL connection pools (write + read)
+	writeConfig := postgres.Config{
 		Host:     cfg.Database.Host,
 		Port:     cfg.Database.Port,
 		User:     cfg.Database.User,
 		Password: cfg.Database.Password,
 		Database: cfg.Database.Database,
 		SSLMode:  cfg.Database.SSLMode,
-	})
+	}
+
+	var readConfig *postgres.Config
+	if cfg.ReadDatabase != nil {
+		readConfig = &postgres.Config{
+			Host:     cfg.ReadDatabase.Host,
+			Port:     cfg.ReadDatabase.Port,
+			User:     cfg.ReadDatabase.User,
+			Password: cfg.ReadDatabase.Password,
+			Database: cfg.ReadDatabase.Database,
+			SSLMode:  cfg.ReadDatabase.SSLMode,
+		}
+	}
+
+	pools, err := postgres.NewPools(ctx, writeConfig, readConfig)
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
-	defer postgres.Close(pool)
+	defer postgres.ClosePools(pools)
 
-	fmt.Println("✅ Database connected")
+	if readConfig != nil {
+		fmt.Println("✅ Database connected (write + read replica)")
+	} else {
+		fmt.Println("✅ Database connected (single instance)")
+	}
 
 	// Initialize event bus
 	eventBus := eventbus.New()
 
-	// Initialize event store and outbox
-	eventStore := postgres.NewEventStore(pool)
-	outbox := postgres.NewOutbox(pool)
+	// Initialize event store and outbox (always use write pool)
+	eventStore := postgres.NewEventStore(pools.Write)
+	outbox := postgres.NewOutbox(pools.Write)
 
-	// Initialize repositories
-	runRepo := postgres.NewRunRepository(pool, eventStore)
-	assistantRepo := postgres.NewAssistantRepository(pool, eventStore)
-	threadRepo := postgres.NewThreadRepository(pool, eventStore)
-	graphRepo := postgres.NewGraphRepository(pool, eventStore)
-	interruptRepo := postgres.NewInterruptRepository(pool, eventStore)
-	checkpointRepo := postgres.NewCheckpointRepository(pool)
+	// Initialize repositories with read/write split
+	runRepo := postgres.NewRunRepositoryWithPools(pools.Write, pools.Read, eventStore)
+	assistantRepo := postgres.NewAssistantRepositoryWithPools(pools.Write, pools.Read, eventStore)
+	threadRepo := postgres.NewThreadRepositoryWithPools(pools.Write, pools.Read, eventStore)
+	graphRepo := postgres.NewGraphRepositoryWithPools(pools.Write, pools.Read, eventStore)
+	interruptRepo := postgres.NewInterruptRepositoryWithPools(pools.Write, pools.Read, eventStore)
+	checkpointRepo := postgres.NewCheckpointRepositoryWithPools(pools.Write, pools.Read)
 
-	// Initialize NATS publisher
+	// Initialize persistent worker + task repositories
+	workerRepo := postgres.NewWorkerRepository(pools.Write)
+	taskRepo := postgres.NewTaskAssignmentRepository(pools.Write)
+
+	// Initialize NATS publisher (Watermill)
 	logger := watermill.NewStdLogger(false, false)
 	publisher, err := nats.NewPublisher(cfg.NATS.URL, logger)
 	if err != nil {
@@ -86,7 +108,7 @@ func main() {
 
 	fmt.Println("✅ NATS publisher connected")
 
-	// Initialize NATS subscriber
+	// Initialize NATS subscriber (Watermill)
 	subscriber, err := nats.NewSubscriber(cfg.NATS.URL, "duragraph-server", logger)
 	if err != nil {
 		log.Fatalf("failed to create NATS subscriber: %v", err)
@@ -94,6 +116,15 @@ func main() {
 	defer subscriber.Close()
 
 	fmt.Println("✅ NATS subscriber connected")
+
+	// Initialize NATS task queue (raw nats.go for JetStream work queue)
+	taskQueue, err := nats.NewTaskQueue(cfg.NATS.URL)
+	if err != nil {
+		log.Fatalf("failed to create NATS task queue: %v", err)
+	}
+	defer taskQueue.Close()
+
+	fmt.Println("✅ NATS task queue connected")
 
 	// Start outbox relay worker
 	outboxRelay := messaging.NewOutboxRelay(outbox, publisher, 1*time.Second, 10)
@@ -121,20 +152,54 @@ func main() {
 
 	fmt.Println("✅ Streaming bridge started")
 
-	// Initialize worker registry
-	workerRegistry := worker.NewRegistry()
-
-	fmt.Println("✅ Worker registry initialized")
-
-	// Initialize worker service
+	// Initialize worker service (persistent PostgreSQL + NATS)
 	workerService := service.NewWorkerService(
-		workerRegistry,
+		workerRepo,
+		taskRepo,
 		runRepo,
 		assistantRepo,
+		taskQueue,
 		30*time.Second, // Health threshold
 	)
 
-	fmt.Println("✅ Worker service initialized")
+	fmt.Println("✅ Worker service initialized (PostgreSQL + NATS)")
+
+	// Start lease monitor goroutine
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := workerService.MonitorExpiredLeases(ctx); err != nil {
+					log.Printf("lease monitor error: %v", err)
+				}
+			}
+		}
+	}()
+
+	fmt.Println("✅ Lease monitor started (30s interval)")
+
+	// Start stale worker cleanup goroutine
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				removed, err := workerRepo.CleanupStale(ctx, 5*time.Minute)
+				if err != nil {
+					log.Printf("stale worker cleanup error: %v", err)
+				} else if removed > 0 {
+					log.Printf("cleaned up %d stale workers", removed)
+				}
+			}
+		}
+	}()
 
 	// Initialize Prometheus metrics
 	metrics := monitoring.NewMetrics("duragraph")
@@ -210,10 +275,11 @@ func main() {
 		eventBus,
 	)
 
-	// Wire up worker service for remote execution
+	// Wire up worker service and task queue for remote execution + NATS-based WaitForRun
 	runService.SetWorkerService(workerService)
+	runService.SetTaskQueue(taskQueue)
 
-	fmt.Println("✅ Run service configured with worker dispatch")
+	fmt.Println("✅ Run service configured with worker dispatch + NATS events")
 
 	// Initialize HTTP handlers
 	runHandler := handlers.NewRunHandler(
@@ -260,7 +326,6 @@ func main() {
 		copyThreadHandler,
 	)
 	workerHandler := handlers.NewWorkerHandler(
-		workerRegistry,
 		workerService,
 		30*time.Second, // Health threshold
 		fmt.Sprintf("http://%s", cfg.ServerAddr()),
@@ -400,9 +465,12 @@ func main() {
 
 	fmt.Println("\n🛑 Shutting down gracefully...")
 
+	// Cancel context to stop background goroutines
+	ctxCancel()
+
 	// Shutdown with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 
 	if err := e.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown error: %v", err)

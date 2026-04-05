@@ -14,14 +14,25 @@ import (
 
 // ThreadRepository implements the workflow.ThreadRepository interface
 type ThreadRepository struct {
-	pool       *pgxpool.Pool
+	writePool  *pgxpool.Pool
+	readPool   *pgxpool.Pool
 	eventStore *EventStore
 }
 
 // NewThreadRepository creates a new thread repository
 func NewThreadRepository(pool *pgxpool.Pool, eventStore *EventStore) *ThreadRepository {
 	return &ThreadRepository{
-		pool:       pool,
+		writePool:  pool,
+		readPool:   pool,
+		eventStore: eventStore,
+	}
+}
+
+// NewThreadRepositoryWithPools creates a thread repository with separate read/write pools
+func NewThreadRepositoryWithPools(writePool, readPool *pgxpool.Pool, eventStore *EventStore) *ThreadRepository {
+	return &ThreadRepository{
+		writePool:  writePool,
+		readPool:   readPool,
 		eventStore: eventStore,
 	}
 }
@@ -31,7 +42,7 @@ func (r *ThreadRepository) Save(ctx context.Context, thread *workflow.Thread) er
 	// Save thread to CRUD table
 	metadataJSON, _ := json.Marshal(thread.Metadata())
 
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.writePool.Exec(ctx, `
 		INSERT INTO threads (id, metadata, created_at, updated_at)
 		VALUES ($1, $2, $3, $4)
 	`,
@@ -48,7 +59,7 @@ func (r *ThreadRepository) Save(ctx context.Context, thread *workflow.Thread) er
 	// Save messages to messages table
 	for _, msg := range thread.Messages() {
 		msgMetadataJSON, _ := json.Marshal(msg.Metadata)
-		_, err = r.pool.Exec(ctx, `
+		_, err = r.writePool.Exec(ctx, `
 			INSERT INTO messages (id, thread_id, role, content, metadata, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (id) DO NOTHING
@@ -91,7 +102,7 @@ func (r *ThreadRepository) FindByID(ctx context.Context, id string) (*workflow.T
 	var metadataJSON []byte
 	var createdAt, updatedAt time.Time
 
-	err := r.pool.QueryRow(ctx, `
+	err := r.writePool.QueryRow(ctx, `
 		SELECT id, metadata, created_at, updated_at
 		FROM threads
 		WHERE id = $1
@@ -108,7 +119,7 @@ func (r *ThreadRepository) FindByID(ctx context.Context, id string) (*workflow.T
 	json.Unmarshal(metadataJSON, &metadata)
 
 	// Load messages from messages table
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.writePool.Query(ctx, `
 		SELECT id, role, content, metadata, created_at
 		FROM messages
 		WHERE thread_id = $1
@@ -156,7 +167,7 @@ func (r *ThreadRepository) FindByID(ctx context.Context, id string) (*workflow.T
 
 // List retrieves threads with pagination
 func (r *ThreadRepository) List(ctx context.Context, limit, offset int) ([]*workflow.Thread, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.writePool.Query(ctx, `
 		SELECT id, metadata, created_at, updated_at
 		FROM threads
 		ORDER BY created_at DESC
@@ -184,7 +195,7 @@ func (r *ThreadRepository) List(ctx context.Context, limit, offset int) ([]*work
 		json.Unmarshal(metadataJSON, &metadata)
 
 		// Load messages for this thread
-		msgRows, err := r.pool.Query(ctx, `
+		msgRows, err := r.writePool.Query(ctx, `
 			SELECT id, role, content, metadata, created_at
 			FROM messages
 			WHERE thread_id = $1
@@ -227,7 +238,7 @@ func (r *ThreadRepository) List(ctx context.Context, limit, offset int) ([]*work
 func (r *ThreadRepository) Update(ctx context.Context, thread *workflow.Thread) error {
 	metadataJSON, _ := json.Marshal(thread.Metadata())
 
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.writePool.Exec(ctx, `
 		UPDATE threads
 		SET metadata = $1, updated_at = $2
 		WHERE id = $3
@@ -241,7 +252,7 @@ func (r *ThreadRepository) Update(ctx context.Context, thread *workflow.Thread) 
 	// This is a simplified approach - in production would track which messages are new
 	for _, msg := range thread.Messages() {
 		msgMetadataJSON, _ := json.Marshal(msg.Metadata)
-		_, err = r.pool.Exec(ctx, `
+		_, err = r.writePool.Exec(ctx, `
 			INSERT INTO messages (id, thread_id, role, content, metadata, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (id) DO NOTHING
@@ -277,7 +288,7 @@ func (r *ThreadRepository) Update(ctx context.Context, thread *workflow.Thread) 
 
 // Delete removes a thread
 func (r *ThreadRepository) Delete(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM threads WHERE id = $1`, id)
+	_, err := r.writePool.Exec(ctx, `DELETE FROM threads WHERE id = $1`, id)
 	if err != nil {
 		return errors.Internal("failed to delete thread", err)
 	}
@@ -320,7 +331,7 @@ func (r *ThreadRepository) Search(ctx context.Context, filters workflow.ThreadSe
 		args = append(args, filters.Offset)
 	}
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := r.writePool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, errors.Internal("failed to search threads", err)
 	}
@@ -369,7 +380,7 @@ func (r *ThreadRepository) Count(ctx context.Context, filters workflow.ThreadSea
 	}
 
 	var count int
-	err := r.pool.QueryRow(ctx, query, args...).Scan(&count)
+	err := r.writePool.QueryRow(ctx, query, args...).Scan(&count)
 	if err != nil {
 		return 0, errors.Internal("failed to count threads", err)
 	}

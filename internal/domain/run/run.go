@@ -25,6 +25,12 @@ type Run struct {
 	completedAt       *time.Time
 	updatedAt         time.Time
 
+	// Worker tracking
+	workerID        string
+	retryCount      int
+	leaseExpiresAt  *time.Time
+	lastHeartbeatAt *time.Time
+
 	// Uncommitted events
 	events []eventbus.Event
 }
@@ -215,6 +221,54 @@ func (r *Run) CompletedAt() *time.Time {
 // UpdatedAt returns the last update time
 func (r *Run) UpdatedAt() time.Time {
 	return r.updatedAt
+}
+
+// WorkerID returns the assigned worker ID
+func (r *Run) WorkerID() string {
+	return r.workerID
+}
+
+// RetryCount returns the number of retry attempts
+func (r *Run) RetryCount() int {
+	return r.retryCount
+}
+
+// LeaseExpiresAt returns the lease expiration time
+func (r *Run) LeaseExpiresAt() *time.Time {
+	return r.leaseExpiresAt
+}
+
+// LastHeartbeatAt returns the last worker heartbeat time
+func (r *Run) LastHeartbeatAt() *time.Time {
+	return r.lastHeartbeatAt
+}
+
+// AssignToWorker assigns the run to a worker with a lease
+func (r *Run) AssignToWorker(workerID string, leaseDuration time.Duration) {
+	now := time.Now()
+	expiry := now.Add(leaseDuration)
+	r.workerID = workerID
+	r.leaseExpiresAt = &expiry
+	r.lastHeartbeatAt = &now
+	r.updatedAt = now
+}
+
+// WorkerHeartbeat extends the lease for the assigned worker
+func (r *Run) WorkerHeartbeat(leaseDuration time.Duration) {
+	now := time.Now()
+	expiry := now.Add(leaseDuration)
+	r.leaseExpiresAt = &expiry
+	r.lastHeartbeatAt = &now
+	r.updatedAt = now
+}
+
+// IncrementRetry increments the retry count
+func (r *Run) IncrementRetry() {
+	r.retryCount++
+	r.workerID = ""
+	r.leaseExpiresAt = nil
+	r.lastHeartbeatAt = nil
+	r.updatedAt = time.Now()
 }
 
 // Start transitions the run to in-progress status
@@ -447,6 +501,10 @@ type RunData struct {
 	StartedAt         *time.Time
 	CompletedAt       *time.Time
 	UpdatedAt         time.Time
+	WorkerID          string
+	RetryCount        int
+	LeaseExpiresAt    *time.Time
+	LastHeartbeatAt   *time.Time
 }
 
 // ReconstructFromData rebuilds a Run from database projection data
@@ -501,6 +559,10 @@ func ReconstructFromData(data RunData) *Run {
 		startedAt:         data.StartedAt,
 		completedAt:       data.CompletedAt,
 		updatedAt:         data.UpdatedAt,
+		workerID:          data.WorkerID,
+		retryCount:        data.RetryCount,
+		leaseExpiresAt:    data.LeaseExpiresAt,
+		lastHeartbeatAt:   data.LastHeartbeatAt,
 		events:            make([]eventbus.Event, 0),
 	}
 }
