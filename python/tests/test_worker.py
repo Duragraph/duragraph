@@ -74,7 +74,8 @@ class TestWorkerLifecycle:
         assert "/api/v1/workers/register" in call_args[0][0]
         payload = call_args[1]["json"]
         assert payload["name"] == worker.name
-        assert payload["status"] == WorkerStatus.STARTING.value
+        assert "worker_id" in payload
+        assert "capabilities" in payload
 
     async def test_worker_registration_retry(self, mock_httpx_client, simple_graph):
         """Test worker registration with retries on failure."""
@@ -129,10 +130,9 @@ class TestWorkerLifecycle:
         # Verify payload
         payload = call_args[1]["json"]
         assert payload["status"] == "ready"
-        assert payload["metrics"]["active_runs"] == 2
-        assert payload["metrics"]["runs_completed"] == 5
-        assert payload["metrics"]["runs_failed"] == 1
-        assert payload["metrics"]["uptime_seconds"] >= 100
+        assert payload["active_runs"] == 2
+        assert payload["total_runs"] == 6
+        assert payload["failed_runs"] == 1
 
     async def test_heartbeat_reregistration_on_404(self, mock_httpx_client):
         """Test worker re-registers when heartbeat returns 404."""

@@ -291,6 +291,7 @@ class GraphInstance:
         *,
         worker_name: str | None = None,
         capabilities: list[str] | None = None,
+        nats_url: str | None = None,
     ) -> None:
         """Register and serve this graph on the control plane.
 
@@ -298,6 +299,7 @@ class GraphInstance:
             control_plane_url: URL of the DuraGraph control plane.
             worker_name: Optional name for the worker.
             capabilities: Optional list of worker capabilities.
+            nats_url: Optional NATS URL for JetStream task subscription.
         """
         from duragraph.worker import Worker
 
@@ -305,8 +307,9 @@ class GraphInstance:
             control_plane_url=control_plane_url,
             name=worker_name,
             capabilities=capabilities,
+            nats_url=nats_url,
         )
-        worker.register_graph(self._definition)
+        worker.register_graph(self._definition, instance=self._instance)
         worker.run()
 
     async def aserve(
@@ -315,6 +318,7 @@ class GraphInstance:
         *,
         worker_name: str | None = None,
         capabilities: list[str] | None = None,
+        nats_url: str | None = None,
     ) -> None:
         """Async version of serve().
 
@@ -322,6 +326,7 @@ class GraphInstance:
             control_plane_url: URL of the DuraGraph control plane.
             worker_name: Optional name for the worker.
             capabilities: Optional list of worker capabilities.
+            nats_url: Optional NATS URL for JetStream task subscription.
         """
         from duragraph.worker import Worker
 
@@ -329,8 +334,9 @@ class GraphInstance:
             control_plane_url=control_plane_url,
             name=worker_name,
             capabilities=capabilities,
+            nats_url=nats_url,
         )
-        worker.register_graph(self._definition)
+        worker.register_graph(self._definition, instance=self._instance)
         await worker.arun()
 
 

@@ -10,7 +10,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
-    { name = "DuraGraph Team", email = "team@duragraph.io" }
+    { name = "DuraGraph Team", email = "team@duragraph.ai" }
 ]
 keywords = [
     "ai",
@@ -41,9 +41,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+nats = ["nats-py>=2.7.0"]
 openai = ["openai>=1.0.0"]
 anthropic = ["anthropic>=0.30.0"]
 all = [
+    "nats-py>=2.7.0",
     "openai>=1.0.0",
     "anthropic>=0.30.0",
     "opentelemetry-api>=1.20.0",
@@ -67,8 +69,8 @@ docs = [
 duragraph = "duragraph.cli.main:main"
 
 [project.urls]
-Homepage = "https://duragraph.io"
-Documentation = "https://docs.duragraph.io"
+Homepage = "https://duragraph.ai"
+Documentation = "https://docs.duragraph.ai"
 Repository = "https://github.com/duragraph/duragraph-python"
 Issues = "https://github.com/duragraph/duragraph-python/issues"
 Changelog = "https://github.com/duragraph/duragraph-python/blob/main/CHANGELOG.md"

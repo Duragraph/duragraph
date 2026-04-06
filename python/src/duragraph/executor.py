@@ -113,7 +113,7 @@ async def execute_llm_node(
 async def execute_function_node(
     node_method: Any,
     state: State,
-) -> dict[str, Any]:
+) -> Any:
     """Execute a regular function node (sync or async).
 
     Args:
@@ -121,18 +121,15 @@ async def execute_function_node(
         state: Current state.
 
     Returns:
-        State updates from the node.
+        The raw result from the node method. Callers should check if it's
+        a dict for state updates, or a string for routing decisions.
     """
-    # The node_method is already the wrapped function from the decorator
-    # which preserves the async nature
     if inspect.iscoroutinefunction(node_method):
         result = await node_method(state)
     else:
         result = node_method(state)
 
-    if isinstance(result, dict):
-        return result
-    return {}
+    return result
 
 
 async def execute_node(
@@ -140,7 +137,7 @@ async def execute_node(
     metadata: NodeMetadata,
     node_method: Any,
     state: State,
-) -> dict[str, Any]:
+) -> Any:
     """Execute a node based on its type.
 
     Args:
@@ -150,7 +147,9 @@ async def execute_node(
         state: Current state.
 
     Returns:
-        State updates from the node.
+        For LLM nodes, always returns a dict of state updates.
+        For function/tool/router/human nodes, returns the raw result
+        (may be a dict, string, or None).
     """
     node_type = metadata.node_type
 
