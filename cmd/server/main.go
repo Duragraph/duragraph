@@ -224,6 +224,8 @@ func main() {
 		getRunHandler,
 		listRunsHandler,
 		runService,
+		subscriber,
+		eventBus,
 	)
 	assistantHandler := handlers.NewAssistantHandler(
 		createAssistantHandler,
