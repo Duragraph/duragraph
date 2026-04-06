@@ -7,6 +7,7 @@ import (
 
 	"github.com/duragraph/duragraph/internal/pkg/errors"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,7 +21,7 @@ func NewEventStore(pool *pgxpool.Pool) *EventStore {
 	return &EventStore{pool: pool}
 }
 
-// SaveEvents saves events to the event store and outbox
+// SaveEvents saves events to the event store and outbox in its own transaction.
 func (s *EventStore) SaveEvents(ctx context.Context, streamID, aggregateType, aggregateID string, events []eventbus.Event) error {
 	if len(events) == 0 {
 		return nil
@@ -32,9 +33,30 @@ func (s *EventStore) SaveEvents(ctx context.Context, streamID, aggregateType, ag
 	}
 	defer tx.Rollback(ctx)
 
+	if err := s.saveEventsWithTx(ctx, tx, streamID, aggregateType, aggregateID, events); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return errors.Internal("failed to commit transaction", err)
+	}
+
+	return nil
+}
+
+// SaveEventsInTx saves events within an existing transaction for atomic writes.
+func (s *EventStore) SaveEventsInTx(ctx context.Context, tx pgx.Tx, streamID, aggregateType, aggregateID string, events []eventbus.Event) error {
+	return s.saveEventsWithTx(ctx, tx, streamID, aggregateType, aggregateID, events)
+}
+
+func (s *EventStore) saveEventsWithTx(ctx context.Context, tx pgx.Tx, streamID, aggregateType, aggregateID string, events []eventbus.Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+
 	// Ensure stream exists
 	var existingStreamID string
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		INSERT INTO event_streams (stream_id, aggregate_type, aggregate_id, version)
 		VALUES ($1, $2, $3, 0)
 		ON CONFLICT (aggregate_type, aggregate_id)
@@ -79,11 +101,6 @@ func (s *EventStore) SaveEvents(ctx context.Context, streamID, aggregateType, ag
 		if err != nil {
 			return errors.Internal("failed to save event", err)
 		}
-	}
-
-	// Commit transaction (this will trigger the outbox population via trigger)
-	if err := tx.Commit(ctx); err != nil {
-		return errors.Internal("failed to commit transaction", err)
 	}
 
 	return nil

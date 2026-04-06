@@ -13,14 +13,25 @@ import (
 
 // GraphRepository implements the workflow.GraphRepository interface
 type GraphRepository struct {
-	pool       *pgxpool.Pool
+	writePool  *pgxpool.Pool
+	readPool   *pgxpool.Pool
 	eventStore *EventStore
 }
 
 // NewGraphRepository creates a new graph repository
 func NewGraphRepository(pool *pgxpool.Pool, eventStore *EventStore) *GraphRepository {
 	return &GraphRepository{
-		pool:       pool,
+		writePool:  pool,
+		readPool:   pool,
+		eventStore: eventStore,
+	}
+}
+
+// NewGraphRepositoryWithPools creates a graph repository with separate read/write pools
+func NewGraphRepositoryWithPools(writePool, readPool *pgxpool.Pool, eventStore *EventStore) *GraphRepository {
+	return &GraphRepository{
+		writePool:  writePool,
+		readPool:   readPool,
 		eventStore: eventStore,
 	}
 }
@@ -32,7 +43,7 @@ func (r *GraphRepository) Save(ctx context.Context, graph *workflow.Graph) error
 	edgesJSON, _ := json.Marshal(graph.Edges())
 	configJSON, _ := json.Marshal(graph.Config())
 
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.writePool.Exec(ctx, `
 		INSERT INTO graphs (id, assistant_id, name, version, description, nodes, edges, config, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`,
@@ -72,7 +83,7 @@ func (r *GraphRepository) FindByID(ctx context.Context, id string) (*workflow.Gr
 	var nodesJSON, edgesJSON, configJSON []byte
 	var createdAt, updatedAt time.Time
 
-	err := r.pool.QueryRow(ctx, `
+	err := r.writePool.QueryRow(ctx, `
 		SELECT id, assistant_id, name, version, description, nodes, edges, config, created_at, updated_at
 		FROM graphs
 		WHERE id = $1
@@ -104,7 +115,7 @@ func (r *GraphRepository) FindByID(ctx context.Context, id string) (*workflow.Gr
 
 // FindByAssistantID retrieves graphs for a specific assistant
 func (r *GraphRepository) FindByAssistantID(ctx context.Context, assistantID string) ([]*workflow.Graph, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.writePool.Query(ctx, `
 		SELECT id, assistant_id, name, version, description, nodes, edges, config, created_at, updated_at
 		FROM graphs
 		WHERE assistant_id = $1
@@ -150,7 +161,7 @@ func (r *GraphRepository) FindByAssistantIDAndVersion(ctx context.Context, assis
 	var nodesJSON, edgesJSON, configJSON []byte
 	var createdAt, updatedAt time.Time
 
-	err := r.pool.QueryRow(ctx, `
+	err := r.writePool.QueryRow(ctx, `
 		SELECT id, assistant_id, name, version, description, nodes, edges, config, created_at, updated_at
 		FROM graphs
 		WHERE assistant_id = $1 AND version = $2
@@ -186,7 +197,7 @@ func (r *GraphRepository) Update(ctx context.Context, graph *workflow.Graph) err
 	edgesJSON, _ := json.Marshal(graph.Edges())
 	configJSON, _ := json.Marshal(graph.Config())
 
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.writePool.Exec(ctx, `
 		UPDATE graphs
 		SET name = $1, description = $2, nodes = $3, edges = $4, config = $5, updated_at = $6
 		WHERE id = $7
@@ -219,7 +230,7 @@ func (r *GraphRepository) Update(ctx context.Context, graph *workflow.Graph) err
 
 // Delete removes a graph
 func (r *GraphRepository) Delete(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM graphs WHERE id = $1`, id)
+	_, err := r.writePool.Exec(ctx, `DELETE FROM graphs WHERE id = $1`, id)
 	if err != nil {
 		return errors.Internal("failed to delete graph", err)
 	}

@@ -13,14 +13,25 @@ import (
 
 // InterruptRepository implements the humanloop.Repository interface
 type InterruptRepository struct {
-	pool       *pgxpool.Pool
+	writePool  *pgxpool.Pool
+	readPool   *pgxpool.Pool
 	eventStore *EventStore
 }
 
 // NewInterruptRepository creates a new interrupt repository
 func NewInterruptRepository(pool *pgxpool.Pool, eventStore *EventStore) *InterruptRepository {
 	return &InterruptRepository{
-		pool:       pool,
+		writePool:  pool,
+		readPool:   pool,
+		eventStore: eventStore,
+	}
+}
+
+// NewInterruptRepositoryWithPools creates an interrupt repository with separate read/write pools
+func NewInterruptRepositoryWithPools(writePool, readPool *pgxpool.Pool, eventStore *EventStore) *InterruptRepository {
+	return &InterruptRepository{
+		writePool:  writePool,
+		readPool:   readPool,
 		eventStore: eventStore,
 	}
 }
@@ -31,7 +42,7 @@ func (r *InterruptRepository) Save(ctx context.Context, interrupt *humanloop.Int
 	stateJSON, _ := json.Marshal(interrupt.State())
 	toolCallsJSON, _ := json.Marshal(interrupt.ToolCalls())
 
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.writePool.Exec(ctx, `
 		INSERT INTO interrupts (id, run_id, node_id, reason, state, tool_calls, resolved, resolved_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`,
@@ -72,7 +83,7 @@ func (r *InterruptRepository) FindByID(ctx context.Context, id string) (*humanlo
 	var resolvedAt *time.Time
 	var createdAt time.Time
 
-	err := r.pool.QueryRow(ctx, `
+	err := r.writePool.QueryRow(ctx, `
 		SELECT id, run_id, node_id, reason, state, tool_calls, resolved, resolved_at, created_at
 		FROM interrupts
 		WHERE id = $1
@@ -102,7 +113,7 @@ func (r *InterruptRepository) FindByID(ctx context.Context, id string) (*humanlo
 
 // FindByRunID retrieves interrupts for a specific run
 func (r *InterruptRepository) FindByRunID(ctx context.Context, runID string) ([]*humanloop.Interrupt, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.writePool.Query(ctx, `
 		SELECT id, run_id, node_id, reason, state, tool_calls, resolved, resolved_at, created_at
 		FROM interrupts
 		WHERE run_id = $1
@@ -144,7 +155,7 @@ func (r *InterruptRepository) FindByRunID(ctx context.Context, runID string) ([]
 
 // FindUnresolvedByRunID retrieves unresolved interrupts for a run
 func (r *InterruptRepository) FindUnresolvedByRunID(ctx context.Context, runID string) ([]*humanloop.Interrupt, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := r.writePool.Query(ctx, `
 		SELECT id, run_id, node_id, reason, state, tool_calls, resolved, resolved_at, created_at
 		FROM interrupts
 		WHERE run_id = $1 AND resolved = FALSE
@@ -189,7 +200,7 @@ func (r *InterruptRepository) Update(ctx context.Context, interrupt *humanloop.I
 	stateJSON, _ := json.Marshal(interrupt.State())
 	toolCallsJSON, _ := json.Marshal(interrupt.ToolCalls())
 
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.writePool.Exec(ctx, `
 		UPDATE interrupts
 		SET state = $1, tool_calls = $2, resolved = $3, resolved_at = $4
 		WHERE id = $5
@@ -220,7 +231,7 @@ func (r *InterruptRepository) Update(ctx context.Context, interrupt *humanloop.I
 
 // Delete removes an interrupt
 func (r *InterruptRepository) Delete(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM interrupts WHERE id = $1`, id)
+	_, err := r.writePool.Exec(ctx, `DELETE FROM interrupts WHERE id = $1`, id)
 	if err != nil {
 		return errors.Internal("failed to delete interrupt", err)
 	}
