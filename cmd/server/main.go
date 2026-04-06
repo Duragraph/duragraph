@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -348,6 +349,24 @@ func main() {
 	e.Use(middleware.Metrics(metrics))
 	e.Use(echomiddleware.Recover())
 	e.Use(echomiddleware.CORS())
+
+	// Optional rate limiting (configurable via env vars)
+	if os.Getenv("RATE_LIMIT_ENABLED") == "true" {
+		rps := 10.0
+		burst := 20
+		if v := os.Getenv("RATE_LIMIT_RPS"); v != "" {
+			if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+				rps = parsed
+			}
+		}
+		if v := os.Getenv("RATE_LIMIT_BURST"); v != "" {
+			if parsed, err := strconv.Atoi(v); err == nil {
+				burst = parsed
+			}
+		}
+		e.Use(middleware.SimpleRateLimit(rps, burst))
+		fmt.Printf("\u2705 Rate limiting enabled (%.0f req/s, burst %d)\n", rps, burst)
+	}
 
 	// Optional authentication (can be made required by setting env var)
 	authEnabled := os.Getenv("AUTH_ENABLED") == "true"
