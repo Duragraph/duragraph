@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/run"
@@ -51,8 +52,8 @@ func (r *RunRepository) Save(ctx context.Context, runAgg *run.Run) error {
 	_, err = tx.Exec(ctx, `
 		INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata, config,
 		                  multitask_strategy, worker_id, retry_count, lease_expires_at,
-		                  last_heartbeat_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		                  last_heartbeat_at, version, lease_epoch, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 	`,
 		runAgg.ID(),
 		runAgg.ThreadID(),
@@ -66,6 +67,8 @@ func (r *RunRepository) Save(ctx context.Context, runAgg *run.Run) error {
 		runAgg.RetryCount(),
 		runAgg.LeaseExpiresAt(),
 		runAgg.LastHeartbeatAt(),
+		runAgg.Version(),
+		runAgg.LeaseEpoch(),
 		runAgg.CreatedAt(),
 		runAgg.UpdatedAt(),
 	)
@@ -104,19 +107,20 @@ func (r *RunRepository) findByID(ctx context.Context, pool *pgxpool.Pool, id str
 	var inputJSON, outputJSON, metadataJSON, configJSON []byte
 	var createdAt, updatedAt time.Time
 	var startedAt, completedAt, leaseExpiresAt, lastHeartbeatAt *time.Time
-	var retryCount int
+	var retryCount, version, leaseEpoch int
 
 	err := pool.QueryRow(ctx, `
 		SELECT id, thread_id, assistant_id, status, input, output, error, metadata,
 		       config, multitask_strategy, worker_id, retry_count, lease_expires_at,
-		       last_heartbeat_at, created_at, started_at, completed_at, updated_at
+		       last_heartbeat_at, version, lease_epoch,
+		       created_at, started_at, completed_at, updated_at
 		FROM runs
 		WHERE id = $1
 	`, id).Scan(
 		&runID, &threadID, &assistantID, &status,
 		&inputJSON, &outputJSON, &errorMsg, &metadataJSON,
 		&configJSON, &multitaskStrategy, &workerID, &retryCount,
-		&leaseExpiresAt, &lastHeartbeatAt,
+		&leaseExpiresAt, &lastHeartbeatAt, &version, &leaseEpoch,
 		&createdAt, &startedAt, &completedAt, &updatedAt,
 	)
 
@@ -160,6 +164,8 @@ func (r *RunRepository) findByID(ctx context.Context, pool *pgxpool.Pool, id str
 		RetryCount:        retryCount,
 		LeaseExpiresAt:    leaseExpiresAt,
 		LastHeartbeatAt:   lastHeartbeatAt,
+		Version:           version,
+		LeaseEpoch:        leaseEpoch,
 		CreatedAt:         createdAt,
 		StartedAt:         startedAt,
 		CompletedAt:       completedAt,
@@ -355,9 +361,13 @@ func (r *RunRepository) FindActiveByThreadID(ctx context.Context, threadID strin
 }
 
 // Update updates an existing run atomically (projection + events in single transaction).
+// Uses optimistic concurrency control: the update only succeeds if the version matches.
 func (r *RunRepository) Update(ctx context.Context, runAgg *run.Run) error {
 	outputJSON, _ := json.Marshal(runAgg.Output())
 	metadataJSON, _ := json.Marshal(runAgg.Metadata())
+
+	expectedVersion := runAgg.Version()
+	runAgg.IncrementVersion()
 
 	tx, err := r.writePool.Begin(ctx)
 	if err != nil {
@@ -365,13 +375,13 @@ func (r *RunRepository) Update(ctx context.Context, runAgg *run.Run) error {
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE runs
 		SET status = $1, output = $2, error = $3, metadata = $4,
 		    started_at = $5, completed_at = $6, updated_at = $7,
 		    worker_id = $8, retry_count = $9, lease_expires_at = $10,
-		    last_heartbeat_at = $11
-		WHERE id = $12
+		    last_heartbeat_at = $11, version = $13, lease_epoch = $14
+		WHERE id = $12 AND version = $15
 	`,
 		runAgg.Status(),
 		outputJSON,
@@ -385,10 +395,17 @@ func (r *RunRepository) Update(ctx context.Context, runAgg *run.Run) error {
 		runAgg.LeaseExpiresAt(),
 		runAgg.LastHeartbeatAt(),
 		runAgg.ID(),
+		runAgg.Version(),
+		runAgg.LeaseEpoch(),
+		expectedVersion,
 	)
 
 	if err != nil {
 		return errors.Internal("failed to update run", err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("optimistic concurrency conflict: run %s was modified by another instance", runAgg.ID())
 	}
 
 	if len(runAgg.Events()) > 0 {
@@ -429,17 +446,20 @@ func (r *RunRepository) LoadFromEvents(ctx context.Context, id string) (*run.Run
 	return r.FindByIDConsistent(ctx, id)
 }
 
-// FindExpiredLeases finds runs with expired worker leases
+// FindExpiredLeases finds runs with expired worker leases.
+// Uses FOR UPDATE SKIP LOCKED to prevent multiple instances from processing the same expired lease.
 func (r *RunRepository) FindExpiredLeases(ctx context.Context) ([]*run.Run, error) {
 	rows, err := r.writePool.Query(ctx, `
 		SELECT id, thread_id, assistant_id, status, input, output, error, metadata,
 		       config, multitask_strategy, worker_id, retry_count, lease_expires_at,
-		       last_heartbeat_at, created_at, started_at, completed_at, updated_at
+		       last_heartbeat_at, version, lease_epoch,
+		       created_at, started_at, completed_at, updated_at
 		FROM runs
 		WHERE status IN ('in_progress', 'running')
 		  AND lease_expires_at IS NOT NULL
 		  AND lease_expires_at < NOW()
 		ORDER BY lease_expires_at ASC
+		FOR UPDATE SKIP LOCKED
 	`)
 	if err != nil {
 		return nil, errors.Internal("failed to find expired leases", err)
@@ -453,13 +473,13 @@ func (r *RunRepository) FindExpiredLeases(ctx context.Context) ([]*run.Run, erro
 		var inputJSON, outputJSON, metadataJSON, configJSON []byte
 		var createdAt, updatedAt time.Time
 		var startedAt, completedAt, leaseExpiresAt, lastHeartbeatAt *time.Time
-		var retryCount int
+		var retryCount, version, leaseEpoch int
 
 		err := rows.Scan(
 			&runID, &threadID, &assistantID, &status,
 			&inputJSON, &outputJSON, &errorMsg, &metadataJSON,
 			&configJSON, &multitaskStrategy, &workerID, &retryCount,
-			&leaseExpiresAt, &lastHeartbeatAt,
+			&leaseExpiresAt, &lastHeartbeatAt, &version, &leaseEpoch,
 			&createdAt, &startedAt, &completedAt, &updatedAt,
 		)
 		if err != nil {
@@ -500,6 +520,8 @@ func (r *RunRepository) FindExpiredLeases(ctx context.Context) ([]*run.Run, erro
 			RetryCount:        retryCount,
 			LeaseExpiresAt:    leaseExpiresAt,
 			LastHeartbeatAt:   lastHeartbeatAt,
+			Version:           version,
+			LeaseEpoch:        leaseEpoch,
 			CreatedAt:         createdAt,
 			StartedAt:         startedAt,
 			CompletedAt:       completedAt,

@@ -80,7 +80,13 @@ func (w *Worker) IsHealthy(threshold time.Duration) bool {
 	return time.Since(w.LastHeartbeat) < threshold
 }
 
-// Registry manages registered workers
+// Registry manages registered workers in-memory.
+//
+// Deprecated: Use the PostgreSQL-backed worker.Repository interface instead.
+// This in-memory registry is not safe for horizontal scaling as state is not
+// shared across replicas. It is retained only for unit testing and single-instance
+// development setups. Production deployments should use WorkerRepository from
+// internal/infrastructure/persistence/postgres.
 type Registry struct {
 	mu      sync.RWMutex
 	workers map[string]*Worker
