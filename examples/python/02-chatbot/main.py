@@ -1,160 +1,125 @@
 """
 DuraGraph Chatbot with Memory Example
 
-This example demonstrates:
-- Conversation memory across multiple runs
-- Using thread_id to track conversation context
-- LLM integration with conversation history
-- Simple in-memory conversation store
+Demonstrates:
+- Conversation memory using thread_id
+- Multi-node processing pipeline with >> edges
+- Serving as a worker on the control plane
 """
 
 import os
 from collections import defaultdict
 from typing import Any
 
-from duragraph import Graph, node
-from duragraph.worker import Worker
+from duragraph import Graph, node, entrypoint
 
 
-# Simple in-memory conversation store
-# In production, use Redis, PostgreSQL, or another persistent store
 class ConversationStore:
-    """Stores conversation history by thread_id."""
+    """In-memory conversation store keyed by thread_id."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._store: dict[str, list[dict[str, str]]] = defaultdict(list)
 
     def get_messages(self, thread_id: str) -> list[dict[str, str]]:
-        """Retrieve conversation history for a thread."""
         return self._store[thread_id].copy()
 
     def add_message(self, thread_id: str, role: str, content: str) -> None:
-        """Add a message to conversation history."""
         self._store[thread_id].append({"role": role, "content": content})
 
-    def clear(self, thread_id: str) -> None:
-        """Clear conversation history for a thread."""
-        if thread_id in self._store:
-            del self._store[thread_id]
 
-
-# Global store instance (shared across graph executions)
 conversation_store = ConversationStore()
 
 
-@Graph
+@Graph(id="chatbot_with_memory", description="A chatbot that remembers conversation history")
 class ChatbotWithMemory:
-    """A chatbot that maintains conversation history using thread_id."""
+    """Chatbot that maintains per-thread conversation history."""
 
-    @node
+    @entrypoint
+    @node()
     async def load_history(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Load conversation history from store."""
+        """Load prior messages for this thread."""
         thread_id = state.get("thread_id", "default")
-        
-        # Load existing messages for this thread
         state["messages"] = conversation_store.get_messages(thread_id)
-        
-        print(f"[load_history] Thread: {thread_id}, Messages: {len(state['messages'])}")
         return state
 
-    @node
+    @node()
     async def add_user_message(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Add the user's new message to conversation."""
+        """Append the user's new input to the message list."""
         user_input = state.get("input", "")
-        thread_id = state.get("thread_id", "default")
-        
-        if not user_input:
-            return state
-        
-        # Add user message to conversation
-        state["messages"].append({
-            "role": "user",
-            "content": user_input
-        })
-        
-        print(f"[add_user_message] User: {user_input}")
+        if user_input:
+            state.setdefault("messages", []).append(
+                {"role": "user", "content": user_input}
+            )
         return state
 
-    @node
+    @node()
     async def generate_response(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Generate AI response based on conversation history."""
-        messages = state.get("messages", [])
-        
-        # Simulate LLM response (in real implementation, call OpenAI/Anthropic)
-        # Build context from conversation history
-        context = "\n".join([
-            f"{msg['role']}: {msg['content']}" 
-            for msg in messages[-5:]  # Last 5 messages for context
-        ])
-        
-        # Simple rule-based response for demo (replace with real LLM)
-        user_message = messages[-1]["content"].lower() if messages else ""
-        
-        if "hello" in user_message or "hi" in user_message:
+        """Generate a response (rule-based demo; replace with LLM in production)."""
+        messages: list[dict[str, str]] = state.get("messages", [])
+        if not messages:
+            state["response"] = "Hello! How can I help you?"
+            return state
+
+        last = messages[-1].get("content", "").lower()
+        if any(w in last for w in ("hello", "hi", "hey")):
             response = "Hello! How can I help you today?"
-        elif "how are you" in user_message:
-            response = "I'm doing great, thank you for asking! How can I assist you?"
-        elif "bye" in user_message or "goodbye" in user_message:
-            response = "Goodbye! Feel free to come back anytime."
-        elif "name" in user_message:
-            response = "I'm DuraGraph Bot, your helpful assistant!"
+        elif "how are you" in last:
+            response = "I'm doing great, thanks for asking!"
+        elif any(w in last for w in ("bye", "goodbye")):
+            response = "Goodbye! Come back anytime."
         else:
-            # Echo with context awareness
-            msg_count = len(messages)
-            response = f"I understand you said: '{messages[-1]['content']}'. " \
-                      f"This is message #{msg_count} in our conversation. How can I help further?"
-        
+            count = len(messages)
+            response = (
+                f"You said: '{messages[-1]['content']}'. "
+                f"This is message #{count} in our conversation."
+            )
+
         state["response"] = response
-        print(f"[generate_response] Assistant: {response}")
         return state
 
-    @node
+    @node()
     async def save_response(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Save assistant response to conversation history."""
+        """Persist both the user message and response to the store."""
         thread_id = state.get("thread_id", "default")
         response = state.get("response", "")
-        
-        if not response:
-            return state
-        
-        # Add assistant message to state
-        state["messages"].append({
-            "role": "assistant",
-            "content": response
-        })
-        
-        # Persist both user message and response
-        conversation_store.add_message(thread_id, "user", state.get("input", ""))
-        conversation_store.add_message(thread_id, "assistant", response)
-        
-        print(f"[save_response] Saved to thread: {thread_id}")
+        user_input = state.get("input", "")
+
+        if user_input:
+            conversation_store.add_message(thread_id, "user", user_input)
+        if response:
+            conversation_store.add_message(thread_id, "assistant", response)
+            state.setdefault("messages", []).append(
+                {"role": "assistant", "content": response}
+            )
         return state
 
+    load_history >> add_user_message >> generate_response >> save_response
 
-def main():
-    # Get control plane URL from environment
-    control_plane_url = os.getenv("DURAGRAPH_URL", "http://localhost:8081")
 
-    print(f"Connecting to DuraGraph at {control_plane_url}")
-    print("Starting Chatbot Worker with Conversation Memory")
+def main() -> None:
+    agent = ChatbotWithMemory()
+
+    # --- Local interactive mode ---
+    print("DuraGraph Chatbot (type 'quit' to exit, 'serve' to connect to control plane)")
     print("=" * 60)
 
-    # Create worker
-    worker = Worker(
-        control_plane_url=control_plane_url,
-        name="chatbot-worker",
-    )
+    thread_id = "local-demo"
+    while True:
+        user_input = input("You: ").strip()
+        if not user_input:
+            continue
+        if user_input.lower() in ("quit", "exit"):
+            print("Goodbye!")
+            break
+        if user_input.lower() == "serve":
+            control_plane = os.getenv("DURAGRAPH_URL", "http://localhost:8081")
+            print(f"\nServing on {control_plane}...")
+            print("Press Ctrl+C to stop\n")
+            agent.serve(control_plane, worker_name="chatbot-worker")
+            return
 
-    # Register our chatbot graph
-    worker.register_graph(ChatbotWithMemory)
-
-    print("Worker registered. Waiting for runs...")
-    print("Each thread_id maintains separate conversation history.")
-    print("Press Ctrl+C to stop")
-    print()
-
-    # Run the worker (blocks until stopped)
-    worker.run()
+        result = agent.run({"input": user_input, "thread_id": thread_id})
+        print(f"Bot: {result.output.get('response', 'No response')}")
 
 
 if __name__ == "__main__":
