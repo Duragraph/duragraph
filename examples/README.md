@@ -35,7 +35,7 @@ Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/durag
 - ✅ Python Hello World
 - ✅ Chatbot with Memory  
 - ✅ RAG Agent
-- 🚧 Go Hello World (next)
+- ✅ Go Hello World
 
 **Milestone v0.8 (Production Ready):**
 - 🚧 Multi-agent collaboration
@@ -59,7 +59,7 @@ Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/durag
 
 | Example | Description | Difficulty | Status |
 |---------|-------------|------------|--------|
-| [01-hello-world](go/01-hello-world) | Minimal Go worker | Beginner | 🚧 Planned |
+| [01-hello-world](go/01-hello-world) | Minimal Go worker | Beginner | ✅ Complete |
 | [02-data-pipeline](go/02-data-pipeline) | High-performance pipeline | Intermediate | 🚧 Planned |
 
 ### Docker Compose
