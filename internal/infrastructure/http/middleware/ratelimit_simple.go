@@ -61,35 +61,47 @@ func (l *SimpleLimiter) CleanupRoutine(ctx context.Context, interval time.Durati
 	}
 }
 
-// SimpleRateLimit creates a simple rate limiting middleware
+// SimpleRateLimit creates a simple rate limiting middleware with standard headers.
 func SimpleRateLimit(requestsPerSecond float64, burst int) echo.MiddlewareFunc {
 	limiter := NewSimpleLimiter(rate.Limit(requestsPerSecond), burst)
 
-	// Start cleanup routine
 	ctx := context.Background()
 	go limiter.CleanupRoutine(ctx, 10*time.Minute)
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			// Skip for health/metrics
-			if c.Path() == "/health" || c.Path() == "/metrics" {
+			if c.Path() == "/health" || c.Path() == "/metrics" || c.Path() == "/ok" {
 				return next(c)
 			}
 
-			// Get key (IP or user ID)
 			key := c.RealIP()
 			if userID := c.Get("user_id"); userID != nil {
 				key = fmt.Sprintf("user:%v", userID)
 			}
 
-			// Get limiter and check
 			l := limiter.GetLimiter(key)
-			if !l.Allow() {
+			reservation := l.Reserve()
+			delay := reservation.Delay()
+
+			c.Response().Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", burst))
+
+			if delay > 0 {
+				reservation.Cancel()
+				retryAfter := int(delay.Seconds()) + 1
+				c.Response().Header().Set("X-RateLimit-Remaining", "0")
+				c.Response().Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
 				return c.JSON(http.StatusTooManyRequests, map[string]interface{}{
-					"error":   "rate_limit_exceeded",
-					"message": "Too many requests. Please slow down.",
+					"error":       "rate_limit_exceeded",
+					"message":     "Too many requests. Please slow down.",
+					"retry_after": retryAfter,
 				})
 			}
+
+			remaining := int(l.Tokens())
+			if remaining < 0 {
+				remaining = 0
+			}
+			c.Response().Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
 
 			return next(c)
 		}
@@ -144,18 +156,16 @@ func (r *RedisRateLimiter) Allow(ctx context.Context, key string) (bool, error) 
 	return int(count) < r.limit, nil
 }
 
-// RedisRateLimit creates a Redis-based rate limiting middleware
+// RedisRateLimit creates a Redis-based rate limiting middleware with standard headers.
 func RedisRateLimit(redisClient *redis.Client, limit int, window time.Duration) echo.MiddlewareFunc {
 	limiter := NewRedisRateLimiter(redisClient, limit, window)
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			// Skip for health/metrics
-			if c.Path() == "/health" || c.Path() == "/metrics" {
+			if c.Path() == "/health" || c.Path() == "/metrics" || c.Path() == "/ok" {
 				return next(c)
 			}
 
-			// Get key
 			key := c.RealIP()
 			if userID := c.Get("user_id"); userID != nil {
 				key = fmt.Sprintf("ratelimit:user:%v", userID)
@@ -163,22 +173,25 @@ func RedisRateLimit(redisClient *redis.Client, limit int, window time.Duration) 
 				key = fmt.Sprintf("ratelimit:ip:%s", key)
 			}
 
-			// Check limit
 			allowed, err := limiter.Allow(c.Request().Context(), key)
 			if err != nil {
-				// On error, allow the request
 				return next(c)
 			}
 
+			c.Response().Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", limit))
+			c.Response().Header().Set("X-RateLimit-Window", window.String())
+
 			if !allowed {
-				c.Response().Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", limit))
-				c.Response().Header().Set("X-RateLimit-Window", window.String())
+				retryAfter := int(window.Seconds())
+				c.Response().Header().Set("X-RateLimit-Remaining", "0")
+				c.Response().Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
 
 				return c.JSON(http.StatusTooManyRequests, map[string]interface{}{
-					"error":   "rate_limit_exceeded",
-					"message": fmt.Sprintf("Rate limit exceeded. Maximum %d requests per %s.", limit, window),
-					"limit":   limit,
-					"window":  window.String(),
+					"error":       "rate_limit_exceeded",
+					"message":     fmt.Sprintf("Rate limit exceeded. Maximum %d requests per %s.", limit, window),
+					"limit":       limit,
+					"window":      window.String(),
+					"retry_after": retryAfter,
 				})
 			}
 
@@ -187,7 +200,7 @@ func RedisRateLimit(redisClient *redis.Client, limit int, window time.Duration) 
 	}
 }
 
-// TieredRateLimitSimple creates tiered rate limits
+// TieredRateLimitSimple creates tiered rate limits with standard headers.
 func TieredRateLimitSimple(redisClient *redis.Client) echo.MiddlewareFunc {
 	freeLimiter := NewRedisRateLimiter(redisClient, 10, 1*time.Minute)
 	proLimiter := NewRedisRateLimiter(redisClient, 100, 1*time.Minute)
@@ -195,12 +208,10 @@ func TieredRateLimitSimple(redisClient *redis.Client) echo.MiddlewareFunc {
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			// Skip for health/metrics
-			if c.Path() == "/health" || c.Path() == "/metrics" {
+			if c.Path() == "/health" || c.Path() == "/metrics" || c.Path() == "/ok" {
 				return next(c)
 			}
 
-			// Determine tier
 			tier := "free"
 			limit := 10
 			var limiter *RedisRateLimiter = freeLimiter
@@ -220,7 +231,6 @@ func TieredRateLimitSimple(redisClient *redis.Client) echo.MiddlewareFunc {
 				}
 			}
 
-			// Get key
 			key := c.RealIP()
 			if userID := c.Get("user_id"); userID != nil {
 				key = fmt.Sprintf("ratelimit:%s:user:%v", tier, userID)
@@ -228,22 +238,23 @@ func TieredRateLimitSimple(redisClient *redis.Client) echo.MiddlewareFunc {
 				key = fmt.Sprintf("ratelimit:%s:ip:%s", tier, key)
 			}
 
-			// Check limit
 			allowed, err := limiter.Allow(c.Request().Context(), key)
 			if err != nil {
 				return next(c)
 			}
 
-			// Set headers
 			c.Response().Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", limit))
 			c.Response().Header().Set("X-RateLimit-Tier", tier)
 
 			if !allowed {
+				c.Response().Header().Set("X-RateLimit-Remaining", "0")
+				c.Response().Header().Set("Retry-After", "60")
 				return c.JSON(http.StatusTooManyRequests, map[string]interface{}{
-					"error":   "rate_limit_exceeded",
-					"message": fmt.Sprintf("Rate limit exceeded for %s tier.", tier),
-					"tier":    tier,
-					"limit":   limit,
+					"error":       "rate_limit_exceeded",
+					"message":     fmt.Sprintf("Rate limit exceeded for %s tier.", tier),
+					"tier":        tier,
+					"limit":       limit,
+					"retry_after": 60,
 				})
 			}
 
