@@ -517,11 +517,9 @@ func (w *Worker[S]) executor(ctx context.Context) {
 	}
 }
 
-// executeRun executes a single run and reports results to the control plane.
+// executeRun executes a single run using streaming to emit per-node events.
 func (w *Worker[S]) executeRun(ctx context.Context, task *RunTask) {
 	log.Printf("[worker] executing run %s (graph=%s)", task.RunID, task.GraphID)
-
-	w.sendEvent(ctx, task.RunID, "run_started", nil)
 
 	inputJSON, err := json.Marshal(task.Input)
 	if err != nil {
@@ -535,13 +533,31 @@ func (w *Worker[S]) executeRun(ctx context.Context, task *RunTask) {
 		return
 	}
 
-	result, err := w.graph.Run(ctx, state)
-	if err != nil {
-		w.failRun(ctx, task.RunID, err.Error())
+	events := make(chan graph.Event, 32)
+
+	type streamResult struct {
+		state S
+		err   error
+	}
+	done := make(chan streamResult, 1)
+
+	go func() {
+		r, e := w.graph.Stream(ctx, state, events)
+		done <- streamResult{state: r, err: e}
+	}()
+
+	for ev := range events {
+		w.sendEvent(ctx, task.RunID, ev.Type, ev.Data)
+	}
+
+	sr := <-done
+
+	if sr.err != nil {
+		w.failRun(ctx, task.RunID, sr.err.Error())
 		return
 	}
 
-	outputJSON, err := json.Marshal(result)
+	outputJSON, err := json.Marshal(sr.state)
 	if err != nil {
 		w.failRun(ctx, task.RunID, fmt.Sprintf("output marshal: %v", err))
 		return
@@ -566,8 +582,6 @@ func (w *Worker[S]) completeRun(ctx context.Context, runID string, output map[st
 	if err != nil {
 		log.Printf("[worker] failed to report completion for run %s: %v", runID, err)
 	}
-
-	w.sendEvent(ctx, runID, "run_completed", output)
 
 	w.runCount.mu.Lock()
 	w.runCount.completed++

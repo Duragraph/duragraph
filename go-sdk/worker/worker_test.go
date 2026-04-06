@@ -277,15 +277,21 @@ func TestExecuteRun_Success(t *testing.T) {
 		t.Errorf("completion status = %v, want 'completed'", completionPayload["status"])
 	}
 
-	// Should have run_started and run_completed events
+	// Should have run_started, node_started, node_completed, run_completed events
 	startedCount := 0
 	completedCount := 0
+	nodeStartedCount := 0
+	nodeCompletedCount := 0
 	for _, e := range events {
 		switch e["event_type"] {
 		case "run_started":
 			startedCount++
 		case "run_completed":
 			completedCount++
+		case "node_started":
+			nodeStartedCount++
+		case "node_completed":
+			nodeCompletedCount++
 		}
 	}
 	if startedCount != 1 {
@@ -293,6 +299,12 @@ func TestExecuteRun_Success(t *testing.T) {
 	}
 	if completedCount != 1 {
 		t.Errorf("run_completed events = %d, want 1", completedCount)
+	}
+	if nodeStartedCount != 1 {
+		t.Errorf("node_started events = %d, want 1", nodeStartedCount)
+	}
+	if nodeCompletedCount != 1 {
+		t.Errorf("node_completed events = %d, want 1", nodeCompletedCount)
 	}
 
 	// Verify run counts
