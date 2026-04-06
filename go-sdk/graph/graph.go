@@ -190,12 +190,37 @@ func (g *Graph[S]) SetEntrypoint(name string) *Graph[S] {
 	return g
 }
 
+// Entrypoint returns the name of the starting node.
+func (g *Graph[S]) Entrypoint() string {
+	return g.entrypoint
+}
+
+// NodeNames returns the names of all nodes in the graph.
+func (g *Graph[S]) NodeNames() []string {
+	names := make([]string, 0, len(g.nodes))
+	for name := range g.nodes {
+		names = append(names, name)
+	}
+	return names
+}
+
+// Edges returns a copy of the edge map.
+func (g *Graph[S]) Edges() map[string][]string {
+	cp := make(map[string][]string, len(g.edges))
+	for k, v := range g.edges {
+		dst := make([]string, len(v))
+		copy(dst, v)
+		cp[k] = dst
+	}
+	return cp
+}
+
 // Run executes the graph starting from the entrypoint with the given initial state.
 //
 // Execution proceeds through nodes following edges or router decisions until:
 //   - A node returns an error
 //   - No more edges or router returns empty string
-//   - The context is cancelled
+//   - The context is canceled
 //
 // Returns the final state and any error that occurred.
 //
