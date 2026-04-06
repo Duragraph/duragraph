@@ -3,13 +3,145 @@ title: Deployment
 description: Deploy DuraGraph to production
 ---
 
-:::note[Coming Soon]
-This documentation is under development.
-:::
+This guide covers deploying DuraGraph, configuring environment variables, and tuning production settings.
 
-This section covers production deployment including Docker, Kubernetes, infrastructure requirements, and configuration best practices.
+---
+
+## Prerequisites
+
+- **PostgreSQL 14+** — Event store, projections, outbox
+- **NATS Server 2.9+** with JetStream enabled — Event streaming
+- **Docker** (optional) — For containerized deployments
+
+---
+
+## Docker Compose (Development)
+
+The quickest way to start all services:
+
+```bash
+cd duragraph/
+task up          # Starts PostgreSQL, NATS, and the API server
+task health      # Verify all services are healthy
+```
+
+This uses `docker-compose.yml` which provisions PostgreSQL, NATS, and the DuraGraph server with sensible defaults.
+
+---
+
+## Environment Variables
+
+### Server Configuration
+
+| Variable      | Default                 | Description              |
+| ------------- | ----------------------- | ------------------------ |
+| `PORT`        | `8080`                  | HTTP server port         |
+| `HOST`        | `0.0.0.0`               | HTTP server bind address |
+| `DB_HOST`     | `localhost`             | PostgreSQL host          |
+| `DB_PORT`     | `5432`                  | PostgreSQL port          |
+| `DB_USER`     | `appuser`               | PostgreSQL user          |
+| `DB_PASSWORD` | `apppass`               | PostgreSQL password      |
+| `DB_NAME`     | `appdb`                 | PostgreSQL database name |
+| `NATS_URL`    | `nats://localhost:4222` | NATS connection URL      |
+
+### Authentication
+
+| Variable       | Default | Description               |
+| -------------- | ------- | ------------------------- |
+| `AUTH_ENABLED` | `false` | Enable JWT authentication |
+| `JWT_SECRET`   | —       | JWT signing secret        |
+
+### Rate Limiting
+
+| Variable             | Default | Description                                |
+| -------------------- | ------- | ------------------------------------------ |
+| `RATE_LIMIT_ENABLED` | `false` | Enable rate limiting middleware            |
+| `RATE_LIMIT_RPS`     | `10`    | Requests per second per client             |
+| `RATE_LIMIT_BURST`   | `20`    | Maximum burst size (token bucket capacity) |
+
+When enabled, the server uses in-memory token bucket rate limiting (SimpleRateLimit) keyed by client IP. If a request arrives from an authenticated user, the `user_id` from the auth context is used as the rate limit key instead.
+
+**Rate limit headers** returned on every response:
+
+| Header                  | Description                                      |
+| ----------------------- | ------------------------------------------------ |
+| `X-RateLimit-Limit`     | Burst capacity                                   |
+| `X-RateLimit-Remaining` | Tokens remaining                                 |
+| `Retry-After`           | Seconds until next allowed request (only on 429) |
+
+Endpoints `/health`, `/metrics`, and `/ok` are excluded from rate limiting.
+
+### LLM Providers (Optional)
+
+| Variable            | Description       |
+| ------------------- | ----------------- |
+| `OPENAI_API_KEY`    | OpenAI API key    |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+
+---
+
+## Database Migrations
+
+Migrations are in `deploy/sql/` and must be applied in order:
+
+```bash
+# Using task runner
+task db:migrate
+
+# Or manually
+psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f deploy/sql/001_init.sql
+psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f deploy/sql/002_event_store.sql
+psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f deploy/sql/003_outbox.sql
+psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f deploy/sql/004_projections.sql
+psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f deploy/sql/010_horizontal_scaling.sql
+```
+
+The `010_horizontal_scaling.sql` migration adds `version` and `lease_epoch` columns to the `runs` table for optimistic concurrency control and lease fencing in multi-instance deployments.
+
+---
+
+## Multi-Instance Deployment
+
+DuraGraph supports running multiple API server instances behind a load balancer. No external coordination (etcd, ZooKeeper) is required — all coordination uses PostgreSQL primitives.
+
+### What you get
+
+- **Optimistic concurrency** — Version columns prevent lost updates
+- **Advisory locks** — Singleton background jobs (lease monitor) run on exactly one instance
+- **Skip locked** — Outbox relay and lease scanning work concurrently across instances
+- **Lease epoch fencing** — Stale workers cannot complete reassigned tasks
+
+### Deployment checklist
+
+1. All instances connect to the **same PostgreSQL** database
+2. All instances connect to the **same NATS** cluster
+3. Place instances behind a load balancer (round-robin is fine)
+4. No sticky sessions required
+5. Run `task db:migrate` once (not per instance)
+
+---
+
+## Health Checks
+
+| Endpoint   | Purpose                                    | Rate Limited |
+| ---------- | ------------------------------------------ | ------------ |
+| `/health`  | Full health check (DB + NATS connectivity) | No           |
+| `/ok`      | Simple liveness probe                      | No           |
+| `/metrics` | Prometheus metrics                         | No           |
+
+Configure your load balancer or Kubernetes liveness/readiness probes to use `/health`.
+
+---
+
+## Monitoring
+
+DuraGraph exposes Prometheus metrics at `/metrics`. See [Observability](/docs/ops/observability) for dashboard configuration and key metrics.
+
+---
 
 ## Resources
 
-- [Getting Started](/docs/getting-started) — Quick start guide
-- [Architecture Overview](/docs/architecture/overview) — System design
+- [Architecture Overview](/docs/architecture/overview) — System design and scaling patterns
+- [Components](/docs/architecture/components) — Detailed component descriptions
+- [Observability](/docs/ops/observability) — Metrics, traces, and dashboards
+- [Security](/docs/ops/security) — Authentication and threat model

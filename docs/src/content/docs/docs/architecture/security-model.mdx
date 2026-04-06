@@ -3,13 +3,69 @@ title: Security Model
 description: Security architecture and threat model
 ---
 
-:::note[Coming Soon]
-This documentation is under development.
-:::
+This section covers the security architecture including authentication, rate limiting, data integrity, and threat modeling.
 
-This section covers the security architecture including authentication, authorization, data encryption, and threat modeling.
+For operational security configuration details, see [Operations > Security](/docs/ops/security).
+
+---
+
+## Defense in Depth
+
+DuraGraph applies security at multiple layers:
+
+```
+Client → Rate Limiting → Authentication → Authorization → Domain Logic → Event Store
+```
+
+### Layer 1: Rate Limiting
+
+Token bucket rate limiting protects against abuse before any business logic executes. Configured via `RATE_LIMIT_ENABLED`, `RATE_LIMIT_RPS`, and `RATE_LIMIT_BURST` environment variables. Three strategies available (in-memory, Redis, tiered) with standard HTTP response headers.
+
+See [Deployment > Rate Limiting](/docs/ops/deployment#rate-limiting) for configuration.
+
+### Layer 2: Authentication
+
+JWT-based authentication validates bearer tokens when `AUTH_ENABLED=true`. User identity is extracted and propagated through the request context for rate limiting keys, audit trails, and authorization checks.
+
+### Layer 3: Data Integrity
+
+- **Optimistic concurrency control** — Version columns on run aggregates prevent lost updates across instances.
+- **Lease epoch fencing** — Prevents stale workers from completing reassigned tasks.
+- **Event immutability** — Events in the event store are append-only. They are never modified or deleted.
+- **Transactional outbox** — Events and outbox entries are written atomically, preventing data inconsistency.
+
+---
+
+## Multi-Instance Security
+
+Horizontal scaling introduces coordination challenges. DuraGraph addresses these without external coordination services:
+
+| Concern                   | Mechanism                                                                         |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| Lost updates              | Optimistic concurrency (version column on `UPDATE ... WHERE version = $expected`) |
+| Duplicate processing      | `FOR UPDATE SKIP LOCKED` on outbox relay and lease scanning                       |
+| Stale worker completion   | Lease epoch fencing tokens                                                        |
+| Singleton job duplication | PostgreSQL advisory locks (`pg_try_advisory_lock`)                                |
+
+See [Architecture Overview > Horizontal Scaling](/docs/architecture/overview#horizontal-scaling) for implementation details.
+
+---
+
+## STRIDE-lite Threat Model
+
+| Threat                     | Vector                         | Mitigation                                          |
+| -------------------------- | ------------------------------ | --------------------------------------------------- |
+| **Spoofing**               | Forged API requests            | JWT authentication + webhook signing                |
+| **Tampering**              | Modified events or checkpoints | Event immutability, optimistic concurrency, S3 ETag |
+| **Repudiation**            | Users denying actions          | Event sourcing provides complete audit trail        |
+| **Information Disclosure** | Secrets in logs/traces         | Redaction policy, sensitive field filters           |
+| **Denial of Service**      | Run flooding, SSE spam         | Rate limiting (token bucket), `429` backpressure    |
+| **Elevation of Privilege** | Bypassing RBAC                 | Namespace scoping, strict role checks               |
+
+---
 
 ## Resources
 
-- [Getting Started](/docs/getting-started) — Quick start guide
-- [Architecture Overview](/docs/architecture/overview) — System design
+- [Operations > Security](/docs/ops/security) — Operational security configuration
+- [Deployment](/docs/ops/deployment) — Environment variable reference
+- [Architecture Overview](/docs/architecture/overview) — Horizontal scaling patterns

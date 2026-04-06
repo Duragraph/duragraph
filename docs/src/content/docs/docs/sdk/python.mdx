@@ -6,7 +6,7 @@ description: Complete reference for the DuraGraph Python SDK
 The DuraGraph Python SDK provides a decorator-based interface for building AI agents and workflows. Build graphs with simple decorators, run them locally, or deploy to the control plane.
 
 :::note[Current Version]
-**v0.2.0** - In Active Development  
+**v0.4.0** - In Active Development  
 **Installation**: `pip install duragraph`  
 **Repository**: [duragraph-python](https://github.com/Duragraph/duragraph-python)
 :::
@@ -20,6 +20,9 @@ pip install duragraph
 # With LLM providers
 pip install duragraph[openai]      # OpenAI support
 pip install duragraph[anthropic]   # Anthropic support
+
+# With DSPy support
+pip install duragraph[dspy]        # DSPy 2.x integration
 
 # With vector stores
 pip install duragraph[chroma]      # Chroma vector store
@@ -117,7 +120,7 @@ def generate(self, state):
     return {"messages": [{"role": "user", "content": "Hello"}]}
 ```
 
-**Supported Providers (v0.2.0):**
+**Supported Providers:**
 
 - OpenAI (GPT-4, GPT-4o, GPT-3.5-turbo)
 - Anthropic (Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku)
@@ -221,6 +224,138 @@ class ConditionalGraph:
     start >> decide
     decide >> {"path_a": path_a, "path_b": path_b}
 ```
+
+#### `@dspy_node`
+
+Creates a node powered by a [DSPy](https://dspy.ai/) module. Requires `pip install duragraph[dspy]`.
+
+```python
+from duragraph import Graph, dspy_node, entrypoint
+
+@Graph(id="dspy_agent")
+class DspyAgent:
+    @entrypoint
+    @dspy_node(
+        signature="question -> answer",
+        module_type="ChainOfThought",  # or "Predict", "ReAct"
+        model="openai/gpt-4o-mini",    # per-node LM override (optional)
+    )
+    def reason(self, state):
+        """Post-process DSPy output."""
+        return state
+
+agent = DspyAgent()
+result = agent.run({"question": "What is event sourcing?"})
+print(result["answer"])
+```
+
+**Parameters:**
+
+| Parameter        | Type           | Description                                                          |
+| ---------------- | -------------- | -------------------------------------------------------------------- |
+| `signature`      | `str`          | DSPy signature (e.g., `"question -> answer"`)                        |
+| `module_type`    | `str`          | `"Predict"`, `"ChainOfThought"`, or `"ReAct"` (default: `"Predict"`) |
+| `model`          | `str \| None`  | LiteLLM model string for per-node LM override                        |
+| `input_map`      | `dict \| None` | Map state keys to DSPy input field names                             |
+| `output_map`     | `dict \| None` | Map DSPy output field names to state keys                            |
+| `optimized_path` | `str \| None`  | Path to pre-optimized module JSON (from DSPy optimizers)             |
+| `max_retries`    | `int`          | Max retries on DSPy module failures (default: 3)                     |
+| `tools`          | `list \| None` | Tool functions for ReAct modules                                     |
+
+**State-to-signature mapping:**
+
+By default, state keys matching signature field names are passed as inputs, and DSPy output fields are written directly to state. Use `input_map` and `output_map` to rename:
+
+```python
+@dspy_node(
+    signature="context, query -> response",
+    input_map={"user_message": "query", "documents": "context"},
+    output_map={"response": "assistant_reply"},
+)
+def answer(self, state):
+    return state
+```
+
+**Loading optimized modules:**
+
+If you've optimized a DSPy module with `BootstrapFewShot` or `MIPROv2`, load the optimized weights:
+
+```python
+@dspy_node(
+    signature="question -> answer",
+    module_type="ChainOfThought",
+    optimized_path="optimized/qa_cot.json",
+)
+def optimized_qa(self, state):
+    return state
+```
+
+---
+
+## DSPy Integration
+
+DuraGraph integrates with [DSPy](https://dspy.ai/) to let you build nodes using DSPy's declarative programming model. This enables structured outputs, chain-of-thought reasoning, and optimizable prompts within your workflow graphs.
+
+### Setup
+
+```bash
+pip install duragraph[dspy]
+```
+
+### Configuring the LM Bridge
+
+DuraGraph provides `DuraGraphLM` for bridging DuraGraph's LLM provider configuration to DSPy:
+
+```python
+from duragraph.dspy import DuraGraphLM, configure_from_provider
+import dspy
+
+# Option 1: Configure DSPy globally with a DuraGraph provider string
+configure_from_provider("openai/gpt-4o-mini")
+
+# Option 2: Use DuraGraphLM directly
+lm = DuraGraphLM(model="openai/gpt-4o-mini", temperature=0.7)
+dspy.configure(lm=lm)
+```
+
+`DuraGraphLM` wraps `dspy.LM` (which uses LiteLLM under the hood), so any model supported by LiteLLM works.
+
+### Module Types
+
+| Type             | Description                       | When to use                    |
+| ---------------- | --------------------------------- | ------------------------------ |
+| `Predict`        | Direct input→output mapping       | Simple structured extraction   |
+| `ChainOfThought` | Adds reasoning step before output | Complex reasoning tasks        |
+| `ReAct`          | Reason + Act with tool use        | Tasks requiring external tools |
+
+### Full Example: RAG with DSPy
+
+```python
+from duragraph import Graph, entrypoint, dspy_node
+from duragraph.dspy import configure_from_provider
+
+configure_from_provider("openai/gpt-4o")
+
+@Graph(id="dspy_rag")
+class DspyRAG:
+    @entrypoint
+    def retrieve(self, state):
+        """Retrieve relevant documents."""
+        docs = search_documents(state["question"])
+        return {"context": "\n".join(docs)}
+
+    @dspy_node(
+        signature="context, question -> answer",
+        module_type="ChainOfThought",
+    )
+    def generate(self, state):
+        """DSPy generates the answer, then this runs post-processing."""
+        return state
+
+    retrieve >> generate
+```
+
+---
 
 ## Async Execution
 
@@ -533,7 +668,7 @@ class MathAgent:
 
 ## CLI
 
-Local development commands (v0.2.0).
+Local development commands.
 
 ```bash
 # Initialize new project

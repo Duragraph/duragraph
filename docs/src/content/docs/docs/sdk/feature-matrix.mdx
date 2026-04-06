@@ -20,13 +20,13 @@ This page shows the feature parity between DuraGraph's Python and Go SDKs.
 
 Essential graph definition and execution features.
 
-| Feature             | Python | Go  | Notes                                                        |
-| ------------------- | ------ | --- | ------------------------------------------------------------ |
-| Graph Definition    | ✅     | ✅  | Python: `@Graph` decorator, Go: `Graph[S]` generics          |
-| Node Types          | ✅     | 🚧  | Python: `@llm_node`, `@tool_node`, etc. Go: `Node` interface |
-| Edge Definition     | ✅     | ✅  | Python: `>>` operator, Go: `AddEdge()`                       |
-| Conditional Routing | ✅     | ✅  | Python: `@router_node`, Go: `Router` interface               |
-| Entrypoint          | ✅     | ✅  | Python: `@entrypoint`, Go: `SetEntrypoint()`                 |
+| Feature             | Python | Go  | Notes                                                                      |
+| ------------------- | ------ | --- | -------------------------------------------------------------------------- |
+| Graph Definition    | ✅     | ✅  | Python: `@Graph` decorator, Go: `Graph[S]` generics                        |
+| Node Types          | ✅     | 🚧  | Python: `@llm_node`, `@tool_node`, `@dspy_node`, etc. Go: `Node` interface |
+| Edge Definition     | ✅     | ✅  | Python: `>>` operator, Go: `AddEdge()`                                     |
+| Conditional Routing | ✅     | ✅  | Python: `@router_node`, Go: `Router` interface                             |
+| Entrypoint          | ✅     | ✅  | Python: `@entrypoint`, Go: `SetEntrypoint()`                               |
 
 ---
 
@@ -93,12 +93,13 @@ Text embedding providers for vector stores.
 
 CLI and development tools.
 
-| Feature           | Python | Go  | Notes                       |
-| ----------------- | ------ | --- | --------------------------- |
-| CLI Tool          | 🚧     | ➖  | `duragraph` command         |
-| Prompt Management | ✅     | 📋  | `@prompt` decorator         |
-| Subgraphs         | 📋     | 📋  | Compose from smaller graphs |
-| Visualization     | 📋     | 📋  | Visualize graph structure   |
+| Feature           | Python | Go  | Notes                                                   |
+| ----------------- | ------ | --- | ------------------------------------------------------- |
+| CLI Tool          | 🚧     | ➖  | `duragraph` command                                     |
+| DSPy Integration  | ✅     | ➖  | `@dspy_node` decorator (Predict, ChainOfThought, ReAct) |
+| Prompt Management | ✅     | 📋  | `@prompt` decorator                                     |
+| Subgraphs         | 📋     | 📋  | Compose from smaller graphs                             |
+| Visualization     | 📋     | 📋  | Visualize graph structure                               |
 
 ---
 
@@ -118,8 +119,8 @@ Tracing, metrics, and debugging.
 
 | SDK        | Complete | Partial | Planned | Not Planned |
 | ---------- | -------- | ------- | ------- | ----------- |
-| **Python** | 16       | 5       | 13      | 0           |
-| **Go**     | 6        | 2       | 24      | 1           |
+| **Python** | 17       | 5       | 12      | 0           |
+| **Go**     | 6        | 2       | 24      | 2           |
 
 ---
 
@@ -132,4 +133,4 @@ Tracing, metrics, and debugging.
 
 ---
 
-_Last updated: January 2025_
+_Last updated: April 2026_

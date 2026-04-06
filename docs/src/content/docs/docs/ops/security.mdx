@@ -55,14 +55,14 @@ This document outlines the security model, mitigations, and known risks in the D
 
 ## STRIDE-lite Threat Model
 
-| Threat                     | Vector / Example                  | Mitigation                                              |
-| -------------------------- | --------------------------------- | ------------------------------------------------------- |
-| **Spoofing**               | Forged API requests               | JWT authentication + webhook signing                    |
-| **Tampering**              | Modified checkpoints or logs      | Integrity checks via S3 ETag, strict DB constraints     |
-| **Repudiation**            | Users denying actions performed   | Audit logs with signed JWT claims                       |
-| **Information Disclosure** | Secrets in logs or traces         | Redaction policy, sensitive field filters               |
-| **Denial of Service**      | Run flooding, SSE stream spamming | Rate limiting, backpressure (`429`), worker autoscaling |
-| **Elevation of Privilege** | Bypassing project RBAC            | Namespace scoping, strict role checks                   |
+| Threat                     | Vector / Example                  | Mitigation                                                                                                  |
+| -------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Spoofing**               | Forged API requests               | JWT authentication + webhook signing                                                                        |
+| **Tampering**              | Modified checkpoints or logs      | Integrity checks via S3 ETag, strict DB constraints                                                         |
+| **Repudiation**            | Users denying actions performed   | Audit logs with signed JWT claims                                                                           |
+| **Information Disclosure** | Secrets in logs or traces         | Redaction policy, sensitive field filters                                                                   |
+| **Denial of Service**      | Run flooding, SSE stream spamming | Token bucket rate limiting (`RATE_LIMIT_ENABLED`), backpressure (`429` + `Retry-After`), worker autoscaling |
+| **Elevation of Privilege** | Bypassing project RBAC            | Namespace scoping, strict role checks                                                                       |
 
 ---
 
@@ -71,10 +71,17 @@ This document outlines the security model, mitigations, and known risks in the D
 Security is enforced via:
 
 - Strong authentication and RBAC.
+- Configurable rate limiting with standard HTTP headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`).
 - Namespace and queue-level workload isolation.
+- Optimistic concurrency control and lease epoch fencing for data integrity.
 - Webhook signing & validation.
 - Prompt-injection and SSRF mitigations.
 - Data retention and redaction policies.
 - Threat modeling using a STRIDE-lite framework.
 
 ---
+
+## Resources
+
+- [Deployment](/docs/ops/deployment) — Rate limiting and authentication configuration
+- [Security Model](/docs/architecture/security-model) — Architecture-level security design
