@@ -164,7 +164,7 @@ func main() {
 
 	fmt.Println("✅ Worker service initialized (PostgreSQL + NATS)")
 
-	// Start lease monitor goroutine
+	// Start lease monitor goroutine (uses advisory lock for single-instance execution)
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -173,9 +173,14 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := workerService.MonitorExpiredLeases(ctx); err != nil {
-					log.Printf("lease monitor error: %v", err)
+				var acquired bool
+				if err := pools.Write.QueryRow(ctx, `SELECT pg_try_advisory_lock(42)`).Scan(&acquired); err != nil || !acquired {
+					continue
 				}
+				if monErr := workerService.MonitorExpiredLeases(ctx); monErr != nil {
+					log.Printf("lease monitor error: %v", monErr)
+				}
+				pools.Write.Exec(ctx, `SELECT pg_advisory_unlock(42)`)
 			}
 		}
 	}()

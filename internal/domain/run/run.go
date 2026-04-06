@@ -31,6 +31,10 @@ type Run struct {
 	leaseExpiresAt  *time.Time
 	lastHeartbeatAt *time.Time
 
+	// Horizontal scaling
+	version    int
+	leaseEpoch int
+
 	// Uncommitted events
 	events []eventbus.Event
 }
@@ -86,6 +90,7 @@ func NewRun(threadID, assistantID string, input map[string]interface{}, opts ...
 		multitaskStrategy: multitaskStrategy,
 		createdAt:         now,
 		updatedAt:         now,
+		version:           1,
 		events:            make([]eventbus.Event, 0),
 	}
 
@@ -243,6 +248,21 @@ func (r *Run) LastHeartbeatAt() *time.Time {
 	return r.lastHeartbeatAt
 }
 
+// Version returns the optimistic concurrency version
+func (r *Run) Version() int {
+	return r.version
+}
+
+// LeaseEpoch returns the lease fencing token
+func (r *Run) LeaseEpoch() int {
+	return r.leaseEpoch
+}
+
+// IncrementVersion bumps the version for optimistic concurrency control
+func (r *Run) IncrementVersion() {
+	r.version++
+}
+
 // AssignToWorker assigns the run to a worker with a lease
 func (r *Run) AssignToWorker(workerID string, leaseDuration time.Duration) {
 	now := time.Now()
@@ -250,6 +270,7 @@ func (r *Run) AssignToWorker(workerID string, leaseDuration time.Duration) {
 	r.workerID = workerID
 	r.leaseExpiresAt = &expiry
 	r.lastHeartbeatAt = &now
+	r.leaseEpoch++
 	r.updatedAt = now
 }
 
@@ -262,12 +283,13 @@ func (r *Run) WorkerHeartbeat(leaseDuration time.Duration) {
 	r.updatedAt = now
 }
 
-// IncrementRetry increments the retry count
+// IncrementRetry increments the retry count and lease epoch
 func (r *Run) IncrementRetry() {
 	r.retryCount++
 	r.workerID = ""
 	r.leaseExpiresAt = nil
 	r.lastHeartbeatAt = nil
+	r.leaseEpoch++
 	r.updatedAt = time.Now()
 }
 
@@ -505,6 +527,8 @@ type RunData struct {
 	RetryCount        int
 	LeaseExpiresAt    *time.Time
 	LastHeartbeatAt   *time.Time
+	Version           int
+	LeaseEpoch        int
 }
 
 // ReconstructFromData rebuilds a Run from database projection data
@@ -544,6 +568,11 @@ func ReconstructFromData(data RunData) *Run {
 		multitaskStrategy = "reject"
 	}
 
+	version := data.Version
+	if version == 0 {
+		version = 1
+	}
+
 	return &Run{
 		id:                data.ID,
 		threadID:          data.ThreadID,
@@ -563,6 +592,8 @@ func ReconstructFromData(data RunData) *Run {
 		retryCount:        data.RetryCount,
 		leaseExpiresAt:    data.LeaseExpiresAt,
 		lastHeartbeatAt:   data.LastHeartbeatAt,
+		version:           version,
+		leaseEpoch:        data.LeaseEpoch,
 		events:            make([]eventbus.Event, 0),
 	}
 }

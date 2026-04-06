@@ -36,7 +36,8 @@ func NewOutbox(pool *pgxpool.Pool) *Outbox {
 	return &Outbox{pool: pool}
 }
 
-// GetUnpublished retrieves unpublished messages from the outbox
+// GetUnpublished retrieves unpublished messages from the outbox.
+// Uses FOR UPDATE SKIP LOCKED so multiple relay instances don't process the same messages.
 func (o *Outbox) GetUnpublished(ctx context.Context, limit int) ([]*OutboxMessage, error) {
 	rows, err := o.pool.Query(ctx, `
 		SELECT id, event_id, aggregate_type, aggregate_id, event_type, payload, metadata,
@@ -45,6 +46,7 @@ func (o *Outbox) GetUnpublished(ctx context.Context, limit int) ([]*OutboxMessag
 		WHERE NOT published AND (next_retry_at IS NULL OR next_retry_at <= NOW())
 		ORDER BY created_at ASC
 		LIMIT $1
+		FOR UPDATE SKIP LOCKED
 	`, limit)
 
 	if err != nil {
