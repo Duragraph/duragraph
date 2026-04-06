@@ -34,7 +34,7 @@ Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/durag
 **Milestone v0.5 (SDK & Studio MVP):**
 - ✅ Python Hello World
 - ✅ Chatbot with Memory  
-- 🚧 RAG Agent (next)
+- ✅ RAG Agent
 - 🚧 Go Hello World (next)
 
 **Milestone v0.8 (Production Ready):**
@@ -49,7 +49,7 @@ Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/durag
 |---------|-------------|------------|--------|
 | [01-hello-world](python/01-hello-world) | Minimal worker setup | Beginner | ✅ Complete |
 | [02-chatbot](python/02-chatbot) | Conversational agent with memory | Beginner | ✅ Complete |
-| [03-rag-agent](python/03-rag-agent) | RAG with vector store | Intermediate | 🚧 Planned |
+| [03-rag-agent](python/03-rag-agent) | RAG with vector store | Intermediate | ✅ Complete |
 | [04-multi-agent](python/04-multi-agent) | Agent collaboration | Advanced | 🚧 Planned |
 | [05-human-in-loop](python/05-human-in-loop) | Approval workflows | Intermediate | 🚧 Planned |
 | [06-tool-use](python/06-tool-use) | Function calling | Intermediate | 🚧 Planned |
