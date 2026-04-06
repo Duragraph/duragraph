@@ -44,10 +44,12 @@ dependencies = [
 nats = ["nats-py>=2.7.0"]
 openai = ["openai>=1.0.0"]
 anthropic = ["anthropic>=0.30.0"]
+dspy = ["dspy>=2.0.0"]
 all = [
     "nats-py>=2.7.0",
     "openai>=1.0.0",
     "anthropic>=0.30.0",
+    "dspy>=2.0.0",
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
 ]

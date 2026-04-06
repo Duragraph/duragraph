@@ -110,6 +110,54 @@ async def execute_llm_node(
     return result
 
 
+async def execute_dspy_node(
+    node_name: str,
+    metadata: NodeMetadata,
+    node_method: Any,
+    state: State,
+) -> dict[str, Any]:
+    """Execute a DSPy module node.
+
+    Builds the DSPy module from node config, runs it with inputs
+    extracted from state, merges outputs back, then calls the
+    user's method body for optional post-processing.
+
+    Args:
+        node_name: Name of the node.
+        metadata: Node metadata with DSPy configuration.
+        node_method: The decorated method (called after DSPy execution).
+        state: Current state.
+
+    Returns:
+        Updated state dict.
+    """
+    from duragraph.dspy.module import DspyNodeConfig, execute_dspy_module
+
+    config = metadata.config
+    dspy_config = DspyNodeConfig(
+        signature=config["signature"],
+        module=config.get("module", "ChainOfThought"),
+        model=config.get("model"),
+        temperature=config.get("temperature", 0.7),
+        max_tokens=config.get("max_tokens"),
+        tools=config.get("tools", []),
+        input_map=config.get("input_map"),
+        output_map=config.get("output_map"),
+        optimized_path=config.get("optimized_path"),
+    )
+
+    updated_state = await execute_dspy_module(dspy_config, state)
+
+    if inspect.iscoroutinefunction(node_method):
+        result = await node_method(updated_state)
+    else:
+        result = node_method(updated_state)
+
+    if isinstance(result, dict):
+        return result
+    return updated_state
+
+
 async def execute_function_node(
     node_method: Any,
     state: State,
@@ -155,6 +203,8 @@ async def execute_node(
 
     if node_type == "llm":
         return await execute_llm_node(node_name, metadata, state)
+    elif node_type == "dspy":
+        return await execute_dspy_node(node_name, metadata, node_method, state)
     elif node_type in ("function", "tool", "router", "human"):
         return await execute_function_node(node_method, state)
     else:

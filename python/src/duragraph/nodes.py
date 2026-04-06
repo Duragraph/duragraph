@@ -312,6 +312,81 @@ def human_node(
     return decorator
 
 
+def dspy_node(
+    signature: str,
+    *,
+    module: str = "ChainOfThought",
+    name: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int | None = None,
+    tools: list[Callable[..., Any]] | None = None,
+    input_map: dict[str, str] | None = None,
+    output_map: dict[str, str] | None = None,
+    optimized_path: str | None = None,
+) -> Callable[[F], NodeDescriptor]:
+    """DSPy module node decorator.
+
+    Wraps a DSPy module (Predict, ChainOfThought, ReAct, etc.) as a
+    DuraGraph graph node. Input fields are read from state; output fields
+    are written back to state.
+
+    The decorated method body is called *after* the DSPy module runs,
+    receiving the state with DSPy outputs already merged in. Return
+    the (possibly modified) state dict.
+
+    Args:
+        signature: DSPy signature string (e.g. ``"question -> answer"``).
+        module: DSPy module class name.
+        name: Optional node name. Defaults to function name.
+        model: LM model identifier. Uses globally-configured LM if None.
+        temperature: Sampling temperature.
+        max_tokens: Maximum generation tokens.
+        tools: Tool callables (for ReAct modules).
+        input_map: State key → signature field mapping.
+        output_map: Signature field → state key mapping.
+        optimized_path: Path to saved optimized module state.
+
+    Example::
+
+        @dspy_node("question -> answer", module="ChainOfThought")
+        async def answer_question(self, state: dict) -> dict:
+            return state
+
+        @dspy_node(
+            "question -> answer",
+            module="ReAct",
+            tools=[search_web],
+        )
+        async def research(self, state: dict) -> dict:
+            return state
+    """
+
+    def decorator(func: F) -> NodeDescriptor:
+        is_async = inspect.iscoroutinefunction(func)
+
+        metadata = NodeMetadata(
+            node_type="dspy",
+            name=name or func.__name__,
+            config={
+                "signature": signature,
+                "module": module,
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "tools": tools or [],
+                "input_map": input_map,
+                "output_map": output_map,
+                "optimized_path": optimized_path,
+            },
+            is_async=is_async,
+        )
+
+        return NodeDescriptor(func, metadata)
+
+    return decorator
+
+
 def entrypoint(func: F | NodeDescriptor) -> F | NodeDescriptor:
     """Mark a node as the graph entry point.
 

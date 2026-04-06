@@ -13,6 +13,8 @@ from duragraph.nodes import (
 from duragraph.tools import get_global_registry, resolve_tool_calls, tool
 from duragraph.types import AIMessage, HumanMessage, Message, State, ToolMessage
 
+dspy_node = None
+
 # Optional dependencies - define as None first, then import if available
 create_embedding_provider = None
 get_embedding_provider = None
@@ -60,6 +62,14 @@ try:
 except ImportError:
     _has_document_loaders = False
 
+try:
+    from duragraph.nodes import dspy_node as _dspy_node
+
+    dspy_node = _dspy_node
+    _has_dspy = True
+except ImportError:
+    _has_dspy = False
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -85,6 +95,9 @@ __all__ = [
     "AIMessage",
     "ToolMessage",
 ]
+
+if _has_dspy:
+    __all__.append("dspy_node")
 
 # Add embeddings to exports if available
 if _has_embeddings:
