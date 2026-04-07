@@ -2,5 +2,6 @@
 
 from duragraph.prompts.decorators import prompt
 from duragraph.prompts.store import PromptStore
+from duragraph.prompts.template import PromptLibrary, PromptTemplate
 
-__all__ = ["prompt", "PromptStore"]
+__all__ = ["prompt", "PromptLibrary", "PromptStore", "PromptTemplate"]

@@ -5,7 +5,7 @@ from typing import Any, TypeVar
 
 from duragraph.edges import Edge, NodeProxy
 from duragraph.nodes import NodeMetadata
-from duragraph.types import Event, GraphConfig, RunResult, State
+from duragraph.types import Event, GraphConfig, RunResult, State, StreamMode
 
 T = TypeVar("T")
 
@@ -187,6 +187,7 @@ class GraphInstance:
         *,
         config: GraphConfig | None = None,
         thread_id: str | None = None,
+        stream_mode: list[StreamMode] | None = None,
     ) -> AsyncIterator[Event]:
         """Stream graph execution events.
 
@@ -194,11 +195,29 @@ class GraphInstance:
             input: Initial state for the graph.
             config: Optional execution configuration.
             thread_id: Optional thread ID for conversation context.
+            stream_mode: Filter which event types to yield.
+                         Supported: "values", "updates", "messages", "events".
+                         Default (None) yields all events.
 
         Yields:
             Event objects for each execution step.
         """
         from datetime import datetime
+
+        modes = set(stream_mode or [])
+
+        def _should_yield(event_type: str) -> bool:
+            if not modes:
+                return True
+            if event_type in ("run_started", "run_completed", "run_failed"):
+                return True
+            if "events" in modes:
+                return True
+            if "values" in modes and event_type == "values":
+                return True
+            if "updates" in modes and event_type in ("node_started", "node_completed", "updates"):
+                return True
+            return "messages" in modes and event_type == "token"
 
         run_id = "local-stream"
         state = input.copy()
@@ -221,15 +240,15 @@ class GraphInstance:
             return
 
         while current_node is not None:
-            yield Event(
-                type="node_started",
-                run_id=run_id,
-                node_id=current_node,
-                data={},
-                timestamp=datetime.utcnow().isoformat(),
-            )
+            if _should_yield("node_started"):
+                yield Event(
+                    type="node_started",
+                    run_id=run_id,
+                    node_id=current_node,
+                    data={},
+                    timestamp=datetime.utcnow().isoformat(),
+                )
 
-            # Get node metadata
             metadata = self._definition.nodes.get(current_node)
             if metadata is None:
                 yield Event(
@@ -250,30 +269,56 @@ class GraphInstance:
                 )
                 return
 
-            # Import executor
-            from duragraph.executor import execute_node
+            # Token-level streaming for LLM nodes when "messages" mode requested
+            if metadata.node_type == "llm" and "messages" in modes:
+                result = await self._stream_llm_node(
+                    current_node, metadata, state, run_id, datetime
+                )
+                async for token_event in result["token_events"]:
+                    yield token_event
+                node_result = result["output"]
+            else:
+                from duragraph.executor import execute_node
 
-            result = await execute_node(current_node, metadata, node_method, state)
-            if isinstance(result, dict):
-                state.update(result)
+                node_result = await execute_node(current_node, metadata, node_method, state)
 
-            yield Event(
-                type="node_completed",
-                run_id=run_id,
-                node_id=current_node,
-                data={"output": result},
-                timestamp=datetime.utcnow().isoformat(),
-            )
+            if isinstance(node_result, dict):
+                state.update(node_result)
 
-            # Find next node
+            if _should_yield("node_completed"):
+                yield Event(
+                    type="node_completed",
+                    run_id=run_id,
+                    node_id=current_node,
+                    data={"output": node_result},
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+
+            if _should_yield("updates"):
+                yield Event(
+                    type="updates",
+                    run_id=run_id,
+                    node_id=current_node,
+                    data={"updates": node_result if isinstance(node_result, dict) else {}},
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+
+            if _should_yield("values"):
+                yield Event(
+                    type="values",
+                    run_id=run_id,
+                    data={"state": state.copy()},
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+
             next_node = None
             for edge in self._definition.edges:
                 if edge.source == current_node:
                     if isinstance(edge.target, str):
                         next_node = edge.target
                     elif isinstance(edge.target, dict):
-                        if isinstance(result, str) and result in edge.target:
-                            next_node = edge.target[result]
+                        if isinstance(node_result, str) and node_result in edge.target:
+                            next_node = edge.target[node_result]
                     break
 
             current_node = next_node
@@ -284,6 +329,72 @@ class GraphInstance:
             data={"output": state},
             timestamp=datetime.utcnow().isoformat(),
         )
+
+    async def _stream_llm_node(
+        self,
+        node_name: str,
+        metadata: NodeMetadata,
+        state: State,
+        run_id: str,
+        datetime_mod: Any,
+    ) -> dict[str, Any]:
+        """Stream tokens from an LLM node, collecting token events and final output."""
+        from duragraph.llm import LLMRequest, get_provider
+
+        config = metadata.config
+        model = config.get("model", "gpt-4o-mini")
+        temperature = config.get("temperature", 0.7)
+        max_tokens = config.get("max_tokens")
+        system_prompt = config.get("system_prompt")
+
+        messages: list[dict[str, Any]] = []
+        if "messages" in state:
+            messages = state["messages"].copy()
+        elif "input" in state:
+            messages = [{"role": "user", "content": str(state["input"])}]
+        else:
+            messages = [{"role": "user", "content": str(state)}]
+
+        provider = get_provider(model)
+        request = LLMRequest(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+        )
+
+        collected_content = ""
+        token_events: list[Event] = []
+
+        try:
+            async for chunk in provider.astream(request):
+                if chunk.content:
+                    collected_content += chunk.content
+                    token_events.append(
+                        Event(
+                            type="token",
+                            run_id=run_id,
+                            node_id=node_name,
+                            data={"token": chunk.content},
+                            timestamp=datetime_mod.utcnow().isoformat(),
+                        )
+                    )
+        except (AttributeError, NotImplementedError):
+            response = await provider.acomplete(request)
+            collected_content = response.content
+
+        result: dict[str, Any] = {}
+        if "messages" in state:
+            messages.append({"role": "assistant", "content": collected_content})
+            result["messages"] = messages
+        result["response"] = collected_content
+
+        async def _yield_tokens() -> AsyncIterator[Event]:
+            for evt in token_events:
+                yield evt
+
+        return {"token_events": _yield_tokens(), "output": result}
 
     def serve(
         self,
@@ -469,11 +580,14 @@ def Graph(
             *,
             config: GraphConfig | None = None,
             thread_id: str | None = None,
+            stream_mode: list[StreamMode] | None = None,
         ) -> AsyncIterator[Event]:
             """Stream graph execution events."""
             definition = self._get_definition()
             instance = GraphInstance(definition, self)
-            async for event in instance.stream(input, config=config, thread_id=thread_id):
+            async for event in instance.stream(
+                input, config=config, thread_id=thread_id, stream_mode=stream_mode
+            ):
                 yield event
 
         def serve(
@@ -492,11 +606,15 @@ def Graph(
                 capabilities=capabilities,
             )
 
-        def as_subgraph(cls_self: type[Any]) -> Any:
-            """Return this graph as a subgraph node."""
-            # Create a subgraph node that can be used in another graph
-            instance = cls_self()
-            return instance._get_definition()
+        def as_subgraph(cls_self: type[Any], *, name: str | None = None) -> Any:
+            """Return this graph as a subgraph node usable in a parent graph.
+
+            Args:
+                name: Optional node name. Defaults to the graph id.
+            """
+            from duragraph.subgraph import SubgraphNode
+
+            return SubgraphNode.from_graph(cls_self, name=name)
 
         cls.__init__ = new_init
         cls._setup_node_proxies = _setup_node_proxies

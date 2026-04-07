@@ -11,7 +11,7 @@ from duragraph.nodes import (
     tool_node,
 )
 from duragraph.tools import get_global_registry, resolve_tool_calls, tool
-from duragraph.types import AIMessage, HumanMessage, Message, State, ToolMessage
+from duragraph.types import AIMessage, HumanMessage, Message, State, StreamMode, ToolMessage
 
 dspy_node = None
 
@@ -90,6 +90,7 @@ __all__ = [
     "resolve_tool_calls",
     # Types
     "State",
+    "StreamMode",
     "Message",
     "HumanMessage",
     "AIMessage",

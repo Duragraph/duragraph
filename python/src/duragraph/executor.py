@@ -32,6 +32,21 @@ async def execute_llm_node(
     system_prompt = config.get("system_prompt")
     tool_schemas = config.get("tool_schemas", [])
 
+    # Resolve prompt template if attached via @prompt decorator
+    prompt_meta = config.get("_prompt_metadata")
+    if prompt_meta:
+        from duragraph.prompts.template import PromptLibrary
+
+        library: PromptLibrary | None = config.get("_prompt_library")
+        if library is not None:
+            tmpl = library.get(prompt_meta["prompt_id"], version=prompt_meta.get("version"))
+            template_vars = {
+                k: v for k, v in state.items() if isinstance(v, (str, int, float, bool))
+            }
+            system_prompt = tmpl.render(
+                **{k: template_vars[k] for k in tmpl.variables if k in template_vars}
+            )
+
     # Build messages from state
     messages = []
     if "messages" in state:
@@ -205,6 +220,13 @@ async def execute_node(
         return await execute_llm_node(node_name, metadata, state)
     elif node_type == "dspy":
         return await execute_dspy_node(node_name, metadata, node_method, state)
+    elif node_type == "subgraph":
+        from duragraph.subgraph import execute_subgraph
+
+        config = metadata.config
+        return await execute_subgraph(
+            config["graph_cls"], state, config.get("input_map", {}), config.get("output_map", {})
+        )
     elif node_type in ("function", "tool", "router", "human"):
         return await execute_function_node(node_method, state)
     else:

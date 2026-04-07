@@ -93,8 +93,13 @@ class Event(BaseModel):
         "node_completed",
         "token",
         "checkpoint",
+        "values",
+        "updates",
     ]
     run_id: str
     node_id: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
     timestamp: str
+
+
+StreamMode = Literal["values", "updates", "messages", "events"]

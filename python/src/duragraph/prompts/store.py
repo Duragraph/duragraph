@@ -1,8 +1,23 @@
 """Prompt store client for DuraGraph."""
 
+import time
 from typing import Any
 
 import httpx
+
+
+class _CacheEntry:
+    """Internal cache entry with TTL."""
+
+    __slots__ = ("value", "expires_at")
+
+    def __init__(self, value: Any, ttl: float):
+        self.value = value
+        self.expires_at = time.monotonic() + ttl
+
+    @property
+    def expired(self) -> bool:
+        return time.monotonic() >= self.expires_at
 
 
 class PromptStore:
@@ -13,16 +28,20 @@ class PromptStore:
         base_url: str,
         *,
         api_key: str | None = None,
+        cache_ttl: float = 300.0,
     ):
         """Initialize prompt store client.
 
         Args:
             base_url: URL of the prompt store API.
             api_key: Optional API key for authentication.
+            cache_ttl: Cache time-to-live in seconds (default 5 minutes, 0 to disable).
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self._client = httpx.Client(timeout=30.0)
+        self._cache_ttl = cache_ttl
+        self._cache: dict[str, _CacheEntry] = {}
 
     def _headers(self) -> dict[str, str]:
         """Get request headers."""
@@ -30,6 +49,36 @@ class PromptStore:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
+
+    def _cache_key(self, prompt_id: str, version: str | None, variant: str | None) -> str:
+        return f"{prompt_id}:{version or 'latest'}:{variant or 'default'}"
+
+    def _get_cached(self, key: str) -> dict[str, Any] | None:
+        if self._cache_ttl <= 0:
+            return None
+        entry = self._cache.get(key)
+        if entry is None or entry.expired:
+            self._cache.pop(key, None)
+            return None
+        return entry.value
+
+    def _set_cached(self, key: str, value: dict[str, Any]) -> None:
+        if self._cache_ttl > 0:
+            self._cache[key] = _CacheEntry(value, self._cache_ttl)
+
+    def invalidate(self, prompt_id: str | None = None) -> None:
+        """Invalidate cached prompts.
+
+        Args:
+            prompt_id: If given, only invalidate entries for this prompt.
+                       Otherwise clear the entire cache.
+        """
+        if prompt_id is None:
+            self._cache.clear()
+        else:
+            keys_to_remove = [k for k in self._cache if k.startswith(f"{prompt_id}:")]
+            for k in keys_to_remove:
+                del self._cache[k]
 
     def get_prompt(
         self,
@@ -48,6 +97,11 @@ class PromptStore:
         Returns:
             Prompt data including content and metadata.
         """
+        cache_key = self._cache_key(prompt_id, version, variant)
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+
         params: dict[str, str] = {}
         if version:
             params["version"] = version
@@ -60,7 +114,9 @@ class PromptStore:
             params=params,
         )
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+        self._set_cached(cache_key, result)
+        return result
 
     def list_prompts(
         self,
