@@ -3,6 +3,8 @@ import { useAllRuns } from '@/api/runs'
 import type { Run, RunStatus, NodeExecution } from '@/types/entities'
 import { createRunStream } from '@/lib/sse'
 import type { RunEvent } from '@/types/entities'
+import { RunInspector } from '@/components/debug/RunInspector'
+import { GraphTopology, StatePanel } from '@/components/debug/GraphView'
 
 const STATUS_COLORS: Record<RunStatus, string> = {
   queued: 'bg-muted-foreground',
@@ -13,23 +15,14 @@ const STATUS_COLORS: Record<RunStatus, string> = {
   requires_action: 'bg-orange-500',
 }
 
-const NODE_TYPE_STYLES: Record<string, { icon: string; color: string }> = {
-  function: { icon: 'fn', color: 'bg-blue-500/10 text-blue-600 border-blue-200' },
-  llm: { icon: 'AI', color: 'bg-purple-500/10 text-purple-600 border-purple-200' },
-  tool: { icon: 'T', color: 'bg-green-500/10 text-green-600 border-green-200' },
-  router: { icon: 'R', color: 'bg-orange-500/10 text-orange-600 border-orange-200' },
-  human: { icon: 'H', color: 'bg-pink-500/10 text-pink-600 border-pink-200' },
-}
-
-function getNodeStyle(type: string) {
-  return NODE_TYPE_STYLES[type] ?? NODE_TYPE_STYLES['function']
-}
+type DebugTab = 'inspector' | 'graph' | 'state'
 
 export function TracesView() {
   const { data: runs, isLoading } = useAllRuns()
   const [selectedRun, setSelectedRun] = useState<Run | null>(null)
   const [nodeExecutions, setNodeExecutions] = useState<NodeExecution[]>([])
   const [traceLoading, setTraceLoading] = useState(false)
+  const [debugTab, setDebugTab] = useState<DebugTab>('inspector')
 
   function loadTrace(run: Run) {
     setSelectedRun(run)
@@ -156,7 +149,7 @@ export function TracesView() {
             <p>Select a run to view its execution trace</p>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl">
+          <div className="mx-auto max-w-4xl">
             {/* Run header */}
             <div className="mb-6">
               <div className="flex items-center gap-3">
@@ -175,77 +168,62 @@ export function TracesView() {
               </div>
             </div>
 
-            {/* Timeline */}
+            {/* Debug tabs */}
+            <div className="mb-4 flex gap-0 border-b border-border">
+              {(['inspector', 'graph', 'state'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setDebugTab(tab)}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    debugTab === tab
+                      ? 'border-foreground text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {tab === 'inspector' && 'Inspector'}
+                  {tab === 'graph' && 'Graph'}
+                  {tab === 'state' && 'State'}
+                </button>
+              ))}
+            </div>
+
             {traceLoading && nodeExecutions.length === 0 && (
               <div className="text-sm text-muted-foreground animate-pulse">
                 Loading trace...
               </div>
             )}
 
-            <div className="space-y-0">
-              {nodeExecutions.map((exec, i) => {
-                const style = getNodeStyle(exec.node_type)
-                return (
-                  <div key={`${exec.node_id}-${i}`} className="flex gap-3">
-                    {/* Timeline connector */}
-                    <div className="flex flex-col items-center">
-                      <div
-                        className={`flex h-8 w-8 items-center justify-center border text-xs font-mono font-bold ${style.color}`}
-                      >
-                        {style.icon}
-                      </div>
-                      {i < nodeExecutions.length - 1 && (
-                        <div className="w-px flex-1 bg-border" />
-                      )}
-                    </div>
+            {debugTab === 'inspector' && (
+              <RunInspector
+                executions={nodeExecutions}
+                runOutput={selectedRun.output}
+              />
+            )}
 
-                    {/* Node detail */}
-                    <div className="flex-1 pb-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">{exec.node_id}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {exec.node_type}
-                        </span>
-                        {exec.status === 'started' && (
-                          <span className="text-xs text-yellow-600 animate-pulse">
-                            running...
-                          </span>
-                        )}
-                        {exec.status === 'failed' && (
-                          <span className="text-xs text-red-600">failed</span>
-                        )}
-                      </div>
+            {debugTab === 'graph' && (
+              <GraphTopology
+                nodes={nodeExecutions.map((e) => ({
+                  id: e.node_id,
+                  type: e.node_type,
+                }))}
+                edges={nodeExecutions.slice(1).map((e, i) => ({
+                  source: nodeExecutions[i].node_id,
+                  target: e.node_id,
+                }))}
+                activeNodeId={
+                  nodeExecutions.find((e) => e.status === 'started')?.node_id
+                }
+                completedNodeIds={nodeExecutions
+                  .filter((e) => e.status === 'completed')
+                  .map((e) => e.node_id)}
+              />
+            )}
 
-                      {exec.error && (
-                        <div className="mt-1 text-xs text-red-600 font-mono bg-red-50 p-2">
-                          {exec.error}
-                        </div>
-                      )}
-
-                      {exec.output && (
-                        <details className="mt-1">
-                          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-                            Output
-                          </summary>
-                          <pre className="mt-1 overflow-x-auto bg-muted p-2 text-xs font-mono">
-                            {JSON.stringify(exec.output, null, 2)}
-                          </pre>
-                        </details>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Run output */}
-            {selectedRun.output && (
-              <div className="mt-6">
-                <h3 className="mb-2 text-sm font-semibold">Output</h3>
-                <pre className="overflow-x-auto bg-muted p-3 text-xs font-mono">
-                  {JSON.stringify(selectedRun.output, null, 2)}
-                </pre>
-              </div>
+            {debugTab === 'state' && (
+              <StatePanel
+                state={(selectedRun.output ?? {}) as Record<string, unknown>}
+                previousState={(selectedRun.input ?? {}) as Record<string, unknown>}
+              />
             )}
 
             {selectedRun.error && (
