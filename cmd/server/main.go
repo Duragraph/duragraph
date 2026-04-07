@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,10 +26,13 @@ import (
 	"github.com/duragraph/duragraph/internal/infrastructure/persistence/postgres"
 	"github.com/duragraph/duragraph/internal/infrastructure/streaming"
 	"github.com/duragraph/duragraph/internal/infrastructure/tools"
+	"github.com/duragraph/duragraph/internal/infrastructure/tracing"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 )
 
 func main() {
@@ -45,6 +49,17 @@ func main() {
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	defer ctxCancel()
+
+	// Initialize OpenTelemetry tracing (opt-in via OTEL_ENABLED)
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		shutdownTracer, err := tracing.Init(ctx, "duragraph-server", version)
+		if err != nil {
+			log.Printf("failed to initialize tracing: %v", err)
+		} else {
+			defer shutdownTracer(context.Background())
+			fmt.Println("✅ OpenTelemetry tracing enabled")
+		}
+	}
 
 	// Initialize PostgreSQL connection pools (write + read)
 	writeConfig := postgres.Config{
@@ -210,6 +225,16 @@ func main() {
 	// Initialize Prometheus metrics
 	metrics := monitoring.NewMetrics("duragraph")
 
+	// Register DB pool collectors for Prometheus
+	writePoolCollector := monitoring.NewDBPoolCollector(pools.Write, "duragraph", "write")
+	prometheus.MustRegister(writePoolCollector)
+	if pools.Read != pools.Write {
+		readPoolCollector := monitoring.NewDBPoolCollector(pools.Read, "duragraph", "read")
+		prometheus.MustRegister(readPoolCollector)
+	}
+
+	fmt.Println("✅ Prometheus metrics + DB pool collectors registered")
+
 	// Initialize tool registry with built-in tools
 	toolRegistry := tools.NewRegistry()
 	if err := tools.RegisterBuiltinTools(toolRegistry); err != nil {
@@ -345,10 +370,27 @@ func main() {
 	e.HTTPErrorHandler = middleware.ErrorHandler()
 
 	// Middleware
+	e.Use(middleware.RequestID())
+	e.Use(middleware.SecurityHeaders())
+	e.Use(middleware.RequestValidation(10 * 1024 * 1024)) // 10 MB
 	e.Use(middleware.Logger())
 	e.Use(middleware.Metrics(metrics))
 	e.Use(echomiddleware.Recover())
-	e.Use(echomiddleware.CORS())
+	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
+		AllowOrigins: func() []string {
+			if origins := os.Getenv("CORS_ALLOWED_ORIGINS"); origins != "" {
+				return strings.Split(origins, ",")
+			}
+			return []string{"*"}
+		}(),
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{"Authorization", "Content-Type", "X-API-Key", "X-Request-ID"},
+		MaxAge:       3600,
+	}))
+
+	if os.Getenv("OTEL_ENABLED") == "true" {
+		e.Use(otelecho.Middleware("duragraph-server"))
+	}
 
 	// Optional rate limiting (configurable via env vars)
 	if os.Getenv("RATE_LIMIT_ENABLED") == "true" {

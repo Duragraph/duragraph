@@ -1,60 +1,62 @@
 package monitoring
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Metrics holds all Prometheus metrics
 type Metrics struct {
-	// HTTP metrics
 	HTTPRequestsTotal   *prometheus.CounterVec
 	HTTPRequestDuration *prometheus.HistogramVec
 	HTTPRequestSize     *prometheus.HistogramVec
 	HTTPResponseSize    *prometheus.HistogramVec
 
-	// Run metrics
 	RunsTotal            *prometheus.CounterVec
 	RunDuration          *prometheus.HistogramVec
 	RunsActive           prometheus.Gauge
 	RunStatusTransitions *prometheus.CounterVec
 
-	// Graph execution metrics
 	NodesExecutedTotal *prometheus.CounterVec
 	NodeDuration       *prometheus.HistogramVec
 	NodeErrors         *prometheus.CounterVec
 
-	// LLM metrics
 	LLMRequestsTotal   *prometheus.CounterVec
 	LLMRequestDuration *prometheus.HistogramVec
 	LLMTokensTotal     *prometheus.CounterVec
 	LLMErrors          *prometheus.CounterVec
 
-	// Tool metrics
 	ToolExecutionsTotal *prometheus.CounterVec
 	ToolDuration        *prometheus.HistogramVec
 	ToolErrors          *prometheus.CounterVec
 
-	// Event bus metrics
 	EventsPublishedTotal *prometheus.CounterVec
 	EventsConsumedTotal  *prometheus.CounterVec
 
-	// Database metrics
 	DBQueriesTotal      *prometheus.CounterVec
 	DBQueryDuration     *prometheus.HistogramVec
 	DBConnectionsActive prometheus.Gauge
+
+	WorkersActive        prometheus.Gauge
+	WorkerHeartbeats     *prometheus.CounterVec
+	TasksDispatched      *prometheus.CounterVec
+	TasksClaimed         *prometheus.CounterVec
+	LeasesExpired        prometheus.Counter
+	OutboxPending        prometheus.Gauge
+	OutboxPublished      prometheus.Counter
+	ConcurrencyConflicts prometheus.Counter
+	ErrorsTotal          *prometheus.CounterVec
+	PanicsRecovered      prometheus.Counter
 }
 
-// NewMetrics creates and registers all Prometheus metrics
 func NewMetrics(namespace string) *Metrics {
 	if namespace == "" {
 		namespace = "duragraph"
 	}
 
 	return &Metrics{
-		// HTTP metrics
 		HTTPRequestsTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
@@ -91,7 +93,6 @@ func NewMetrics(namespace string) *Metrics {
 			[]string{"method", "path"},
 		),
 
-		// Run metrics
 		RunsTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
@@ -125,7 +126,6 @@ func NewMetrics(namespace string) *Metrics {
 			[]string{"from_status", "to_status"},
 		),
 
-		// Graph execution metrics
 		NodesExecutedTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
@@ -152,7 +152,6 @@ func NewMetrics(namespace string) *Metrics {
 			[]string{"node_type", "error_type"},
 		),
 
-		// LLM metrics
 		LLMRequestsTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
@@ -187,7 +186,6 @@ func NewMetrics(namespace string) *Metrics {
 			[]string{"provider", "model", "error_type"},
 		),
 
-		// Tool metrics
 		ToolExecutionsTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
@@ -214,7 +212,6 @@ func NewMetrics(namespace string) *Metrics {
 			[]string{"tool_name", "error_type"},
 		),
 
-		// Event bus metrics
 		EventsPublishedTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
@@ -232,7 +229,6 @@ func NewMetrics(namespace string) *Metrics {
 			[]string{"event_type"},
 		),
 
-		// Database metrics
 		DBQueriesTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
@@ -257,36 +253,107 @@ func NewMetrics(namespace string) *Metrics {
 				Help:      "Number of active database connections",
 			},
 		),
+
+		WorkersActive: promauto.NewGauge(
+			prometheus.GaugeOpts{
+				Namespace: namespace,
+				Name:      "workers_active",
+				Help:      "Number of active workers",
+			},
+		),
+		WorkerHeartbeats: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "worker_heartbeats_total",
+				Help:      "Total worker heartbeats received",
+			},
+			[]string{"worker_id"},
+		),
+		TasksDispatched: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "tasks_dispatched_total",
+				Help:      "Total tasks dispatched to workers",
+			},
+			[]string{"graph_id"},
+		),
+		TasksClaimed: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "tasks_claimed_total",
+				Help:      "Total tasks claimed by workers",
+			},
+			[]string{"worker_id"},
+		),
+		LeasesExpired: promauto.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "leases_expired_total",
+				Help:      "Total number of expired run leases",
+			},
+		),
+		OutboxPending: promauto.NewGauge(
+			prometheus.GaugeOpts{
+				Namespace: namespace,
+				Name:      "outbox_pending",
+				Help:      "Number of pending outbox messages",
+			},
+		),
+		OutboxPublished: promauto.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "outbox_published_total",
+				Help:      "Total outbox messages published",
+			},
+		),
+		ConcurrencyConflicts: promauto.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "concurrency_conflicts_total",
+				Help:      "Total optimistic concurrency conflicts",
+			},
+		),
+		ErrorsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "errors_total",
+				Help:      "Total errors by category",
+			},
+			[]string{"category", "code"},
+		),
+		PanicsRecovered: promauto.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "panics_recovered_total",
+				Help:      "Total panics recovered by middleware",
+			},
+		),
 	}
 }
 
-// RecordHTTPRequest records an HTTP request metric
 func (m *Metrics) RecordHTTPRequest(method, path string, status int, duration time.Duration, reqSize, respSize int) {
-	m.HTTPRequestsTotal.WithLabelValues(method, path, string(rune(status))).Inc()
+	statusStr := strconv.Itoa(status)
+	m.HTTPRequestsTotal.WithLabelValues(method, path, statusStr).Inc()
 	m.HTTPRequestDuration.WithLabelValues(method, path).Observe(duration.Seconds())
 	m.HTTPRequestSize.WithLabelValues(method, path).Observe(float64(reqSize))
 	m.HTTPResponseSize.WithLabelValues(method, path).Observe(float64(respSize))
 }
 
-// RecordRunCreated records a run creation
 func (m *Metrics) RecordRunCreated(assistantID string) {
 	m.RunsTotal.WithLabelValues(assistantID).Inc()
 	m.RunsActive.Inc()
 }
 
-// RecordRunCompleted records a run completion
 func (m *Metrics) RecordRunCompleted(assistantID, status string, duration time.Duration) {
 	m.RunDuration.WithLabelValues(assistantID, status).Observe(duration.Seconds())
 	m.RunsActive.Dec()
 }
 
-// RecordNodeExecution records node execution
 func (m *Metrics) RecordNodeExecution(nodeType, status string, duration time.Duration) {
 	m.NodesExecutedTotal.WithLabelValues(nodeType, status).Inc()
 	m.NodeDuration.WithLabelValues(nodeType).Observe(duration.Seconds())
 }
 
-// RecordLLMRequest records an LLM request
 func (m *Metrics) RecordLLMRequest(provider, model, status string, duration time.Duration, promptTokens, completionTokens int) {
 	m.LLMRequestsTotal.WithLabelValues(provider, model, status).Inc()
 	m.LLMRequestDuration.WithLabelValues(provider, model).Observe(duration.Seconds())
@@ -294,8 +361,11 @@ func (m *Metrics) RecordLLMRequest(provider, model, status string, duration time
 	m.LLMTokensTotal.WithLabelValues(provider, model, "completion").Add(float64(completionTokens))
 }
 
-// RecordToolExecution records tool execution
 func (m *Metrics) RecordToolExecution(toolName, status string, duration time.Duration) {
 	m.ToolExecutionsTotal.WithLabelValues(toolName, status).Inc()
 	m.ToolDuration.WithLabelValues(toolName).Observe(duration.Seconds())
+}
+
+func (m *Metrics) RecordError(category, code string) {
+	m.ErrorsTotal.WithLabelValues(category, code).Inc()
 }
