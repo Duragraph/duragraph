@@ -2,51 +2,67 @@ package middleware
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
 
 	"github.com/duragraph/duragraph/internal/infrastructure/http/dto"
 	"github.com/duragraph/duragraph/internal/pkg/errors"
 	"github.com/labstack/echo/v4"
 )
 
-// ErrorHandler is a custom error handler for Echo
 func ErrorHandler() echo.HTTPErrorHandler {
 	return func(err error, c echo.Context) {
 		if c.Response().Committed {
 			return
 		}
 
-		// Check if it's a domain error
+		reqID, _ := c.Get("request_id").(string)
+
 		var domainErr *errors.DomainError
 		if errors.As(err, &domainErr) {
 			statusCode := mapDomainErrorToHTTPStatus(domainErr)
-
-			c.JSON(statusCode, dto.ErrorResponse{
+			resp := dto.ErrorResponse{
 				Error:   domainErr.Code,
 				Message: domainErr.Message,
 				Code:    domainErr.Code,
-			})
+			}
+			if reqID != "" {
+				resp.RequestID = reqID
+			}
+			logError(c, statusCode, domainErr.Code, domainErr.Message, reqID)
+			c.JSON(statusCode, resp)
 			return
 		}
 
-		// Check if it's an Echo HTTP error
 		if he, ok := err.(*echo.HTTPError); ok {
-			c.JSON(he.Code, dto.ErrorResponse{
+			msg := fmt.Sprintf("%v", he.Message)
+			resp := dto.ErrorResponse{
 				Error:   http.StatusText(he.Code),
-				Message: fmt.Sprintf("%v", he.Message),
-			})
+				Message: msg,
+			}
+			if reqID != "" {
+				resp.RequestID = reqID
+			}
+			logError(c, he.Code, http.StatusText(he.Code), msg, reqID)
+			c.JSON(he.Code, resp)
 			return
 		}
 
-		// Default to internal server error
-		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+		safeMsg := sanitizeErrorMessage(err.Error())
+		resp := dto.ErrorResponse{
 			Error:   "internal_error",
-			Message: err.Error(),
-		})
+			Message: safeMsg,
+		}
+		if reqID != "" {
+			resp.RequestID = reqID
+		}
+		log.Printf("[ERROR] request_id=%s method=%s path=%s status=500 error=%q",
+			reqID, c.Request().Method, c.Request().URL.Path, err.Error())
+		c.JSON(http.StatusInternalServerError, resp)
 	}
 }
 
-// mapDomainErrorToHTTPStatus maps domain errors to HTTP status codes
 func mapDomainErrorToHTTPStatus(err *errors.DomainError) int {
 	switch err.Code {
 	case "NOT_FOUND":
@@ -63,7 +79,31 @@ func mapDomainErrorToHTTPStatus(err *errors.DomainError) int {
 		return http.StatusForbidden
 	case "CONCURRENCY":
 		return http.StatusConflict
+	case "TIMEOUT":
+		return http.StatusGatewayTimeout
+	case "RATE_LIMITED":
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError
+	}
+}
+
+func sanitizeErrorMessage(msg string) string {
+	lower := strings.ToLower(msg)
+	for _, keyword := range []string{"password", "secret", "token", "key", "credential", "dsn", "connection string"} {
+		if strings.Contains(lower, keyword) {
+			return "An internal error occurred"
+		}
+	}
+	if len(msg) > 500 {
+		return msg[:500]
+	}
+	return msg
+}
+
+func logError(c echo.Context, status int, code, message, reqID string) {
+	if status >= 500 {
+		log.Printf("[ERROR] request_id=%s method=%s path=%s status=%d code=%s message=%q",
+			reqID, c.Request().Method, c.Request().URL.Path, status, code, message)
 	}
 }

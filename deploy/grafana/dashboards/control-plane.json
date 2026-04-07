@@ -1,0 +1,175 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Request Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(duragraph_http_requests_total[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "title": "Request Latency (p50/p95/p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(duragraph_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(duragraph_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(duragraph_http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "title": "Active Runs",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "duragraph_runs_active", "legendFormat": "Active" }
+      ]
+    },
+    {
+      "title": "Active Workers",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 },
+      "targets": [
+        { "expr": "duragraph_workers_active", "legendFormat": "Workers" }
+      ]
+    },
+    {
+      "title": "Error Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(duragraph_errors_total[5m]))", "legendFormat": "Errors/s" }
+      ],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "color": "green", "value": null },
+        { "color": "yellow", "value": 0.1 },
+        { "color": "red", "value": 1 }
+      ] } } }
+    },
+    {
+      "title": "Panics Recovered",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
+      "targets": [
+        { "expr": "duragraph_panics_recovered_total", "legendFormat": "Panics" }
+      ],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "color": "green", "value": null },
+        { "color": "red", "value": 1 }
+      ] } } }
+    },
+    {
+      "title": "Run Duration by Status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(duragraph_run_duration_seconds_bucket[5m])) by (le, status))", "legendFormat": "p95 {{status}}" }
+      ]
+    },
+    {
+      "title": "Run Status Transitions",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "sum(rate(duragraph_run_status_transitions_total[5m])) by (from_status, to_status)", "legendFormat": "{{from_status}} → {{to_status}}" }
+      ]
+    },
+    {
+      "title": "Node Execution Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "sum(rate(duragraph_nodes_executed_total[5m])) by (node_type, status)", "legendFormat": "{{node_type}} ({{status}})" }
+      ]
+    },
+    {
+      "title": "Node Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(duragraph_node_duration_seconds_bucket[5m])) by (le, node_type))", "legendFormat": "{{node_type}}" }
+      ]
+    },
+    {
+      "title": "LLM Request Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        { "expr": "sum(rate(duragraph_llm_requests_total[5m])) by (provider, model)", "legendFormat": "{{provider}}/{{model}}" }
+      ]
+    },
+    {
+      "title": "LLM Tokens (prompt vs completion)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [
+        { "expr": "sum(rate(duragraph_llm_tokens_total[5m])) by (type)", "legendFormat": "{{type}}" }
+      ]
+    },
+    {
+      "title": "DB Pool Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "targets": [
+        { "expr": "duragraph_db_pool_total_conns", "legendFormat": "total ({{pool}})" },
+        { "expr": "duragraph_db_pool_acquired_conns", "legendFormat": "acquired ({{pool}})" },
+        { "expr": "duragraph_db_pool_idle_conns", "legendFormat": "idle ({{pool}})" },
+        { "expr": "duragraph_db_pool_max_conns", "legendFormat": "max ({{pool}})" }
+      ]
+    },
+    {
+      "title": "DB Acquire Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "targets": [
+        { "expr": "rate(duragraph_db_pool_acquire_duration_seconds_total[5m]) / rate(duragraph_db_pool_acquire_count_total[5m])", "legendFormat": "avg acquire ({{pool}})" }
+      ]
+    },
+    {
+      "title": "Outbox Health",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "targets": [
+        { "expr": "duragraph_outbox_pending", "legendFormat": "Pending" },
+        { "expr": "rate(duragraph_outbox_published_total[5m])", "legendFormat": "Published/s" }
+      ]
+    },
+    {
+      "title": "Concurrency Conflicts & Expired Leases",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
+      "targets": [
+        { "expr": "rate(duragraph_concurrency_conflicts_total[5m])", "legendFormat": "Conflicts/s" },
+        { "expr": "rate(duragraph_leases_expired_total[5m])", "legendFormat": "Expired leases/s" }
+      ]
+    },
+    {
+      "title": "Tasks Dispatched vs Claimed",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
+      "targets": [
+        { "expr": "sum(rate(duragraph_tasks_dispatched_total[5m]))", "legendFormat": "Dispatched/s" },
+        { "expr": "sum(rate(duragraph_tasks_claimed_total[5m]))", "legendFormat": "Claimed/s" }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["duragraph", "ai-orchestration"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "DuraGraph Control Plane",
+  "uid": "duragraph-control-plane",
+  "version": 1
+}
