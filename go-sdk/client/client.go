@@ -104,9 +104,50 @@ type Run struct {
 	UpdatedAt   string         `json:"updated_at"`
 }
 
+// StoreItem represents an item in the key-value store.
+type StoreItem struct {
+	Namespace []string       `json:"namespace"`
+	Key       string         `json:"key"`
+	Value     map[string]any `json:"value"`
+	CreatedAt string         `json:"created_at,omitempty"`
+	UpdatedAt string         `json:"updated_at,omitempty"`
+}
+
+// Cron represents a scheduled cron job.
+type Cron struct {
+	CronID      string         `json:"cron_id"`
+	AssistantID string         `json:"assistant_id"`
+	ThreadID    string         `json:"thread_id,omitempty"`
+	Schedule    string         `json:"schedule"`
+	Input       map[string]any `json:"input,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+}
+
+// ThreadState represents the current state of a thread.
+type ThreadState struct {
+	Values    map[string]any   `json:"values"`
+	Next      []string         `json:"next,omitempty"`
+	Metadata  map[string]any   `json:"metadata,omitempty"`
+	Config    map[string]any   `json:"config,omitempty"`
+	Tasks     []map[string]any `json:"tasks,omitempty"`
+	CreatedAt string           `json:"created_at,omitempty"`
+	ParentID  string           `json:"parent_id,omitempty"`
+}
+
 // CreateAssistantRequest is the payload for creating an assistant.
 type CreateAssistantRequest struct {
 	GraphID     string         `json:"graph_id"`
+	Name        string         `json:"name,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Config      map[string]any `json:"config,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// UpdateAssistantRequest is the payload for updating an assistant.
+type UpdateAssistantRequest struct {
+	GraphID     string         `json:"graph_id,omitempty"`
 	Name        string         `json:"name,omitempty"`
 	Description string         `json:"description,omitempty"`
 	Config      map[string]any `json:"config,omitempty"`
@@ -124,6 +165,67 @@ type CreateRunRequest struct {
 // CreateThreadRequest is the payload for creating a thread.
 type CreateThreadRequest struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// PutStoreItemRequest is the payload for putting an item in the store.
+type PutStoreItemRequest struct {
+	Namespace []string       `json:"namespace"`
+	Key       string         `json:"key"`
+	Value     map[string]any `json:"value"`
+}
+
+// SearchStoreRequest is the payload for searching store items.
+type SearchStoreRequest struct {
+	Namespace []string `json:"namespace,omitempty"`
+	Query     string   `json:"query,omitempty"`
+	Limit     int      `json:"limit,omitempty"`
+	Offset    int      `json:"offset,omitempty"`
+}
+
+// ListNamespacesRequest is the payload for listing store namespaces.
+type ListNamespacesRequest struct {
+	Prefix []string `json:"prefix,omitempty"`
+	Limit  int      `json:"limit,omitempty"`
+	Offset int      `json:"offset,omitempty"`
+}
+
+// CreateCronRequest is the payload for creating a cron job.
+type CreateCronRequest struct {
+	AssistantID string         `json:"assistant_id"`
+	Schedule    string         `json:"schedule"`
+	ThreadID    string         `json:"thread_id,omitempty"`
+	Input       map[string]any `json:"input,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// SearchCronsRequest is the payload for searching cron jobs.
+type SearchCronsRequest struct {
+	AssistantID string `json:"assistant_id,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
+}
+
+// UpdateThreadStateRequest is the payload for updating thread state.
+type UpdateThreadStateRequest struct {
+	Values   map[string]any `json:"values"`
+	AsNode   string         `json:"as_node,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// SearchAssistantsRequest is the payload for searching assistants.
+type SearchAssistantsRequest struct {
+	GraphID  string         `json:"graph_id,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	Limit    int            `json:"limit,omitempty"`
+	Offset   int            `json:"offset,omitempty"`
+}
+
+// SearchThreadsRequest is the payload for searching threads.
+type SearchThreadsRequest struct {
+	Metadata map[string]any `json:"metadata,omitempty"`
+	Status   string         `json:"status,omitempty"`
+	Limit    int            `json:"limit,omitempty"`
+	Offset   int            `json:"offset,omitempty"`
 }
 
 // -- Assistants ---
@@ -158,6 +260,24 @@ func (c *Client) ListAssistants(ctx context.Context) ([]Assistant, error) {
 // DeleteAssistant deletes an assistant by ID.
 func (c *Client) DeleteAssistant(ctx context.Context, id string) error {
 	return c.delete(ctx, fmt.Sprintf("/api/v1/assistants/%s", id))
+}
+
+// UpdateAssistant updates an existing assistant.
+func (c *Client) UpdateAssistant(ctx context.Context, id string, req UpdateAssistantRequest) (*Assistant, error) {
+	var a Assistant
+	if err := c.patch(ctx, fmt.Sprintf("/api/v1/assistants/%s", id), req, &a); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// SearchAssistants searches for assistants matching criteria.
+func (c *Client) SearchAssistants(ctx context.Context, req SearchAssistantsRequest) ([]Assistant, error) {
+	var list []Assistant
+	if err := c.post(ctx, "/api/v1/assistants/search", req, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 // --- Threads ---
@@ -198,6 +318,42 @@ func (c *Client) ListThreads(ctx context.Context) ([]Thread, error) {
 // DeleteThread deletes a thread by ID.
 func (c *Client) DeleteThread(ctx context.Context, id string) error {
 	return c.delete(ctx, fmt.Sprintf("/api/v1/threads/%s", id))
+}
+
+// SearchThreads searches for threads matching criteria.
+func (c *Client) SearchThreads(ctx context.Context, req SearchThreadsRequest) ([]Thread, error) {
+	var list []Thread
+	if err := c.post(ctx, "/api/v1/threads/search", req, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// GetThreadState retrieves the current state of a thread.
+func (c *Client) GetThreadState(ctx context.Context, threadID string) (*ThreadState, error) {
+	var s ThreadState
+	if err := c.get(ctx, fmt.Sprintf("/api/v1/threads/%s/state", threadID), &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// UpdateThreadState updates the state of a thread.
+func (c *Client) UpdateThreadState(ctx context.Context, threadID string, req UpdateThreadStateRequest) (*ThreadState, error) {
+	var s ThreadState
+	if err := c.post(ctx, fmt.Sprintf("/api/v1/threads/%s/state", threadID), req, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// GetThreadHistory retrieves the state history of a thread.
+func (c *Client) GetThreadHistory(ctx context.Context, threadID string) ([]ThreadState, error) {
+	var list []ThreadState
+	if err := c.get(ctx, fmt.Sprintf("/api/v1/threads/%s/history", threadID), &list); err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 // --- Runs ---
@@ -261,6 +417,72 @@ func (c *Client) CancelRun(ctx context.Context, threadID, runID string) error {
 // Health checks the control plane health.
 func (c *Client) Health(ctx context.Context) error {
 	return c.getNoBody(ctx, "/health")
+}
+
+// --- Store ---
+
+// PutStoreItem creates or updates an item in the key-value store.
+func (c *Client) PutStoreItem(ctx context.Context, req PutStoreItemRequest) error {
+	return c.putNoBody(ctx, "/api/v1/store/items", req)
+}
+
+// GetStoreItem retrieves a single item from the store.
+func (c *Client) GetStoreItem(ctx context.Context, namespace []string, key string) (*StoreItem, error) {
+	var item StoreItem
+	payload := map[string]any{"namespace": namespace, "key": key}
+	if err := c.post(ctx, "/api/v1/store/items/get", payload, &item); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+// DeleteStoreItem deletes an item from the store.
+func (c *Client) DeleteStoreItem(ctx context.Context, namespace []string, key string) error {
+	payload := map[string]any{"namespace": namespace, "key": key}
+	return c.postNoBodyWithPayload(ctx, "/api/v1/store/items/delete", payload)
+}
+
+// SearchStore searches for items in the store.
+func (c *Client) SearchStore(ctx context.Context, req SearchStoreRequest) ([]StoreItem, error) {
+	var list []StoreItem
+	if err := c.post(ctx, "/api/v1/store/items/search", req, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// ListNamespaces lists namespaces in the store.
+func (c *Client) ListNamespaces(ctx context.Context, req ListNamespacesRequest) ([][]string, error) {
+	var list [][]string
+	if err := c.post(ctx, "/api/v1/store/namespaces", req, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// --- Crons ---
+
+// CreateCron creates a new cron job.
+func (c *Client) CreateCron(ctx context.Context, req CreateCronRequest) (*Cron, error) {
+	var cr Cron
+	if err := c.post(ctx, "/api/v1/crons", req, &cr); err != nil {
+		return nil, err
+	}
+	return &cr, nil
+}
+
+// DeleteCron deletes a cron job by ID.
+func (c *Client) DeleteCron(ctx context.Context, cronID string) error {
+	return c.delete(ctx, fmt.Sprintf("/api/v1/crons/%s", cronID))
+}
+
+// SearchCrons searches for cron jobs.
+func (c *Client) SearchCrons(ctx context.Context, req SearchCronsRequest) ([]Cron, error) {
+	var list []Cron
+	if err := c.post(ctx, "/api/v1/crons/search", req, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 // --- HTTP helpers ---
@@ -345,5 +567,26 @@ func (c *Client) getNoBody(ctx context.Context, path string) error {
 
 func (c *Client) postNoBody(ctx context.Context, path string) error {
 	_, err := c.doRequest(ctx, http.MethodPost, path, map[string]any{})
+	return err
+}
+
+func (c *Client) postNoBodyWithPayload(ctx context.Context, path string, payload any) error {
+	_, err := c.doRequest(ctx, http.MethodPost, path, payload)
+	return err
+}
+
+func (c *Client) patch(ctx context.Context, path string, payload, result any) error {
+	body, err := c.doRequest(ctx, http.MethodPatch, path, payload)
+	if err != nil {
+		return err
+	}
+	if result != nil {
+		return json.Unmarshal(body, result)
+	}
+	return nil
+}
+
+func (c *Client) putNoBody(ctx context.Context, path string, payload any) error {
+	_, err := c.doRequest(ctx, http.MethodPut, path, payload)
 	return err
 }

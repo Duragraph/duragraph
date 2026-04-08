@@ -227,3 +227,302 @@ func TestDeleteAssistant(t *testing.T) {
 		t.Fatalf("error: %v", err)
 	}
 }
+
+func TestUpdateAssistant(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Errorf("method = %q", r.Method)
+		}
+		if r.URL.Path != "/api/v1/assistants/a-123" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		var req UpdateAssistantRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Assistant{ID: "a-123", Name: req.Name, GraphID: "test"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	a, err := c.UpdateAssistant(context.Background(), "a-123", UpdateAssistantRequest{Name: "Updated"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if a.Name != "Updated" {
+		t.Errorf("Name = %q", a.Name)
+	}
+}
+
+func TestSearchAssistants(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/assistants/search" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]Assistant{{ID: "a-1", GraphID: "g1"}})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	list, err := c.SearchAssistants(context.Background(), SearchAssistantsRequest{GraphID: "g1"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(list) != 1 {
+		t.Errorf("len = %d", len(list))
+	}
+}
+
+func TestSearchThreads(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/threads/search" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]Thread{{ID: "t-1"}})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	list, err := c.SearchThreads(context.Background(), SearchThreadsRequest{Status: "idle"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(list) != 1 {
+		t.Errorf("len = %d", len(list))
+	}
+}
+
+func TestGetThreadState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/threads/t-1/state" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ThreadState{Values: map[string]any{"count": float64(5)}})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	s, err := c.GetThreadState(context.Background(), "t-1")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if s.Values["count"] != float64(5) {
+		t.Errorf("Values[count] = %v", s.Values["count"])
+	}
+}
+
+func TestUpdateThreadState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/threads/t-1/state" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ThreadState{Values: map[string]any{"updated": true}})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	s, err := c.UpdateThreadState(context.Background(), "t-1", UpdateThreadStateRequest{
+		Values: map[string]any{"updated": true},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if s.Values["updated"] != true {
+		t.Errorf("Values[updated] = %v", s.Values["updated"])
+	}
+}
+
+func TestGetThreadHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/threads/t-1/history" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]ThreadState{
+			{Values: map[string]any{"step": float64(1)}},
+			{Values: map[string]any{"step": float64(2)}},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	history, err := c.GetThreadHistory(context.Background(), "t-1")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(history) != 2 {
+		t.Errorf("len = %d", len(history))
+	}
+}
+
+func TestPutStoreItem(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/store/items" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var req PutStoreItemRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Key != "user-1" {
+			t.Errorf("key = %q", req.Key)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.PutStoreItem(context.Background(), PutStoreItemRequest{
+		Namespace: []string{"users"},
+		Key:       "user-1",
+		Value:     map[string]any{"name": "Alice"},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+}
+
+func TestGetStoreItem(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/store/items/get" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(StoreItem{
+			Namespace: []string{"users"},
+			Key:       "user-1",
+			Value:     map[string]any{"name": "Alice"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	item, err := c.GetStoreItem(context.Background(), []string{"users"}, "user-1")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if item.Key != "user-1" {
+		t.Errorf("Key = %q", item.Key)
+	}
+}
+
+func TestDeleteStoreItem(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/store/items/delete" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteStoreItem(context.Background(), []string{"users"}, "user-1")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+}
+
+func TestSearchStore(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/store/items/search" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]StoreItem{{Key: "k1", Value: map[string]any{"v": float64(1)}}})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	items, err := c.SearchStore(context.Background(), SearchStoreRequest{Namespace: []string{"ns"}})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Errorf("len = %d", len(items))
+	}
+}
+
+func TestListNamespaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/store/namespaces" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([][]string{{"users"}, {"settings"}})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	ns, err := c.ListNamespaces(context.Background(), ListNamespacesRequest{})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(ns) != 2 {
+		t.Errorf("len = %d", len(ns))
+	}
+}
+
+func TestCreateCron(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/crons" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var req CreateCronRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Cron{
+			CronID:      "cr-1",
+			AssistantID: req.AssistantID,
+			Schedule:    req.Schedule,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	cr, err := c.CreateCron(context.Background(), CreateCronRequest{
+		AssistantID: "a-1",
+		Schedule:    "0 * * * *",
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if cr.CronID != "cr-1" {
+		t.Errorf("CronID = %q", cr.CronID)
+	}
+}
+
+func TestDeleteCron(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/crons/cr-1" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	if err := c.DeleteCron(context.Background(), "cr-1"); err != nil {
+		t.Fatalf("error: %v", err)
+	}
+}
+
+func TestSearchCrons(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/crons/search" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]Cron{{CronID: "cr-1", Schedule: "0 * * * *"}})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	crons, err := c.SearchCrons(context.Background(), SearchCronsRequest{AssistantID: "a-1"})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(crons) != 1 {
+		t.Errorf("len = %d", len(crons))
+	}
+}
