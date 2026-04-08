@@ -141,21 +141,21 @@ type UpdateAssistantRequest struct {
 	Tools        []map[string]interface{} `json:"tools,omitempty"`
 }
 
-// AssistantResponse represents an assistant resource
+// AssistantResponse represents an assistant resource (LangGraph compatible)
 type AssistantResponse struct {
 	ID           string                   `json:"assistant_id"`
-	GraphID      string                   `json:"graph_id,omitempty"`
+	GraphID      string                   `json:"graph_id"`
 	Name         string                   `json:"name"`
 	Description  string                   `json:"description,omitempty"`
 	Model        string                   `json:"model,omitempty"`
 	Instructions string                   `json:"instructions,omitempty"`
 	Tools        []map[string]interface{} `json:"tools,omitempty"`
-	Metadata     map[string]interface{}   `json:"metadata,omitempty"`
+	Metadata     map[string]interface{}   `json:"metadata"`
 	Config       map[string]interface{}   `json:"config,omitempty"`
 	Context      []map[string]interface{} `json:"context,omitempty"`
 	Version      int                      `json:"version"`
-	CreatedAt    int64                    `json:"created_at"`
-	UpdatedAt    int64                    `json:"updated_at"`
+	CreatedAt    string                   `json:"created_at"`
+	UpdatedAt    string                   `json:"updated_at"`
 }
 
 // ListAssistantsResponse represents the response from listing assistants
@@ -169,13 +169,16 @@ type UpdateThreadRequest struct {
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// ThreadResponse represents a thread resource
+// ThreadResponse represents a thread resource (LangGraph compatible)
 type ThreadResponse struct {
-	ID        string                 `json:"id"`
-	Messages  []MessageResponse      `json:"messages"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt int64                  `json:"created_at"`
-	UpdatedAt int64                  `json:"updated_at"`
+	ThreadID   string                   `json:"thread_id"`
+	Status     string                   `json:"status"`
+	Values     map[string]interface{}   `json:"values"`
+	Metadata   map[string]interface{}   `json:"metadata,omitempty"`
+	Config     map[string]interface{}   `json:"config,omitempty"`
+	Interrupts []map[string]interface{} `json:"interrupts,omitempty"`
+	CreatedAt  string                   `json:"created_at"`
+	UpdatedAt  string                   `json:"updated_at"`
 }
 
 // MessageResponse represents a message in a thread

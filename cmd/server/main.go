@@ -481,9 +481,6 @@ func main() {
 	// Thread run wait route (LangGraph compatible)
 	api.POST("/threads/:thread_id/runs/wait", runHandler.CreateThreadRunAndWait)
 
-	// Human-in-the-loop (state update)
-	api.POST("/threads/:thread_id/state", runHandler.UpdateState)
-
 	// Assistant routes
 	api.POST("/assistants", assistantHandler.Create)
 	api.POST("/assistants/search", assistantHandler.Search)

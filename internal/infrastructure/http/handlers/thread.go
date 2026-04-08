@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
@@ -85,24 +86,13 @@ func (h *ThreadHandler) Get(c echo.Context) error {
 		})
 	}
 
-	// Convert messages
-	messages := make([]dto.MessageResponse, len(thread.Messages()))
-	for i, msg := range thread.Messages() {
-		messages[i] = dto.MessageResponse{
-			ID:        msg.ID,
-			Role:      msg.Role,
-			Content:   msg.Content,
-			Metadata:  msg.Metadata,
-			CreatedAt: msg.CreatedAt.Unix(),
-		}
-	}
-
 	return c.JSON(http.StatusOK, dto.ThreadResponse{
-		ID:        thread.ID(),
-		Messages:  messages,
+		ThreadID:  thread.ID(),
+		Status:    "idle",
+		Values:    map[string]interface{}{},
 		Metadata:  thread.Metadata(),
-		CreatedAt: thread.CreatedAt().Unix(),
-		UpdatedAt: thread.UpdatedAt().Unix(),
+		CreatedAt: thread.CreatedAt().Format(time.RFC3339),
+		UpdatedAt: thread.UpdatedAt().Format(time.RFC3339),
 	})
 }
 
@@ -133,23 +123,13 @@ func (h *ThreadHandler) List(c echo.Context) error {
 
 	response := make([]dto.ThreadResponse, len(threads))
 	for i, thread := range threads {
-		messages := make([]dto.MessageResponse, len(thread.Messages()))
-		for j, msg := range thread.Messages() {
-			messages[j] = dto.MessageResponse{
-				ID:        msg.ID,
-				Role:      msg.Role,
-				Content:   msg.Content,
-				Metadata:  msg.Metadata,
-				CreatedAt: msg.CreatedAt.Unix(),
-			}
-		}
-
 		response[i] = dto.ThreadResponse{
-			ID:        thread.ID(),
-			Messages:  messages,
+			ThreadID:  thread.ID(),
+			Status:    "idle",
+			Values:    map[string]interface{}{},
 			Metadata:  thread.Metadata(),
-			CreatedAt: thread.CreatedAt().Unix(),
-			UpdatedAt: thread.UpdatedAt().Unix(),
+			CreatedAt: thread.CreatedAt().Format(time.RFC3339),
+			UpdatedAt: thread.UpdatedAt().Format(time.RFC3339),
 		}
 	}
 
@@ -291,23 +271,13 @@ func (h *ThreadHandler) Search(c echo.Context) error {
 
 	response := make([]dto.ThreadResponse, len(threads))
 	for i, thread := range threads {
-		messages := make([]dto.MessageResponse, len(thread.Messages()))
-		for j, msg := range thread.Messages() {
-			messages[j] = dto.MessageResponse{
-				ID:        msg.ID,
-				Role:      msg.Role,
-				Content:   msg.Content,
-				Metadata:  msg.Metadata,
-				CreatedAt: msg.CreatedAt.Unix(),
-			}
-		}
-
 		response[i] = dto.ThreadResponse{
-			ID:        thread.ID(),
-			Messages:  messages,
+			ThreadID:  thread.ID(),
+			Status:    "idle",
+			Values:    map[string]interface{}{},
 			Metadata:  thread.Metadata(),
-			CreatedAt: thread.CreatedAt().Unix(),
-			UpdatedAt: thread.UpdatedAt().Unix(),
+			CreatedAt: thread.CreatedAt().Format(time.RFC3339),
+			UpdatedAt: thread.UpdatedAt().Format(time.RFC3339),
 		}
 	}
 

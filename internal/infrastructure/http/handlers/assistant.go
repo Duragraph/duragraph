@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
@@ -125,8 +126,8 @@ func (h *AssistantHandler) Get(c echo.Context) error {
 		Instructions: assistant.Instructions(),
 		Tools:        assistant.Tools(),
 		Metadata:     assistant.Metadata(),
-		CreatedAt:    assistant.CreatedAt().Unix(),
-		UpdatedAt:    assistant.UpdatedAt().Unix(),
+		CreatedAt:    assistant.CreatedAt().Format(time.RFC3339),
+		UpdatedAt:    assistant.UpdatedAt().Format(time.RFC3339),
 	})
 }
 
@@ -165,8 +166,8 @@ func (h *AssistantHandler) List(c echo.Context) error {
 			Instructions: assistant.Instructions(),
 			Tools:        assistant.Tools(),
 			Metadata:     assistant.Metadata(),
-			CreatedAt:    assistant.CreatedAt().Unix(),
-			UpdatedAt:    assistant.UpdatedAt().Unix(),
+			CreatedAt:    assistant.CreatedAt().Format(time.RFC3339),
+			UpdatedAt:    assistant.UpdatedAt().Format(time.RFC3339),
 		}
 	}
 
@@ -270,9 +271,9 @@ func (h *AssistantHandler) Search(c echo.Context) error {
 			Instructions: assistant.Instructions(),
 			Tools:        assistant.Tools(),
 			Metadata:     assistant.Metadata(),
-			Version:      1, // Default version
-			CreatedAt:    assistant.CreatedAt().Unix(),
-			UpdatedAt:    assistant.UpdatedAt().Unix(),
+			Version:      1,
+			CreatedAt:    assistant.CreatedAt().Format(time.RFC3339),
+			UpdatedAt:    assistant.UpdatedAt().Format(time.RFC3339),
 		}
 	}
 

@@ -705,15 +705,6 @@ func (h *RunHandler) DeleteRun(c echo.Context) error {
 	})
 }
 
-// UpdateState handles POST /threads/:thread_id/state (human-in-the-loop state update)
-func (h *RunHandler) UpdateState(c echo.Context) error {
-	// TODO: Implement state update for human-in-the-loop
-	return c.JSON(http.StatusNotImplemented, dto.ErrorResponse{
-		Error:   "not_implemented",
-		Message: "State update is not yet implemented",
-	})
-}
-
 // GetRun handles GET /threads/:thread_id/runs/:run_id
 func (h *RunHandler) GetRun(c echo.Context) error {
 	runID := c.Param("run_id")
