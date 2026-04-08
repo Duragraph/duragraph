@@ -68,6 +68,7 @@ func main() {
 ## Features
 
 - **Graph Definition** - Define workflows with structs and interfaces
+- **REST API Client** - Full control plane client for assistants, threads, runs, store, and crons
 - **LLM Providers** - OpenAI, Anthropic, Gemini, Ollama, Cohere
 - **Vector Stores** - Chroma, Pinecone, Weaviate, Qdrant, Milvus, Elasticsearch, pgvector
 - **Knowledge Graphs** - Neo4j, Memgraph, ArangoDB
@@ -82,6 +83,7 @@ func main() {
 
 ## Documentation
 
+- [REST API Client Reference](docs/client-api.md)
 - [Full Documentation](https://duragraph.ai/docs)
 - [API Reference](https://duragraph.ai/docs/api-reference/overview)
 - [Examples](https://github.com/Duragraph/duragraph-examples)
