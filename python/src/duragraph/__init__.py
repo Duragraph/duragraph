@@ -1,5 +1,6 @@
 """DuraGraph Python SDK - Reliable AI Workflow Orchestration."""
 
+from duragraph.client import AsyncDuraGraphClient, DuraGraphClient
 from duragraph.edges import edge
 from duragraph.graph import Graph
 from duragraph.nodes import (
@@ -73,6 +74,9 @@ except ImportError:
 __version__ = "0.1.0"
 
 __all__ = [
+    # Client
+    "DuraGraphClient",
+    "AsyncDuraGraphClient",
     # Graph
     "Graph",
     # Node decorators
