@@ -312,6 +312,9 @@ func main() {
 
 	fmt.Println("✅ Run service configured with worker dispatch + NATS events")
 
+	// Initialize store repository
+	storeRepo := postgres.NewStoreRepositoryWithPools(pools.Write, pools.Read)
+
 	// Initialize HTTP handlers
 	runHandler := handlers.NewRunHandler(
 		createRunHandler,
@@ -507,6 +510,14 @@ func main() {
 	api.GET("/threads/:thread_id/history", threadStateHandler.GetHistory)
 	api.POST("/threads/:thread_id/history", threadStateHandler.PostHistory)
 	api.POST("/threads/:thread_id/copy", threadStateHandler.CopyThread)
+
+	// Store routes (LangGraph compatible)
+	storeHandler := handlers.NewStoreHandler(storeRepo)
+	api.PUT("/store/items", storeHandler.PutItem)
+	api.GET("/store/items", storeHandler.GetItem)
+	api.DELETE("/store/items", storeHandler.DeleteItem)
+	api.POST("/store/items/search", storeHandler.SearchItems)
+	api.POST("/store/namespaces", storeHandler.ListNamespaces)
 
 	// Worker protocol routes
 	api.POST("/workers/register", workerHandler.Register)
