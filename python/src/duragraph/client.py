@@ -1,4 +1,22 @@
-"""DuraGraph API client for managing assistants, threads, runs, store, and crons."""
+"""DuraGraph REST API clients for managing assistants, threads, runs, store, and crons.
+
+Provides synchronous (:class:`DuraGraphClient`) and asynchronous
+(:class:`AsyncDuraGraphClient`) clients that wrap the full DuraGraph control
+plane API.  Both clients are compatible with the LangGraph Cloud API.
+
+Typical usage::
+
+    from duragraph import DuraGraphClient
+
+    with DuraGraphClient("http://localhost:8081") as client:
+        assistant = client.create_assistant("My Agent", graph_id="chatbot")
+        thread = client.create_thread()
+        run = client.create_run(
+            thread["thread_id"],
+            assistant["assistant_id"],
+            input={"messages": [{"role": "user", "content": "Hello!"}]},
+        )
+"""
 
 from __future__ import annotations
 
@@ -56,6 +74,21 @@ class DuraGraphClient:
         metadata: dict[str, Any] | None = None,
         config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Create a new assistant.
+
+        Args:
+            name: Display name for the assistant.
+            graph_id: Graph definition to back this assistant.
+            description: Human-readable description.
+            model: Default LLM model identifier.
+            instructions: System-level instructions.
+            metadata: Arbitrary key-value metadata.
+            config: Runtime configuration overrides.
+
+        Returns:
+            Assistant resource dict containing ``assistant_id``, ``name``,
+            ``graph_id``, ``created_at``, and ``updated_at``.
+        """
         payload: dict[str, Any] = {"name": name}
         if graph_id:
             payload["graph_id"] = graph_id
@@ -74,11 +107,13 @@ class DuraGraphClient:
         return resp.json()
 
     def get_assistant(self, assistant_id: str) -> dict[str, Any]:
+        """Retrieve an assistant by ID."""
         resp = self._client.get(f"/api/v1/assistants/{assistant_id}")
         resp.raise_for_status()
         return resp.json()
 
     def list_assistants(self, *, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        """List assistants with pagination."""
         resp = self._client.get("/api/v1/assistants", params={"limit": limit, "offset": offset})
         resp.raise_for_status()
         return resp.json()
@@ -91,6 +126,7 @@ class DuraGraphClient:
         limit: int = 10,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """Search assistants by graph ID or metadata."""
         payload: dict[str, Any] = {"limit": limit, "offset": offset}
         if graph_id:
             payload["graph_id"] = graph_id
@@ -101,11 +137,13 @@ class DuraGraphClient:
         return resp.json()
 
     def update_assistant(self, assistant_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Update an assistant. Pass any assistant fields as keyword arguments."""
         resp = self._client.patch(f"/api/v1/assistants/{assistant_id}", json=kwargs)
         resp.raise_for_status()
         return resp.json()
 
     def delete_assistant(self, assistant_id: str) -> dict[str, Any]:
+        """Delete an assistant by ID."""
         resp = self._client.delete(f"/api/v1/assistants/{assistant_id}")
         resp.raise_for_status()
         return resp.json()
@@ -113,6 +151,14 @@ class DuraGraphClient:
     # -- Threads --
 
     def create_thread(self, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Create a new thread.
+
+        Args:
+            metadata: Optional metadata to attach to the thread.
+
+        Returns:
+            Thread resource dict with ``thread_id``, ``created_at``, ``updated_at``.
+        """
         payload: dict[str, Any] = {}
         if metadata:
             payload["metadata"] = metadata
@@ -121,6 +167,7 @@ class DuraGraphClient:
         return resp.json()
 
     def get_thread(self, thread_id: str) -> dict[str, Any]:
+        """Retrieve a thread by ID."""
         resp = self._client.get(f"/api/v1/threads/{thread_id}")
         resp.raise_for_status()
         return resp.json()
@@ -158,6 +205,7 @@ class DuraGraphClient:
         return resp.json()
 
     def get_thread_state(self, thread_id: str) -> dict[str, Any]:
+        """Get the current state of a thread."""
         resp = self._client.get(f"/api/v1/threads/{thread_id}/state")
         resp.raise_for_status()
         return resp.json()
@@ -169,6 +217,7 @@ class DuraGraphClient:
         values: dict[str, Any],
         as_node: str | None = None,
     ) -> dict[str, Any]:
+        """Update thread state, optionally as if from a specific node."""
         payload: dict[str, Any] = {"values": values}
         if as_node:
             payload["as_node"] = as_node
@@ -177,6 +226,7 @@ class DuraGraphClient:
         return resp.json()
 
     def get_thread_history(self, thread_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        """Retrieve checkpoint history for a thread."""
         resp = self._client.get(f"/api/v1/threads/{thread_id}/history", params={"limit": limit})
         resp.raise_for_status()
         return resp.json()
@@ -195,6 +245,22 @@ class DuraGraphClient:
         interrupt_before: list[str] | None = None,
         interrupt_after: list[str] | None = None,
     ) -> dict[str, Any]:
+        """Create a run within a thread.
+
+        Args:
+            thread_id: Thread to execute in.
+            assistant_id: Assistant (graph) to run.
+            input: Input state for the graph.
+            config: Runtime configuration overrides.
+            metadata: Arbitrary run metadata.
+            multitask_strategy: How to handle concurrent runs
+                (``"reject"``, ``"enqueue"``, ``"rollback"``).
+            interrupt_before: Pause execution before these nodes.
+            interrupt_after: Pause execution after these nodes.
+
+        Returns:
+            Run resource dict with ``run_id``, ``status``, etc.
+        """
         payload: dict[str, Any] = {"assistant_id": assistant_id}
         if input:
             payload["input"] = input
@@ -220,6 +286,7 @@ class DuraGraphClient:
         config: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Create a stateless run (no thread). Useful for one-shot executions."""
         payload: dict[str, Any] = {"assistant_id": assistant_id}
         if input:
             payload["input"] = input
@@ -280,6 +347,14 @@ class DuraGraphClient:
         *,
         ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
+        """Create or update an item in the key-value store.
+
+        Args:
+            namespace: Hierarchical namespace (e.g. ``["users", "prefs"]``).
+            key: Item key within the namespace.
+            value: JSON-serializable value.
+            ttl_seconds: Optional time-to-live in seconds.
+        """
         payload: dict[str, Any] = {"namespace": namespace, "key": key, "value": value}
         if ttl_seconds is not None:
             payload["ttl_seconds"] = ttl_seconds
@@ -288,6 +363,7 @@ class DuraGraphClient:
         return resp.json()
 
     def get_store_item(self, namespace: list[str], key: str) -> dict[str, Any]:
+        """Retrieve an item from the store by namespace and key."""
         resp = self._client.get(
             "/api/v1/store/items",
             params={"namespace": ".".join(namespace), "key": key},
@@ -296,6 +372,7 @@ class DuraGraphClient:
         return resp.json()
 
     def delete_store_item(self, namespace: list[str], key: str) -> dict[str, Any]:
+        """Delete an item from the store."""
         resp = self._client.request(
             "DELETE",
             "/api/v1/store/items",
@@ -312,6 +389,7 @@ class DuraGraphClient:
         limit: int = 10,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """Search store items within a namespace prefix."""
         payload: dict[str, Any] = {
             "namespace_prefix": namespace_prefix,
             "limit": limit,
@@ -332,6 +410,7 @@ class DuraGraphClient:
         limit: int = 100,
         offset: int = 0,
     ) -> list[list[str]]:
+        """List namespaces in the store, optionally filtered by prefix/suffix."""
         payload: dict[str, Any] = {"limit": limit, "offset": offset}
         if prefix:
             payload["prefix"] = prefix
@@ -354,6 +433,15 @@ class DuraGraphClient:
         payload: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Create a scheduled cron job.
+
+        Args:
+            assistant_id: Assistant to run on schedule.
+            schedule: Cron expression (5-field, e.g. ``"0 */6 * * *"``).
+            thread_id: Optional thread to run in (creates new if omitted).
+            payload: Input data passed to each run.
+            metadata: Arbitrary cron metadata.
+        """
         body: dict[str, Any] = {
             "assistant_id": assistant_id,
             "schedule": schedule,
@@ -370,6 +458,7 @@ class DuraGraphClient:
         return resp.json()
 
     def delete_cron(self, cron_id: str) -> dict[str, Any]:
+        """Delete a cron job by ID."""
         resp = self._client.delete(f"/api/v1/runs/crons/{cron_id}")
         resp.raise_for_status()
         return resp.json()
@@ -381,6 +470,7 @@ class DuraGraphClient:
         limit: int = 10,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """Search cron jobs, optionally filtered by assistant."""
         payload: dict[str, Any] = {"limit": limit, "offset": offset}
         if assistant_id:
             payload["assistant_id"] = assistant_id

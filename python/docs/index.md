@@ -17,8 +17,9 @@ Welcome to the DuraGraph Python SDK documentation. This guide covers all the fea
 11. [Document Loaders](#document-loaders)
 12. [CLI Reference](#cli-reference)
 13. [Worker System](#worker-system)
-14. [Examples](#examples)
-15. [API Reference](#api-reference)
+14. [REST API Client](client-api.md)
+15. [Examples](#examples)
+16. [API Reference](#api-reference)
 
 ## Getting Started
 
