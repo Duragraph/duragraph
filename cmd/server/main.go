@@ -20,6 +20,7 @@ import (
 	"github.com/duragraph/duragraph/internal/infrastructure/graph"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/middleware"
+	"github.com/duragraph/duragraph/internal/infrastructure/mcp"
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging"
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
 	"github.com/duragraph/duragraph/internal/infrastructure/monitoring"
@@ -538,6 +539,23 @@ func main() {
 	api.DELETE("/store/items", storeHandler.DeleteItem)
 	api.POST("/store/items/search", storeHandler.SearchItems)
 	api.POST("/store/namespaces", storeHandler.ListNamespaces)
+
+	// MCP routes (Model Context Protocol - Streamable HTTP transport)
+	mcpServer := mcp.NewServer(
+		toolRegistry,
+		getAssistantHandler,
+		listAssistantsHandler,
+		getThreadHandler,
+		createRunHandler,
+		getRunHandler,
+		runService,
+	)
+	mcpHandler := handlers.NewMCPHandler(mcpServer)
+	e.POST("/mcp", mcpHandler.Post)
+	e.GET("/mcp", mcpHandler.Get)
+	e.DELETE("/mcp", mcpHandler.Delete)
+
+	fmt.Println("✅ MCP endpoint enabled at /mcp")
 
 	// Worker protocol routes
 	api.POST("/workers/register", workerHandler.Register)
