@@ -315,6 +315,17 @@ func main() {
 	// Initialize store repository
 	storeRepo := postgres.NewStoreRepositoryWithPools(pools.Write, pools.Read)
 
+	// Initialize cron repository and scheduler
+	cronRepo := postgres.NewCronRepositoryWithPools(pools.Write, pools.Read)
+	cronScheduler := service.NewCronScheduler(cronRepo, 30*time.Second)
+	go func() {
+		if err := cronScheduler.Start(ctx); err != nil {
+			log.Printf("cron scheduler error: %v", err)
+		}
+	}()
+
+	fmt.Println("✅ Cron scheduler started (30s poll interval)")
+
 	// Initialize HTTP handlers
 	runHandler := handlers.NewRunHandler(
 		createRunHandler,
@@ -511,6 +522,15 @@ func main() {
 	api.POST("/threads/:thread_id/history", threadStateHandler.PostHistory)
 	api.POST("/threads/:thread_id/copy", threadStateHandler.CopyThread)
 
+	// Cron routes (LangGraph compatible)
+	cronHandler := handlers.NewCronHandler(cronRepo)
+	api.POST("/runs/crons", cronHandler.CreateStatelessCron)
+	api.POST("/runs/crons/search", cronHandler.SearchCrons)
+	api.POST("/runs/crons/count", cronHandler.CountCrons)
+	api.DELETE("/runs/crons/:cron_id", cronHandler.DeleteCron)
+	api.PATCH("/runs/crons/:cron_id", cronHandler.UpdateCron)
+	api.POST("/threads/:thread_id/runs/crons", cronHandler.CreateThreadCron)
+
 	// Store routes (LangGraph compatible)
 	storeHandler := handlers.NewStoreHandler(storeRepo)
 	api.PUT("/store/items", storeHandler.PutItem)
@@ -558,6 +578,7 @@ func main() {
 	// Stop workers
 	outboxRelay.Stop()
 	cleanupWorker.Stop()
+	cronScheduler.Stop()
 
 	fmt.Println("👋 Shutdown complete")
 
