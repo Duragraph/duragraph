@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-type View = 'chat' | 'traces'
+type View = 'chat' | 'traces' | 'editor' | 'deployments'
 
 interface UIState {
   activeView: View

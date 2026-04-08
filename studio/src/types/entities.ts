@@ -60,3 +60,47 @@ export interface NodeExecution {
   duration_ms?: number
   error?: string
 }
+
+export type EditorNodeType = 'function' | 'llm' | 'tool' | 'router' | 'human' | 'subgraph'
+
+export interface EditorNode {
+  id: string
+  type: EditorNodeType
+  label: string
+  x: number
+  y: number
+  config: Record<string, unknown>
+  isEntrypoint?: boolean
+}
+
+export interface EditorEdge {
+  id: string
+  source: string
+  target: string
+  label?: string
+}
+
+export interface GraphDefinition {
+  id: string
+  name: string
+  description: string
+  nodes: EditorNode[]
+  edges: EditorEdge[]
+  created_at?: string
+  updated_at?: string
+}
+
+export interface Deployment {
+  deployment_id: string
+  assistant_id: string
+  assistant_name: string
+  graph_id: string
+  status: 'active' | 'stopped' | 'error' | 'deploying'
+  workers: number
+  active_runs: number
+  completed_runs: number
+  failed_runs: number
+  created_at: string
+  updated_at: string
+  config?: Record<string, unknown>
+}

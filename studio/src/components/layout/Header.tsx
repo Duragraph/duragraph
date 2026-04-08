@@ -6,6 +6,8 @@ export function Header() {
   const navItems = [
     { key: 'chat' as const, label: 'Chat' },
     { key: 'traces' as const, label: 'Traces' },
+    { key: 'editor' as const, label: 'Graph Editor' },
+    { key: 'deployments' as const, label: 'Deployments' },
   ]
 
   return (
