@@ -86,8 +86,7 @@ def configure_from_provider(
         import dspy
     except ImportError as exc:
         raise ImportError(
-            "dspy is required for this feature. "
-            "Install it with: pip install duragraph[dspy]"
+            "dspy is required for this feature. Install it with: pip install duragraph[dspy]"
         ) from exc
 
     lm = dspy.LM(

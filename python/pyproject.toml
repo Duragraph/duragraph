@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "duragraph-python"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python SDK for DuraGraph - Reliable AI Workflow Orchestration"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "DuraGraph Team", email = "team@duragraph.ai" }
 ]
@@ -25,7 +25,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -84,7 +83,7 @@ Changelog = "https://github.com/duragraph/duragraph-python/blob/main/CHANGELOG.m
 packages = ["src/duragraph"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
@@ -113,7 +112,7 @@ ignore = [
 known-first-party = ["duragraph"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true

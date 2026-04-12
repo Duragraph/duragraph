@@ -49,9 +49,7 @@ def _parse_signature_fields(signature: str) -> tuple[list[str], list[str]]:
     """
     parts = signature.split("->")
     if len(parts) != 2:
-        raise ValueError(
-            f"Invalid DSPy signature '{signature}': expected 'inputs -> outputs'"
-        )
+        raise ValueError(f"Invalid DSPy signature '{signature}': expected 'inputs -> outputs'")
 
     def _field_names(raw: str) -> list[str]:
         names: list[str] = []
@@ -75,8 +73,7 @@ def build_dspy_module(config: DspyNodeConfig) -> Any:
         import dspy
     except ImportError as exc:
         raise ImportError(
-            "dspy is required for @dspy_node(). "
-            "Install it with: pip install duragraph[dspy]"
+            "dspy is required for @dspy_node(). Install it with: pip install duragraph[dspy]"
         ) from exc
 
     module_cls_name = config.module
