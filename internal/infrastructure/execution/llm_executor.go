@@ -128,12 +128,12 @@ func (e *LLMExecutor) Execute(ctx context.Context, nodeID string, nodeType strin
 // getProviderFromModel determines the provider from the model name
 func (e *LLMExecutor) getProviderFromModel(model string) string {
 	// OpenAI models
-	if model[:4] == "gpt-" || model[:3] == "o1-" || model[:7] == "chatgpt" {
+	if len(model) >= 4 && model[:4] == "gpt-" || len(model) >= 3 && model[:3] == "o1-" || len(model) >= 7 && model[:7] == "chatgpt" {
 		return "openai"
 	}
 
 	// Anthropic models
-	if model[:7] == "claude-" {
+	if len(model) >= 7 && model[:7] == "claude-" {
 		return "anthropic"
 	}
 

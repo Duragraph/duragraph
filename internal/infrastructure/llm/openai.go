@@ -21,6 +21,15 @@ func NewOpenAIClient(apiKey string) *OpenAIClient {
 	}
 }
 
+// NewOpenAICompatibleClient creates an OpenAI-compatible client with a custom base URL (e.g. OpenRouter)
+func NewOpenAICompatibleClient(apiKey, baseURL string) *OpenAIClient {
+	config := openai.DefaultConfig(apiKey)
+	config.BaseURL = baseURL
+	return &OpenAIClient{
+		client: openai.NewClientWithConfig(config),
+	}
+}
+
 // Complete sends a chat completion request to OpenAI
 func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
 	// Convert messages
