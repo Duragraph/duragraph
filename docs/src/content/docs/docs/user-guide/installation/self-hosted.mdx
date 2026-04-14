@@ -5,6 +5,20 @@ description: Deploy DuraGraph in your own infrastructure
 
 Deploy DuraGraph in your own infrastructure for full control, data sovereignty, and cost optimization.
 
+## Docker Image
+
+DuraGraph publishes multi-arch Docker images (linux/amd64, linux/arm64) to GitHub Container Registry:
+
+```bash
+# Latest release
+docker pull ghcr.io/duragraph/duragraph:latest
+
+# Specific version
+docker pull ghcr.io/duragraph/duragraph:0.2.1
+```
+
+See all available tags on the [GitHub Packages page](https://github.com/Duragraph/duragraph/pkgs/container/duragraph).
+
 ## Architecture Overview
 
 DuraGraph uses a modern, event-driven architecture:
@@ -143,7 +157,7 @@ services:
     restart: unless-stopped
 
   server:
-    image: duragraph/server:latest
+    image: ghcr.io/duragraph/duragraph:0.2.1
     container_name: duragraph-server
     ports:
       - '8080:8080'
@@ -247,7 +261,7 @@ spec:
     spec:
       containers:
         - name: server
-          image: duragraph/server:latest
+          image: ghcr.io/duragraph/duragraph:0.2.1
           ports:
             - containerPort: 8080
           envFrom:

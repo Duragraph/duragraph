@@ -13,13 +13,21 @@ Get DuraGraph running locally and execute your first workflow.
 
 ## 1. Start DuraGraph
 
-Clone and start all services:
+Option A — Clone and run from source:
 
 ```bash
 git clone https://github.com/Duragraph/duragraph.git
 cd duragraph
 task up
 ```
+
+Option B — Pull the Docker image directly:
+
+```bash
+docker pull ghcr.io/duragraph/duragraph:0.2.1
+```
+
+See [Self-Hosted Installation](/docs/user-guide/installation/self-hosted) for full Docker Compose and Kubernetes guides.
 
 This starts:
 
