@@ -44,10 +44,11 @@ func (r *AssistantRepository) Save(ctx context.Context, assistant *workflow.Assi
 	metadataJSON, _ := json.Marshal(assistant.Metadata())
 
 	_, err := r.writePool.Exec(ctx, `
-		INSERT INTO assistants (id, name, description, model, instructions, tools, metadata, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO assistants (id, graph_id, name, description, model, instructions, tools, metadata, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`,
 		assistant.ID(),
+		assistant.GraphID(),
 		assistant.Name(),
 		assistant.Description(),
 		assistant.Model(),
@@ -79,15 +80,16 @@ func (r *AssistantRepository) Save(ctx context.Context, assistant *workflow.Assi
 // FindByID retrieves an assistant by ID
 func (r *AssistantRepository) FindByID(ctx context.Context, id string) (*workflow.Assistant, error) {
 	var assistantID, name, description, model, instructions string
+	var graphID *string
 	var toolsJSON, metadataJSON []byte
 	var createdAt, updatedAt time.Time
 
 	err := r.writePool.QueryRow(ctx, `
-		SELECT id, name, description, model, instructions, tools, metadata, created_at, updated_at
+		SELECT id, graph_id, name, description, model, instructions, tools, metadata, created_at, updated_at
 		FROM assistants
 		WHERE id = $1
 	`, id).Scan(
-		&assistantID, &name, &description, &model, &instructions,
+		&assistantID, &graphID, &name, &description, &model, &instructions,
 		&toolsJSON, &metadataJSON, &createdAt, &updatedAt,
 	)
 
@@ -95,16 +97,21 @@ func (r *AssistantRepository) FindByID(ctx context.Context, id string) (*workflo
 		return nil, errors.NotFound("assistant", id)
 	}
 
-	// Reconstruct assistant
 	var tools []map[string]interface{}
 	json.Unmarshal(toolsJSON, &tools)
 
 	var metadata map[string]interface{}
 	json.Unmarshal(metadataJSON, &metadata)
 
+	var opts []workflow.AssistantOption
+	if graphID != nil {
+		opts = append(opts, workflow.WithGraphID(*graphID))
+	}
+
 	assistant, err := workflow.ReconstructAssistant(
 		assistantID, name, description, model, instructions,
 		tools, metadata, createdAt, updatedAt,
+		opts...,
 	)
 	if err != nil {
 		return nil, err
@@ -116,7 +123,7 @@ func (r *AssistantRepository) FindByID(ctx context.Context, id string) (*workflo
 // List retrieves assistants with pagination
 func (r *AssistantRepository) List(ctx context.Context, limit, offset int) ([]*workflow.Assistant, error) {
 	rows, err := r.writePool.Query(ctx, `
-		SELECT id, name, description, model, instructions, tools, metadata, created_at, updated_at
+		SELECT id, graph_id, name, description, model, instructions, tools, metadata, created_at, updated_at
 		FROM assistants
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -131,10 +138,11 @@ func (r *AssistantRepository) List(ctx context.Context, limit, offset int) ([]*w
 
 	for rows.Next() {
 		var assistantID, name, description, model, instructions string
+		var graphID *string
 		var toolsJSON, metadataJSON []byte
 		var createdAt, updatedAt time.Time
 
-		err := rows.Scan(&assistantID, &name, &description, &model, &instructions,
+		err := rows.Scan(&assistantID, &graphID, &name, &description, &model, &instructions,
 			&toolsJSON, &metadataJSON, &createdAt, &updatedAt)
 		if err != nil {
 			return nil, errors.Internal("failed to scan assistant", err)
@@ -146,9 +154,15 @@ func (r *AssistantRepository) List(ctx context.Context, limit, offset int) ([]*w
 		var metadata map[string]interface{}
 		json.Unmarshal(metadataJSON, &metadata)
 
+		var opts []workflow.AssistantOption
+		if graphID != nil {
+			opts = append(opts, workflow.WithGraphID(*graphID))
+		}
+
 		assistant, _ := workflow.ReconstructAssistant(
 			assistantID, name, description, model, instructions,
 			tools, metadata, createdAt, updatedAt,
+			opts...,
 		)
 		assistants = append(assistants, assistant)
 	}

@@ -66,10 +66,13 @@ func (s *WorkerService) DispatchRun(ctx context.Context, runID string) (string, 
 		return "", fmt.Errorf("load assistant: %w", err)
 	}
 
-	graphID := assistant.ID()
-	if metadata := assistant.Metadata(); metadata != nil {
-		if gid, ok := metadata["graph_id"].(string); ok && gid != "" {
-			graphID = gid
+	graphID := assistant.GraphID()
+	if graphID == "" {
+		graphID = assistant.ID()
+		if metadata := assistant.Metadata(); metadata != nil {
+			if gid, ok := metadata["graph_id"].(string); ok && gid != "" {
+				graphID = gid
+			}
 		}
 	}
 

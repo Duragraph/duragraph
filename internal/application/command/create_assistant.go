@@ -9,6 +9,7 @@ import (
 
 // CreateAssistant command
 type CreateAssistant struct {
+	GraphID      string
 	Name         string
 	Description  string
 	Model        string
@@ -32,6 +33,11 @@ func NewCreateAssistantHandler(assistantRepo workflow.AssistantRepository) *Crea
 // Handle handles the CreateAssistant command
 func (h *CreateAssistantHandler) Handle(ctx context.Context, cmd CreateAssistant) (string, error) {
 	// Create assistant aggregate
+	var opts []workflow.AssistantOption
+	if cmd.GraphID != "" {
+		opts = append(opts, workflow.WithGraphID(cmd.GraphID))
+	}
+
 	assistant, err := workflow.NewAssistant(
 		cmd.Name,
 		cmd.Description,
@@ -39,6 +45,7 @@ func (h *CreateAssistantHandler) Handle(ctx context.Context, cmd CreateAssistant
 		cmd.Instructions,
 		cmd.Tools,
 		cmd.Metadata,
+		opts...,
 	)
 	if err != nil {
 		return "", err

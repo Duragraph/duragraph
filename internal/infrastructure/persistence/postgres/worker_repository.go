@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/worker"
 	"github.com/duragraph/duragraph/internal/pkg/errors"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -116,7 +118,7 @@ func (r *WorkerRepository) FindForGraph(ctx context.Context, graphID string, thr
 		WHERE last_heartbeat_at > $1
 		  AND status != 'offline'
 		  AND capabilities->'graphs' ? $2
-		  AND active_runs < COALESCE((capabilities->>'max_concurrent_runs')::int, 1)
+		  AND active_runs < GREATEST(COALESCE((capabilities->>'max_concurrent_runs')::int, 10), 1)
 		ORDER BY active_runs ASC
 		LIMIT 1
 	`, cutoff, graphID).Scan(
@@ -124,7 +126,11 @@ func (r *WorkerRepository) FindForGraph(ctx context.Context, graphID string, thr
 		&w.ActiveRuns, &w.TotalRuns, &w.FailedRuns, &w.LastHeartbeat, &w.RegisteredAt,
 	)
 	if err != nil {
-		return nil, nil
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		fmt.Printf("FindForGraph query error (graphID=%s): %v\n", graphID, err)
+		return nil, errors.Internal("failed to find worker for graph", err)
 	}
 
 	w.Status = worker.Status(statusStr)

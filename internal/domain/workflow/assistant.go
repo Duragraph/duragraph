@@ -8,9 +8,20 @@ import (
 	pkguuid "github.com/duragraph/duragraph/internal/pkg/uuid"
 )
 
+// AssistantOption configures optional Assistant fields
+type AssistantOption func(*Assistant)
+
+// WithGraphID sets the graph ID on an assistant
+func WithGraphID(graphID string) AssistantOption {
+	return func(a *Assistant) {
+		a.graphID = graphID
+	}
+}
+
 // Assistant represents an AI assistant aggregate
 type Assistant struct {
 	id           string
+	graphID      string
 	name         string
 	description  string
 	model        string
@@ -25,7 +36,7 @@ type Assistant struct {
 }
 
 // NewAssistant creates a new Assistant aggregate
-func NewAssistant(name, description, model, instructions string, tools []map[string]interface{}, metadata map[string]interface{}) (*Assistant, error) {
+func NewAssistant(name, description, model, instructions string, tools []map[string]interface{}, metadata map[string]interface{}, opts ...AssistantOption) (*Assistant, error) {
 	if name == "" {
 		return nil, errors.InvalidInput("name", "name is required")
 	}
@@ -53,6 +64,10 @@ func NewAssistant(name, description, model, instructions string, tools []map[str
 		events:       make([]eventbus.Event, 0),
 	}
 
+	for _, opt := range opts {
+		opt(assistant)
+	}
+
 	assistant.recordEvent(AssistantCreated{
 		AssistantID:  assistantID,
 		Name:         name,
@@ -72,6 +87,7 @@ func ReconstructAssistant(
 	tools []map[string]interface{},
 	metadata map[string]interface{},
 	createdAt, updatedAt time.Time,
+	opts ...AssistantOption,
 ) (*Assistant, error) {
 	if tools == nil {
 		tools = make([]map[string]interface{}, 0)
@@ -80,7 +96,7 @@ func ReconstructAssistant(
 		metadata = make(map[string]interface{})
 	}
 
-	return &Assistant{
+	a := &Assistant{
 		id:           id,
 		name:         name,
 		description:  description,
@@ -91,7 +107,11 @@ func ReconstructAssistant(
 		createdAt:    createdAt,
 		updatedAt:    updatedAt,
 		events:       make([]eventbus.Event, 0),
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a, nil
 }
 
 // ID returns the assistant ID
@@ -185,6 +205,16 @@ func (a *Assistant) Delete() error {
 	})
 
 	return nil
+}
+
+// GraphID returns the graph ID
+func (a *Assistant) GraphID() string {
+	return a.graphID
+}
+
+// SetGraphID sets the graph ID
+func (a *Assistant) SetGraphID(graphID string) {
+	a.graphID = graphID
 }
 
 // Events returns the uncommitted events
