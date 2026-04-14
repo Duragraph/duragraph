@@ -81,6 +81,7 @@ func (h *AssistantHandler) Create(c echo.Context) error {
 
 	// Create assistant
 	assistantID, err := h.createHandler.Handle(c.Request().Context(), command.CreateAssistant{
+		GraphID:      req.GraphID,
 		Name:         req.Name,
 		Description:  req.Description,
 		Model:        req.Model,

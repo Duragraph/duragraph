@@ -135,6 +135,9 @@ func (s *RunService) ExecuteRun(ctx context.Context, runID string) error {
 		if dispatchErr != nil {
 			fmt.Printf("Worker dispatch failed for run %s: %v, falling back to local execution\n", runID, dispatchErr)
 		}
+		if workerID == "" && dispatchErr == nil {
+			fmt.Printf("No healthy worker found for run %s (assistant=%s), falling back to local execution\n", runID, runAgg.AssistantID())
+		}
 	}
 
 	if err := runAgg.Start(); err != nil {

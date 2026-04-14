@@ -170,13 +170,19 @@ func main() {
 	fmt.Println("✅ Streaming bridge started")
 
 	// Initialize worker service (persistent PostgreSQL + NATS)
+	healthThreshold := 90 * time.Second
+	if v := os.Getenv("WORKER_HEALTH_THRESHOLD_SECONDS"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			healthThreshold = time.Duration(secs) * time.Second
+		}
+	}
 	workerService := service.NewWorkerService(
 		workerRepo,
 		taskRepo,
 		runRepo,
 		assistantRepo,
 		taskQueue,
-		30*time.Second, // Health threshold
+		healthThreshold,
 	)
 
 	fmt.Println("✅ Worker service initialized (PostgreSQL + NATS)")
