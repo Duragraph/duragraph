@@ -26,26 +26,21 @@ Traditional rule-based governance fails modern AI systems:
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                   AI CONTEXTUAL GOVERNANCE LAYER                    │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐        │
-│  │                │  │     Policy     │  │   Automated    │        │
-│  │ Context Engine │  │  Orchestration │  │     Risk       │        │
-│  │                │  │     Layer      │  │   Evaluation   │        │
-│  └───────┬────────┘  └───────┬────────┘  └───────┬────────┘        │
-│          │                   │                   │                  │
-│          └───────────────────┼───────────────────┘                  │
-│                              │                                      │
-│  ┌────────────────┐  ┌──────┴───────┐  ┌────────────────┐          │
-│  │      AI        │  │  Behavioral  │  │ Multi-Environ  │          │
-│  │ Observability  │◄─┤  Guardrails  │──┤  Enforcement   │          │
-│  │                │  │              │  │                │          │
-│  └────────────────┘  └──────────────┘  └────────────────┘          │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 3
+    block:top:3
+        A["Context Engine"] B["Policy Orchestration"] C["Automated Risk Evaluation"]
+    end
+    space:3
+    block:bottom:3
+        D["AI Observability"] E["Behavioral Guardrails"] F["Multi-Environment Enforcement"]
+    end
+    A --> E
+    B --> E
+    C --> E
+    E --> D
+    E --> F
 ```
 
 ## Core Components

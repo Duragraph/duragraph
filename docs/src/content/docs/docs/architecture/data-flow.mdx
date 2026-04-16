@@ -55,8 +55,12 @@ Writes and reads follow separate paths:
 
 ### Write path (Commands)
 
-```
-API → Command Handler → Aggregate → Event Store + Outbox
+```mermaid
+flowchart LR
+    A[API Request] --> B[Command Handler]
+    B --> C[Aggregate]
+    C --> D[(Event Store)]
+    C --> E[(Outbox)]
 ```
 
 - Commands modify domain aggregates through domain methods.
@@ -66,8 +70,10 @@ API → Command Handler → Aggregate → Event Store + Outbox
 
 ### Read path (Queries)
 
-```
-API → Query Handler → Projection (PostgreSQL view)
+```mermaid
+flowchart LR
+    A[API Request] --> B[Query Handler]
+    B --> C[(Projection<br/>PostgreSQL View)]
 ```
 
 - Queries read directly from projection tables — never from the event store.

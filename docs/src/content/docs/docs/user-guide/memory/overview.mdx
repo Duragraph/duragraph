@@ -11,20 +11,20 @@ DuraGraph provides a sophisticated memory system that enables agents to remember
 
 DuraGraph implements a hierarchical memory system inspired by human cognition:
 
-```
-┌─────────────────────────────────────────────────┐
-│  L1: Working Memory (current context)           │
-│  - Active conversation                          │
-│  - Immediate task state                         │
-├─────────────────────────────────────────────────┤
-│  L2: Episodic Memory (recent interactions)      │
-│  - Past conversations                           │
-│  - Stored in vector database                    │
-├─────────────────────────────────────────────────┤
-│  L3: Semantic Memory (facts & knowledge)        │
-│  - Entity relationships                         │
-│  - Stored in knowledge graph                    │
-└─────────────────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 1
+    block:L1
+        A["<strong>L1: Working Memory</strong><br/>Active conversation · Immediate task state"]
+    end
+    block:L2
+        B["<strong>L2: Episodic Memory</strong><br/>Past conversations · Stored in vector database"]
+    end
+    block:L3
+        C["<strong>L3: Semantic Memory</strong><br/>Entity relationships · Stored in knowledge graph"]
+    end
+    L1 --> L2
+    L2 --> L3
 ```
 
 ## Quick Start

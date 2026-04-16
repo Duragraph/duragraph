@@ -23,16 +23,11 @@ See all available tags on the [GitHub Packages page](https://github.com/Duragrap
 
 DuraGraph uses a modern, event-driven architecture:
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│  API Server │────▶│  PostgreSQL │
-│  (SDK/CLI)  │     │   (Echo)    │     │  (Events)   │
-└─────────────┘     └──────┬──────┘     └─────────────┘
-                           │
-                    ┌──────▼──────┐
-                    │    NATS     │
-                    │  JetStream  │
-                    └─────────────┘
+```mermaid
+flowchart LR
+    A["Client<br/>(SDK/CLI)"] --> B["API Server<br/>(Echo)"]
+    B --> C[("PostgreSQL<br/>(Events)")]
+    B --> D["NATS<br/>JetStream"]
 ```
 
 **Components:**

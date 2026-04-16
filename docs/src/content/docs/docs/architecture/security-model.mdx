@@ -13,8 +13,13 @@ For operational security configuration details, see [Operations > Security](/doc
 
 DuraGraph applies security at multiple layers:
 
-```
-Client → Rate Limiting → Authentication → Authorization → Domain Logic → Event Store
+```mermaid
+flowchart LR
+    A[Client] --> B[Rate Limiting]
+    B --> C[Authentication]
+    C --> D[Authorization]
+    D --> E[Domain Logic]
+    E --> F[(Event Store)]
 ```
 
 ### Layer 1: Rate Limiting
