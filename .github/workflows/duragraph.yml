@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE_NAME: ${{ secrets.INFISICAL_DOCKER_USERNAME }}/duragraph
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -89,7 +91,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          image-ref: ${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.version }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           exit-code: '0'
