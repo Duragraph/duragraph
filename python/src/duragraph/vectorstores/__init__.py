@@ -19,26 +19,6 @@ try:
 except ImportError:
     ChromaVectorStore = None  # type: ignore
 
-try:
-    from duragraph.vectorstores.qdrant import QdrantVectorStore
-except ImportError:
-    QdrantVectorStore = None  # type: ignore
-
-try:
-    from duragraph.vectorstores.weaviate import WeaviateVectorStore
-except ImportError:
-    WeaviateVectorStore = None  # type: ignore
-
-try:
-    from duragraph.vectorstores.pgvector import PgVectorStore
-except ImportError:
-    PgVectorStore = None  # type: ignore
-
-try:
-    from duragraph.vectorstores.pinecone import PineconeVectorStore
-except ImportError:
-    PineconeVectorStore = None  # type: ignore
-
 __all__ = [
     # Base classes
     "VectorStore",
@@ -53,8 +33,4 @@ __all__ = [
     # Store implementations (if available)
     "InMemoryVectorStore",
     "ChromaVectorStore",
-    "QdrantVectorStore",
-    "WeaviateVectorStore",
-    "PgVectorStore",
-    "PineconeVectorStore",
 ]
