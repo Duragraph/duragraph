@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-01
+
+### Removed
+- Broken provider stubs: `CohereEmbeddingProvider`, `OllamaEmbeddingProvider`,
+  `QdrantVectorStore`, `WeaviateVectorStore`, `PgVectorStore`, `PineconeVectorStore`.
+  Their imports referenced names that don't exist (`EmbeddingProvider` from
+  `duragraph.vectorstores.base`), so they silently exposed as `None` rather than
+  the class. Tracked in roadmap for v0.8.
+
+### Fixed
+- `duragraph.__version__` now matches the installed package version
+  (was stale at `0.1.0` while pyproject was already at `0.2.0`).
+
+## [0.2.0] - 2026-04-12
+
+### Changed
+- Drop Python 3.10 support; minimum is now Python 3.11.
+
+### Added
+- REST API client (`DuraGraphClient`, `AsyncDuraGraphClient`).
+
 ## [0.1.0] - 2024-12-29
 
 ### Added
@@ -26,5 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Apache 2.0 license
 - PEP 561 type hints support (py.typed marker)
 
-[Unreleased]: https://github.com/duragraph/duragraph-python/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/duragraph/duragraph-python/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/duragraph/duragraph-python/releases/tag/v0.2.1
+[0.2.0]: https://github.com/duragraph/duragraph-python/releases/tag/v0.2.0
 [0.1.0]: https://github.com/duragraph/duragraph-python/releases/tag/v0.1.0
