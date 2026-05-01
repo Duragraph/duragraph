@@ -1,0 +1,26 @@
+name: Sync README to Docker Hub
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - README.md
+      - .github/workflows/dockerhub-readme.yml
+  workflow_dispatch:
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Push README to Docker Hub
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.INFISICAL_DOCKER_USERNAME }}
+          password: ${{ secrets.INFISICAL_DOCKER_PASSWORD }}
+          repository: ${{ secrets.INFISICAL_DOCKER_USERNAME }}/duragraph
+          short-description: "Open-source LangGraph Cloud-compatible AI workflow orchestration with event sourcing & CQRS"
+          enable-url-completion: true
