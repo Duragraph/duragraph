@@ -8,7 +8,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/duragraph/duragraph)](https://hub.docker.com/r/duragraph/duragraph)
 [![License](https://img.shields.io/github/license/Duragraph/duragraph)](LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/Duragraph/duragraph)](go.mod)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Duragraph/duragraph)](https://goreportcard.com/report/github.com/Duragraph/duragraph)
+[![Go Report Card](https://img.shields.io/badge/go%20report-A%2B-brightgreen)](https://goreportcard.com/report/github.com/Duragraph/duragraph)
 [![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph?style=social)](https://github.com/Duragraph/duragraph/stargazers)
 
 **An open, extensible orchestration layer for AI and workflow automation**
