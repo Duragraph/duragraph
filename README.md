@@ -2,6 +2,15 @@
 
 ![DuraGraph Logo](assets/logo.svg)
 
+[![CI](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph/ci.yml?branch=main&label=CI)](https://github.com/Duragraph/duragraph/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph/duragraph.yml?label=release)](https://github.com/Duragraph/duragraph/actions/workflows/duragraph.yml)
+[![Docker Image Version](https://img.shields.io/docker/v/duragraph/duragraph?label=docker&sort=semver)](https://hub.docker.com/r/duragraph/duragraph)
+[![Docker Pulls](https://img.shields.io/docker/pulls/duragraph/duragraph)](https://hub.docker.com/r/duragraph/duragraph)
+[![License](https://img.shields.io/github/license/Duragraph/duragraph)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Duragraph/duragraph)](go.mod)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Duragraph/duragraph)](https://goreportcard.com/report/github.com/Duragraph/duragraph)
+[![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph?style=social)](https://github.com/Duragraph/duragraph/stargazers)
+
 **An open, extensible orchestration layer for AI and workflow automation**
 
 DuraGraph provides a **LangGraph Cloud-compatible API** built with **Event Sourcing** and **CQRS** patterns for reliable, observable, and maintainable AI pipelines that can be self-hosted in enterprise environments.
@@ -26,9 +35,9 @@ Get started with DuraGraph in minutes:
 Deploy DuraGraph to your preferred cloud platform:
 
 [![Deploy on Fly.io](https://img.shields.io/badge/Deploy%20on-Fly.io-7B3FE4?style=for-the-badge&logo=fly.io&logoColor=white)](https://fly.io/docs/getting-started/)
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template)
-[![Deploy on DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new)
+[![Deploy on Render](https://img.shields.io/badge/Deploy%20on-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://render.com/deploy)
+[![Deploy on Railway](https://img.shields.io/badge/Deploy%20on-Railway-0B0D0E?style=for-the-badge&logo=railway&logoColor=white)](https://railway.app/template)
+[![Deploy on DigitalOcean](https://img.shields.io/badge/Deploy%20on-DigitalOcean-0080FF?style=for-the-badge&logo=digitalocean&logoColor=white)](https://cloud.digitalocean.com/apps/new)
 [![Deploy on Scaleway](https://img.shields.io/badge/Deploy%20on-Scaleway-4F0599?style=for-the-badge&logo=scaleway&logoColor=white)](https://www.scaleway.com/en/docs/)
 
 ### Local Development
