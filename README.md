@@ -1,6 +1,6 @@
 # DuraGraph
 
-![DuraGraph Logo](assets/logo.svg)
+<img src="assets/logo.svg" alt="DuraGraph Logo" width="200">
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph/ci.yml?branch=main&label=CI)](https://github.com/Duragraph/duragraph/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph/duragraph.yml?label=release)](https://github.com/Duragraph/duragraph/actions/workflows/duragraph.yml)
