@@ -1,9 +1,11 @@
 # DuraGraph Python SDK
 
-[![PyPI version](https://badge.fury.io/py/duragraph.svg)](https://badge.fury.io/py/duragraph)
-[![Python](https://img.shields.io/pypi/pyversions/duragraph.svg)](https://pypi.org/project/duragraph/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://github.com/Duragraph/duragraph-python/actions/workflows/ci.yml/badge.svg)](https://github.com/Duragraph/duragraph-python/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph-python/ci.yml?branch=main&label=CI)](https://github.com/Duragraph/duragraph-python/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/duragraph-python)](https://pypi.org/project/duragraph-python/)
+[![Python versions](https://img.shields.io/pypi/pyversions/duragraph-python)](https://pypi.org/project/duragraph-python/)
+[![Downloads](https://img.shields.io/pypi/dm/duragraph-python)](https://pypistats.org/packages/duragraph-python)
+[![License](https://img.shields.io/github/license/Duragraph/duragraph-python)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph-python?style=social)](https://github.com/Duragraph/duragraph-python/stargazers)
 
 Python SDK for [DuraGraph](https://github.com/Duragraph/duragraph) - Reliable AI Workflow Orchestration.
 
