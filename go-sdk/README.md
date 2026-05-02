@@ -1,9 +1,11 @@
 # DuraGraph Go SDK
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/Duragraph/duragraph-go.svg)](https://pkg.go.dev/github.com/Duragraph/duragraph-go)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Duragraph/duragraph-go)](https://goreportcard.com/report/github.com/Duragraph/duragraph-go)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://github.com/Duragraph/duragraph-go/actions/workflows/ci.yml/badge.svg)](https://github.com/Duragraph/duragraph-go/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph-go/ci.yml?branch=main&label=CI)](https://github.com/Duragraph/duragraph-go/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/duragraph/duragraph-go.svg)](https://pkg.go.dev/github.com/duragraph/duragraph-go)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Duragraph/duragraph-go)](go.mod)
+[![Go Report Card](https://img.shields.io/badge/go%20report-A%2B-brightgreen)](https://goreportcard.com/report/github.com/Duragraph/duragraph-go)
+[![License](https://img.shields.io/github/license/Duragraph/duragraph-go)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph-go?style=social)](https://github.com/Duragraph/duragraph-go/stargazers)
 
 Go SDK for [DuraGraph](https://github.com/Duragraph/duragraph) - Reliable AI Workflow Orchestration.
 
