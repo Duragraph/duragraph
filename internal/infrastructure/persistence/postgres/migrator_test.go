@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/fstest"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -54,9 +56,19 @@ func dbExists(t *testing.T, ctx context.Context, dbName string) bool {
 }
 
 // tableExists connects directly to dbName (not through the migrator)
-// and checks information_schema for tableName. Used to verify that
-// tenant migrations actually created the expected schema objects.
+// and checks information_schema for tableName in the public schema.
+// Used to verify that tenant migrations actually created the expected
+// schema objects.
 func tableExists(t *testing.T, ctx context.Context, dbName, tableName string) bool {
+	t.Helper()
+	return tableExistsInSchema(t, ctx, dbName, "public", tableName)
+}
+
+// tableExistsInSchema is the schema-aware variant of tableExists. The
+// platform DB places its objects under the `platform` schema (per the
+// migrator's `SELECT FROM platform.tenants` query), so the platform
+// migrations need a schema-qualified existence check.
+func tableExistsInSchema(t *testing.T, ctx context.Context, dbName, schema, tableName string) bool {
 	t.Helper()
 	_, dsn := sharedContainer(t)
 	conn, err := pgx.Connect(ctx, adminURLForDB(t, dsn, dbName))
@@ -69,10 +81,10 @@ func tableExists(t *testing.T, ctx context.Context, dbName, tableName string) bo
 	if err := conn.QueryRow(ctx,
 		`SELECT EXISTS (
 			SELECT 1 FROM information_schema.tables
-			WHERE table_schema='public' AND table_name=$1
-		)`, tableName,
+			WHERE table_schema=$1 AND table_name=$2
+		)`, schema, tableName,
 	).Scan(&exists); err != nil {
-		t.Fatalf("check table %s.%s: %v", dbName, tableName, err)
+		t.Fatalf("check table %s.%s.%s: %v", dbName, schema, tableName, err)
 	}
 	return exists
 }
@@ -132,6 +144,72 @@ func newMigratorForTest(t *testing.T) (*Migrator, string) {
 	return m, platformDB
 }
 
+// platformConn opens a direct pgx connection to the platform DB for
+// tests that need to insert or assert against `platform.users` /
+// `platform.tenants` directly. Caller closes via the returned cleanup.
+func platformConn(t *testing.T, ctx context.Context, platformDB string) *pgx.Conn {
+	t.Helper()
+	_, dsn := sharedContainer(t)
+	conn, err := pgx.Connect(ctx, adminURLForDB(t, dsn, platformDB))
+	if err != nil {
+		t.Fatalf("connect platform DB %s: %v", platformDB, err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+// insertUser inserts a row into platform.users with overridable
+// status/role/email and returns the generated id. Defaults produce a
+// valid `pending`/`user`/google user.
+type userOpts struct {
+	id            *string
+	oauthProvider string
+	oauthID       string
+	email         string
+	role          string
+	status        string
+}
+
+func insertUser(t *testing.T, ctx context.Context, conn *pgx.Conn, o userOpts) string {
+	t.Helper()
+	if o.oauthProvider == "" {
+		o.oauthProvider = "google"
+	}
+	if o.oauthID == "" {
+		o.oauthID = "oauth-" + uuid.New().String()
+	}
+	if o.email == "" {
+		o.email = uuid.New().String() + "@example.com"
+	}
+	if o.role == "" {
+		o.role = "user"
+	}
+	if o.status == "" {
+		o.status = "pending"
+	}
+	var id string
+	if o.id != nil {
+		id = *o.id
+		_, err := conn.Exec(ctx, `
+			INSERT INTO platform.users (id, oauth_provider, oauth_id, email, role, status)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, id, o.oauthProvider, o.oauthID, o.email, o.role, o.status)
+		if err != nil {
+			t.Fatalf("insert user: %v", err)
+		}
+		return id
+	}
+	err := conn.QueryRow(ctx, `
+		INSERT INTO platform.users (oauth_provider, oauth_id, email, role, status)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id::text
+	`, o.oauthProvider, o.oauthID, o.email, o.role, o.status).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	return id
+}
+
 // TestMigrator_NewMigrator_DefaultPlatformDBName is the unit-test smoke
 // for the option pattern. No testcontainer needed; just confirms the
 // default is "duragraph_platform" and overriding sticks.
@@ -154,6 +232,41 @@ func TestMigrator_NewMigrator_DefaultPlatformDBName(t *testing.T) {
 	}
 }
 
+// TestMigrator_HasMigrations_DetectsEmptyDir preserves coverage of the
+// empty-FS short-circuit branch in MigratePlatform. The previous
+// integration test `Bootstrap_HandlesEmptyPlatformMigrationsDir`
+// relied on the embedded migrations/platform/ being empty — once
+// feat/platform-db-init lands real .up.sql files the branch can no
+// longer be exercised through Bootstrap, so this is now exercised
+// directly against `hasMigrations` with a synthetic in-memory FS.
+func TestMigrator_HasMigrations_DetectsEmptyDir(t *testing.T) {
+	// Empty (only a non-SQL file): hasMigrations must report false.
+	emptyFS := fstest.MapFS{
+		"migrations/platform/README.md": &fstest.MapFile{Data: []byte("placeholder")},
+	}
+	any, err := hasMigrations(emptyFS, "migrations/platform")
+	if err != nil {
+		t.Fatalf("hasMigrations(empty): %v", err)
+	}
+	if any {
+		t.Errorf("hasMigrations(empty) = true, want false")
+	}
+
+	// Populated with at least one .up.sql: must report true.
+	populatedFS := fstest.MapFS{
+		"migrations/platform/README.md":         &fstest.MapFile{Data: []byte("notes")},
+		"migrations/platform/001_init.up.sql":   &fstest.MapFile{Data: []byte("CREATE TABLE x();")},
+		"migrations/platform/001_init.down.sql": &fstest.MapFile{Data: []byte("DROP TABLE x;")},
+	}
+	any, err = hasMigrations(populatedFS, "migrations/platform")
+	if err != nil {
+		t.Fatalf("hasMigrations(populated): %v", err)
+	}
+	if !any {
+		t.Errorf("hasMigrations(populated) = false, want true")
+	}
+}
+
 func TestMigrator_Bootstrap_CreatesPlatformDB(t *testing.T) {
 	ctx := context.Background()
 	m, platformDB := newMigratorForTest(t)
@@ -170,21 +283,52 @@ func TestMigrator_Bootstrap_CreatesPlatformDB(t *testing.T) {
 	}
 }
 
-// TestMigrator_Bootstrap_HandlesEmptyPlatformMigrationsDir is the most
-// load-bearing test in this PR: the platform/ embed dir is empty (just
-// a README) until feat/platform-db-init lands. Bootstrap must succeed
-// in that state.
-func TestMigrator_Bootstrap_HandlesEmptyPlatformMigrationsDir(t *testing.T) {
+// TestMigrator_MigratePlatform_AppliesAllPlatformMigrations replaces
+// the previous `Bootstrap_HandlesEmptyPlatformMigrationsDir` test now
+// that real platform migrations exist. Verifies that Bootstrap creates
+// the DB and runs platform/* migrations end-to-end.
+func TestMigrator_MigratePlatform_AppliesAllPlatformMigrations(t *testing.T) {
 	ctx := context.Background()
 	m, platformDB := newMigratorForTest(t)
 
-	// First call creates the DB and runs MigratePlatform with empty FS.
-	// Should NOT return an error despite no migrations being applied.
 	if err := m.Bootstrap(ctx); err != nil {
-		t.Fatalf("Bootstrap with empty platform migrations: %v", err)
+		t.Fatalf("Bootstrap: %v", err)
 	}
 	if !dbExists(t, ctx, platformDB) {
 		t.Fatalf("expected platform DB %s to exist", platformDB)
+	}
+
+	for _, table := range []string{"users", "tenants", "audit_log"} {
+		if !tableExistsInSchema(t, ctx, platformDB, "platform", table) {
+			t.Errorf("expected table platform.%s in %s, not found", table, platformDB)
+		}
+	}
+}
+
+// TestMigrator_PlatformMigrations_Idempotent verifies that re-running
+// Bootstrap (and therefore MigratePlatform) is a no-op against an
+// already-migrated platform DB.
+func TestMigrator_PlatformMigrations_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("first Bootstrap: %v", err)
+	}
+	v1, dirty := migrationVersion(t, ctx, platformDB)
+	if dirty {
+		t.Fatalf("schema_migrations dirty after first Bootstrap")
+	}
+
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("second Bootstrap: %v", err)
+	}
+	v2, dirty := migrationVersion(t, ctx, platformDB)
+	if dirty {
+		t.Fatalf("schema_migrations dirty after second Bootstrap")
+	}
+	if v1 != v2 {
+		t.Errorf("platform migration version changed across idempotent runs: v1=%d v2=%d", v1, v2)
 	}
 }
 
@@ -316,16 +460,20 @@ func TestMigrator_ProvisionTenant_Idempotent(t *testing.T) {
 	}
 }
 
-// TestMigrator_MigrateAllTenants_EmptyWhenNoTenantsTable verifies the
-// graceful-empty path: when the platform DB exists but the
-// platform.tenants table doesn't (no platform migrations applied),
-// MigrateAllTenants returns no results without error.
-func TestMigrator_MigrateAllTenants_EmptyWhenNoTenantsTable(t *testing.T) {
+// TestMigrator_MigrateAllTenants_EmptyWhenNoApprovedTenants verifies
+// the empty-result path now that platform migrations create the
+// `platform.tenants` table: when the table exists but has no
+// status='approved' rows, MigrateAllTenants returns no results.
+//
+// Note: the previous test `EmptyWhenNoTenantsTable` exercised the
+// 42P01 (undefined_table) error path inside listApprovedTenants. That
+// path is now harder to trigger because Bootstrap creates the table —
+// see TestMigrator_MigrateAllTenants_EmptyWhenTenantsTableMissing for
+// the explicit coverage.
+func TestMigrator_MigrateAllTenants_EmptyWhenNoApprovedTenants(t *testing.T) {
 	ctx := context.Background()
 	m, _ := newMigratorForTest(t)
 
-	// Bootstrap creates the empty platform DB. No platform.tenants
-	// table is created because the platform migrations FS is empty.
 	if err := m.Bootstrap(ctx); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
@@ -333,6 +481,31 @@ func TestMigrator_MigrateAllTenants_EmptyWhenNoTenantsTable(t *testing.T) {
 	results := m.MigrateAllTenants(ctx)
 	if len(results) != 0 {
 		t.Errorf("expected empty results, got %d", len(results))
+	}
+}
+
+// TestMigrator_MigrateAllTenants_EmptyWhenTenantsTableMissing
+// preserves coverage of the 42P01 fall-through branch by manually
+// dropping `platform.tenants` after Bootstrap to simulate a partially
+// initialized platform DB (e.g. mid-migration). The migrator must not
+// panic and must return no results.
+func TestMigrator_MigrateAllTenants_EmptyWhenTenantsTableMissing(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+
+	// Drop platform.tenants directly to simulate the pre-init state.
+	conn := platformConn(t, ctx, platformDB)
+	if _, err := conn.Exec(ctx, `DROP TABLE platform.tenants`); err != nil {
+		t.Fatalf("drop platform.tenants: %v", err)
+	}
+
+	results := m.MigrateAllTenants(ctx)
+	if len(results) != 0 {
+		t.Errorf("expected empty results when tenants table missing, got %d", len(results))
 	}
 }
 
@@ -351,6 +524,53 @@ func TestMigrator_MigrateAllTenants_EmptyWhenNoPlatformDB(t *testing.T) {
 	results := m.MigrateAllTenants(ctx)
 	if len(results) != 0 {
 		t.Errorf("expected empty results when platform DB missing, got %d", len(results))
+	}
+}
+
+// TestMigrator_MigrateAllTenants_FindsApprovedTenants is the
+// end-to-end success path: insert a user + tenant in `platform.users`
+// + `platform.tenants` with status='approved', then call
+// MigrateAllTenants and assert the tenant is included in the results.
+// This proves the schema-qualified `platform.tenants` query connects.
+func TestMigrator_MigrateAllTenants_FindsApprovedTenants(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+
+	// Provision a real tenant DB (so MigrateTenant succeeds against it).
+	tenantID := uuid.New().String()
+	dbName, err := tenant.DBName(tenantID)
+	if err != nil {
+		t.Fatalf("tenant.DBName: %v", err)
+	}
+	t.Cleanup(func() { dropDatabase(t, context.Background(), dbName) })
+	if err := m.ProvisionTenant(ctx, tenantID); err != nil {
+		t.Fatalf("ProvisionTenant: %v", err)
+	}
+
+	// Now register the tenant in platform.tenants with status='approved'.
+	conn := platformConn(t, ctx, platformDB)
+	userID := insertUser(t, ctx, conn, userOpts{status: "approved"})
+	_, err = conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status, schema_version, provisioned_at)
+		VALUES ($1, $2, $3, 'approved', 1, NOW())
+	`, tenantID, userID, dbName)
+	if err != nil {
+		t.Fatalf("insert tenant: %v", err)
+	}
+
+	results := m.MigrateAllTenants(ctx)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].TenantID != tenantID {
+		t.Errorf("result tenant id = %q, want %q", results[0].TenantID, tenantID)
+	}
+	if results[0].Err != nil {
+		t.Errorf("expected no error on already-migrated tenant, got: %v", results[0].Err)
 	}
 }
 
@@ -420,6 +640,286 @@ func TestMigrator_MigrateTenant_RejectsInvalidUUID(t *testing.T) {
 	}
 	if _, err := m.MigrateTenant(context.Background(), "not-a-uuid"); err == nil {
 		t.Fatal("expected error for invalid UUID")
+	}
+}
+
+// =============================================================================
+// platform.users / platform.tenants CHECK + UNIQUE constraint coverage
+// =============================================================================
+
+// TestPlatformDB_UsersConstraints exercises the column-level CHECK
+// constraints (oauth_provider, role, status) and the two UNIQUE
+// constraints (email; (oauth_provider, oauth_id)) on platform.users.
+func TestPlatformDB_UsersConstraints(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	conn := platformConn(t, ctx, platformDB)
+
+	// Baseline: a valid user inserts cleanly.
+	insertUser(t, ctx, conn, userOpts{})
+
+	// Invalid role.
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.users (oauth_provider, oauth_id, email, role)
+		VALUES ('google', 'oid-x', 'bad-role@example.com', 'superadmin')
+	`)
+	if err == nil {
+		t.Errorf("expected CHECK violation for role='superadmin', got nil")
+	}
+
+	// Invalid status.
+	_, err = conn.Exec(ctx, `
+		INSERT INTO platform.users (oauth_provider, oauth_id, email, status)
+		VALUES ('google', 'oid-y', 'bad-status@example.com', 'banned')
+	`)
+	if err == nil {
+		t.Errorf("expected CHECK violation for status='banned', got nil")
+	}
+
+	// Invalid oauth_provider.
+	_, err = conn.Exec(ctx, `
+		INSERT INTO platform.users (oauth_provider, oauth_id, email)
+		VALUES ('facebook', 'oid-z', 'bad-provider@example.com')
+	`)
+	if err == nil {
+		t.Errorf("expected CHECK violation for oauth_provider='facebook', got nil")
+	}
+
+	// Duplicate email rejection.
+	insertUser(t, ctx, conn, userOpts{email: "dup@example.com", oauthID: "oid-a"})
+	_, err = conn.Exec(ctx, `
+		INSERT INTO platform.users (oauth_provider, oauth_id, email)
+		VALUES ('github', 'oid-b', 'dup@example.com')
+	`)
+	if err == nil {
+		t.Errorf("expected UNIQUE violation for duplicate email, got nil")
+	}
+
+	// Duplicate (oauth_provider, oauth_id) rejection.
+	insertUser(t, ctx, conn, userOpts{oauthProvider: "github", oauthID: "shared-oid"})
+	_, err = conn.Exec(ctx, `
+		INSERT INTO platform.users (oauth_provider, oauth_id, email)
+		VALUES ('github', 'shared-oid', 'other-user@example.com')
+	`)
+	if err == nil {
+		t.Errorf("expected UNIQUE violation on (oauth_provider, oauth_id), got nil")
+	}
+}
+
+// validTenantInsert performs the canonical insert path: derives db_name
+// from id and writes status='pending' (no schema_version /
+// provisioned_at required). Returns (id, db_name).
+func validTenantInsert(t *testing.T, ctx context.Context, conn *pgx.Conn, userID string) (string, string) {
+	t.Helper()
+	id := uuid.New().String()
+	dbName := "tenant_" + strings.ReplaceAll(id, "-", "")
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status)
+		VALUES ($1, $2, $3, 'pending')
+	`, id, userID, dbName)
+	if err != nil {
+		t.Fatalf("insert tenant: %v", err)
+	}
+	return id, dbName
+}
+
+// TestPlatformDB_TenantsDerivationCheck verifies the table-level
+// `tenants_db_name_derived_from_id` CHECK rejects rows where db_name
+// is not equal to 'tenant_' || replace(id::text, '-', ”).
+func TestPlatformDB_TenantsDerivationCheck(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	conn := platformConn(t, ctx, platformDB)
+	userID := insertUser(t, ctx, conn, userOpts{})
+
+	// Mismatched db_name (different UUID under the prefix). The format
+	// regex passes (32 hex chars) but the derivation CHECK fails.
+	id := uuid.New().String()
+	otherDBName := "tenant_" + strings.ReplaceAll(uuid.New().String(), "-", "")
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status)
+		VALUES ($1, $2, $3, 'pending')
+	`, id, userID, otherDBName)
+	if err == nil {
+		t.Errorf("expected CHECK violation tenants_db_name_derived_from_id, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "tenants_db_name_derived_from_id") {
+		// Postgres does include the constraint name in its error
+		// detail; if it doesn't, the test still catches the rejection
+		// but we log to surface the change.
+		t.Logf("derivation CHECK rejection (constraint name not in msg): %v", err)
+	}
+}
+
+// TestPlatformDB_TenantsApprovedRequiresSchemaVersion verifies the
+// `tenants_approved_requires_schema_version` table-level CHECK.
+func TestPlatformDB_TenantsApprovedRequiresSchemaVersion(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	conn := platformConn(t, ctx, platformDB)
+	userID := insertUser(t, ctx, conn, userOpts{status: "approved"})
+
+	id := uuid.New().String()
+	dbName := "tenant_" + strings.ReplaceAll(id, "-", "")
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status, provisioned_at)
+		VALUES ($1, $2, $3, 'approved', NOW())
+	`, id, userID, dbName)
+	if err == nil {
+		t.Errorf("expected CHECK violation for approved tenant with NULL schema_version, got nil")
+	}
+}
+
+// TestPlatformDB_TenantsApprovedRequiresProvisionedAt verifies the
+// `tenants_approved_requires_provisioned_at` table-level CHECK.
+func TestPlatformDB_TenantsApprovedRequiresProvisionedAt(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	conn := platformConn(t, ctx, platformDB)
+	userID := insertUser(t, ctx, conn, userOpts{status: "approved"})
+
+	id := uuid.New().String()
+	dbName := "tenant_" + strings.ReplaceAll(id, "-", "")
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status, schema_version)
+		VALUES ($1, $2, $3, 'approved', 1)
+	`, id, userID, dbName)
+	if err == nil {
+		t.Errorf("expected CHECK violation for approved tenant with NULL provisioned_at, got nil")
+	}
+}
+
+// TestPlatformDB_TenantsFailureReasonGuard verifies the
+// `tenants_failure_reason_only_when_failed` CHECK: failure_reason can
+// only be non-NULL when status='provisioning_failed'.
+func TestPlatformDB_TenantsFailureReasonGuard(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	conn := platformConn(t, ctx, platformDB)
+	userID := insertUser(t, ctx, conn, userOpts{})
+
+	id := uuid.New().String()
+	dbName := "tenant_" + strings.ReplaceAll(id, "-", "")
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status, failure_reason)
+		VALUES ($1, $2, $3, 'pending', 'should not be allowed when pending')
+	`, id, userID, dbName)
+	if err == nil {
+		t.Errorf("expected CHECK violation for failure_reason on non-failed tenant, got nil")
+	}
+
+	// Sanity: the same row with status='provisioning_failed' is allowed.
+	_, err = conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status, failure_reason)
+		VALUES ($1, $2, $3, 'provisioning_failed', 'CREATE DATABASE failed')
+	`, id, userID, dbName)
+	if err != nil {
+		t.Errorf("provisioning_failed + failure_reason should be allowed, got: %v", err)
+	}
+}
+
+// TestPlatformDB_TenantsUserIdUnique verifies the 1:1 user↔tenant
+// constraint via tenants_user_id_unique.
+func TestPlatformDB_TenantsUserIdUnique(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	conn := platformConn(t, ctx, platformDB)
+	userID := insertUser(t, ctx, conn, userOpts{})
+
+	// First tenant for this user inserts cleanly.
+	validTenantInsert(t, ctx, conn, userID)
+
+	// Second tenant for the same user is rejected.
+	id := uuid.New().String()
+	dbName := "tenant_" + strings.ReplaceAll(id, "-", "")
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status)
+		VALUES ($1, $2, $3, 'pending')
+	`, id, userID, dbName)
+	if err == nil {
+		t.Errorf("expected UNIQUE violation on tenants_user_id_unique, got nil")
+	}
+}
+
+// TestPlatformDB_TenantsDBNameFormatCheck verifies the column-level
+// regex check on db_name (independent from the derivation check).
+func TestPlatformDB_TenantsDBNameFormatCheck(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	conn := platformConn(t, ctx, platformDB)
+	userID := insertUser(t, ctx, conn, userOpts{})
+
+	id := uuid.New().String()
+	// Wrong format — uppercase hex would violate the regex
+	// `^tenant_[a-f0-9]{32}$`.
+	badDBName := "tenant_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.tenants (id, user_id, db_name, status)
+		VALUES ($1, $2, $3, 'pending')
+	`, id, userID, badDBName)
+	if err == nil {
+		t.Errorf("expected CHECK violation for invalid db_name format, got nil")
+	}
+}
+
+// TestPlatformDB_AuditLogAppendOnly is a smoke test that the audit_log
+// table accepts inserts shaped like the spec's UserSignedUp /
+// TenantApproved events. Designed to fail loud if a future migration
+// accidentally drops a required column.
+func TestPlatformDB_AuditLogAppendOnly(t *testing.T) {
+	ctx := context.Background()
+	m, platformDB := newMigratorForTest(t)
+	if err := m.Bootstrap(ctx); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	conn := platformConn(t, ctx, platformDB)
+
+	userID := insertUser(t, ctx, conn, userOpts{})
+
+	// Insert a sample user.signed_up audit row.
+	_, err := conn.Exec(ctx, `
+		INSERT INTO platform.audit_log (event_type, aggregate_type, aggregate_id, payload, occurred_at)
+		VALUES ('user.signed_up', 'user', $1, '{"email":"new@example.com"}'::jsonb, $2)
+	`, userID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("insert audit_log row: %v", err)
+	}
+
+	// Insert a sample tenant.approved with actor + reason.
+	tenantID := uuid.New().String()
+	_, err = conn.Exec(ctx, `
+		INSERT INTO platform.audit_log (
+			event_type, aggregate_type, aggregate_id, actor_user_id,
+			payload, reason, ip_address, user_agent, occurred_at
+		)
+		VALUES (
+			'tenant.approved', 'tenant', $1, $2,
+			'{"db_name":"tenant_x"}'::jsonb, 'manual review', '127.0.0.1', 'test-agent', $3
+		)
+	`, tenantID, userID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("insert audit_log row with full fields: %v", err)
 	}
 }
 
