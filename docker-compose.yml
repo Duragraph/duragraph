@@ -1,5 +1,11 @@
 services:
   # PostgreSQL Database
+  #
+  # Schema migrations are applied at engine startup by the embedded
+  # migrator (internal/infrastructure/persistence/postgres/migrator.go),
+  # NOT by docker-entrypoint-initdb.d. The image only needs the
+  # POSTGRES_* envs to bootstrap an empty cluster + default DB; the
+  # engine takes over from there.
   db:
     image: postgres:15
     container_name: duragraph-postgres
@@ -11,7 +17,6 @@ services:
       - "${DURAGRAPH_DB_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./deploy/sql:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
       interval: 30s

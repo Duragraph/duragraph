@@ -84,6 +84,58 @@ func main() {
 		}
 	}
 
+	// Run schema migrations BEFORE opening the application pool.
+	//
+	// The migrator owns DB-level provisioning + golang-migrate-driven
+	// schema rollout, replacing the docker-entrypoint-initdb.d mount
+	// that previously seeded the SQL on first container boot. See
+	// internal/infrastructure/persistence/postgres/migrator.go.
+	//
+	// Behaviour:
+	//   - Always runs MigrateMainDB(ctx, DB_NAME) — drop-in replacement
+	//     for the old initdb seed; existing single-DB deployments
+	//     continue to work without changes.
+	//   - When MIGRATOR_PLATFORM_ENABLED=true, additionally runs
+	//     Bootstrap (creates duragraph_platform if absent + applies
+	//     platform migrations, today a no-op) and MigrateAllTenants
+	//     (per-tenant migrations for approved tenants from
+	//     platform.tenants). Default false until feat/platform-db-init
+	//     and downstream multi-tenant routing land.
+	platformEnabled := os.Getenv("MIGRATOR_PLATFORM_ENABLED") == "true"
+	adminDSN := fmt.Sprintf(
+		"postgres://%s:%s@%s:%d/postgres?sslmode=%s",
+		cfg.Database.User, cfg.Database.Password,
+		cfg.Database.Host, cfg.Database.Port,
+		cfg.Database.SSLMode,
+	)
+	migrator, err := postgres.NewMigrator(adminDSN)
+	if err != nil {
+		log.Fatalf("failed to construct migrator: %v", err)
+	}
+
+	if platformEnabled {
+		if err := migrator.Bootstrap(ctx); err != nil {
+			log.Fatalf("migrator bootstrap failed: %v", err)
+		}
+		fmt.Println("✅ Platform DB bootstrapped")
+	}
+
+	if err := migrator.MigrateMainDB(ctx, cfg.Database.Database); err != nil {
+		log.Fatalf("main DB migrations failed: %v", err)
+	}
+	fmt.Printf("✅ Main DB migrations applied (%s)\n", cfg.Database.Database)
+
+	if platformEnabled {
+		results := migrator.MigrateAllTenants(ctx)
+		failed := 0
+		for _, r := range results {
+			if r.Err != nil {
+				failed++
+			}
+		}
+		fmt.Printf("✅ Tenant migrations dispatched (%d total, %d failed)\n", len(results), failed)
+	}
+
 	pools, err := postgres.NewPools(ctx, writeConfig, readConfig)
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
@@ -428,7 +480,7 @@ func main() {
 			}
 		}
 		e.Use(middleware.SimpleRateLimit(rps, burst))
-		fmt.Printf("\u2705 Rate limiting enabled (%.0f req/s, burst %d)\n", rps, burst)
+		fmt.Printf("✅ Rate limiting enabled (%.0f req/s, burst %d)\n", rps, burst)
 	}
 
 	// Optional authentication (can be made required by setting env var)
