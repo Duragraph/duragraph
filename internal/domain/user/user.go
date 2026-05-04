@@ -31,6 +31,15 @@ type User struct {
 	updatedAt     time.Time
 	version       int
 
+	// loadedUpdatedAt is the optimistic-concurrency token: the value of
+	// updated_at as observed when the aggregate was loaded from the
+	// projection (set by ReconstructFromData). Zero on freshly registered
+	// users — the persistence layer uses IsZero() to discriminate
+	// INSERT vs UPDATE on Save. The platform.users table has no
+	// `version` column; updated_at (maintained by the BEFORE UPDATE
+	// trigger) is the OCC token.
+	loadedUpdatedAt time.Time
+
 	// events holds uncommitted domain events recorded by aggregate methods.
 	events []eventbus.Event
 }
@@ -293,8 +302,17 @@ func (u *User) CreatedAt() time.Time { return u.createdAt }
 // UpdatedAt returns the time the user aggregate was last mutated.
 func (u *User) UpdatedAt() time.Time { return u.updatedAt }
 
-// Version returns the optimistic-concurrency version.
+// Version returns the in-memory aggregate version. The platform.users
+// projection table does not carry a version column, so this is a soft
+// counter incremented by the persistence layer for diagnostic purposes;
+// optimistic concurrency is enforced via LoadedUpdatedAt instead.
 func (u *User) Version() int { return u.version }
+
+// LoadedUpdatedAt returns the value of updated_at observed when the user
+// was loaded from the projection. Returns the zero time for fresh users
+// produced by RegisterUser. The persistence layer uses this as the
+// optimistic-concurrency token (`WHERE id = $X AND updated_at = $Y`).
+func (u *User) LoadedUpdatedAt() time.Time { return u.loadedUpdatedAt }
 
 // Events returns the uncommitted domain events recorded since the last
 // ClearEvents call.
@@ -306,7 +324,77 @@ func (u *User) ClearEvents() {
 	u.events = make([]eventbus.Event, 0)
 }
 
+// SetPersistedState is invoked by the persistence layer immediately after
+// a successful Save to refresh the OCC token (loadedUpdatedAt) and the
+// authoritative updated_at observed in PG (after the BEFORE UPDATE
+// trigger / column DEFAULT NOW() applied). Increments the in-memory
+// version counter as a soft diagnostic.
+//
+// This is intentionally exported (rather than a peer of recordEvent) so
+// the persistence layer in internal/infrastructure/persistence/postgres
+// can call it without sharing a package; it is NOT part of the domain
+// API and should not be called from application command handlers.
+func (u *User) SetPersistedState(updatedAt time.Time) {
+	u.updatedAt = updatedAt
+	u.loadedUpdatedAt = updatedAt
+	u.version++
+}
+
 // recordEvent appends an event to the uncommitted events list.
 func (u *User) recordEvent(e eventbus.Event) {
 	u.events = append(u.events, e)
+}
+
+// UserData is a flat DTO carrying all persisted user fields. Used by
+// ReconstructFromData to materialize a User aggregate from a database
+// row without going through RegisterUser (which would emit events and
+// generate a fresh ID).
+type UserData struct {
+	ID            string
+	Email         string
+	OAuthProvider string
+	OAuthID       string
+	Role          string
+	Status        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// ReconstructFromData rebuilds a User aggregate from database projection
+// data. The resulting aggregate has no uncommitted events and carries
+// loadedUpdatedAt set to data.UpdatedAt — the optimistic-concurrency
+// token used by the persistence layer to detect concurrent modifications
+// on subsequent Save calls. The in-memory version counter starts at 1.
+//
+// Unlike RegisterUser this function does NOT validate inputs (the row
+// has already been validated at insert time by the table-level CHECKs);
+// it does, however, fall back to RoleUser / StatusPending if Role /
+// Status are unrecognized strings, mirroring the pattern in
+// run.ReconstructFromData.
+func ReconstructFromData(data UserData) *User {
+	role := RoleUser
+	switch Role(data.Role) {
+	case RoleUser, RoleAdmin:
+		role = Role(data.Role)
+	}
+
+	status := StatusPending
+	switch Status(data.Status) {
+	case StatusPending, StatusApproved, StatusSuspended:
+		status = Status(data.Status)
+	}
+
+	return &User{
+		id:              data.ID,
+		email:           data.Email,
+		oauthProvider:   data.OAuthProvider,
+		oauthID:         data.OAuthID,
+		role:            role,
+		status:          status,
+		createdAt:       data.CreatedAt,
+		updatedAt:       data.UpdatedAt,
+		version:         1,
+		loadedUpdatedAt: data.UpdatedAt,
+		events:          make([]eventbus.Event, 0),
+	}
 }

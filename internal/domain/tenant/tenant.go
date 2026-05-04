@@ -25,7 +25,17 @@ type Tenant struct {
 	createdAt     time.Time
 	updatedAt     time.Time
 	version       int
-	events        []eventbus.Event
+
+	// loadedUpdatedAt is the optimistic-concurrency token: the value of
+	// updated_at as observed when the aggregate was loaded from the
+	// projection (set by ReconstructFromData). Zero on freshly created
+	// tenants — the persistence layer uses IsZero() to discriminate
+	// INSERT vs UPDATE on Save. The platform.tenants table has no
+	// `version` column; updated_at (maintained by the BEFORE UPDATE
+	// trigger) is the OCC token.
+	loadedUpdatedAt time.Time
+
+	events []eventbus.Event
 }
 
 // NewTenant creates a new Tenant aggregate in pending status. The tenant ID
@@ -195,9 +205,17 @@ func (t *Tenant) CreatedAt() time.Time { return t.createdAt }
 // UpdatedAt returns the last-update timestamp.
 func (t *Tenant) UpdatedAt() time.Time { return t.updatedAt }
 
-// Version returns the optimistic concurrency version. Bumped by the
-// repository layer on each successful Save.
+// Version returns the in-memory aggregate version. The platform.tenants
+// projection table does not carry a version column, so this is a soft
+// counter incremented by the persistence layer for diagnostic purposes;
+// optimistic concurrency is enforced via LoadedUpdatedAt instead.
 func (t *Tenant) Version() int { return t.version }
+
+// LoadedUpdatedAt returns the value of updated_at observed when the
+// tenant was loaded from the projection. Returns the zero time for fresh
+// tenants produced by NewTenant. The persistence layer uses this as the
+// optimistic-concurrency token (`WHERE id = $X AND updated_at = $Y`).
+func (t *Tenant) LoadedUpdatedAt() time.Time { return t.loadedUpdatedAt }
 
 // Events returns the uncommitted events recorded on this aggregate.
 func (t *Tenant) Events() []eventbus.Event { return t.events }
@@ -208,7 +226,72 @@ func (t *Tenant) ClearEvents() {
 	t.events = make([]eventbus.Event, 0)
 }
 
+// SetPersistedState is invoked by the persistence layer immediately after
+// a successful Save to refresh the OCC token (loadedUpdatedAt) and the
+// authoritative updated_at observed in PG (after the BEFORE UPDATE
+// trigger / column DEFAULT NOW() applied). Increments the in-memory
+// version counter as a soft diagnostic.
+//
+// Exported so the postgres package can call it without sharing a package
+// boundary; not part of the domain API used by application command
+// handlers.
+func (t *Tenant) SetPersistedState(updatedAt time.Time) {
+	t.updatedAt = updatedAt
+	t.loadedUpdatedAt = updatedAt
+	t.version++
+}
+
 // recordEvent appends an event to the uncommitted events list.
 func (t *Tenant) recordEvent(event eventbus.Event) {
 	t.events = append(t.events, event)
+}
+
+// TenantData is a flat DTO carrying all persisted tenant fields. Used by
+// ReconstructFromData to materialize a Tenant aggregate from a database
+// row without going through NewTenant (which would emit a TenantPending
+// event and generate a fresh ID).
+type TenantData struct {
+	ID            string
+	UserID        string
+	DBName        string
+	Status        string
+	SchemaVersion *int
+	ProvisionedAt *time.Time
+	FailureReason string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// ReconstructFromData rebuilds a Tenant aggregate from database
+// projection data. The resulting aggregate has no uncommitted events and
+// carries loadedUpdatedAt set to data.UpdatedAt — the OCC token used by
+// the persistence layer on subsequent Save calls. The in-memory version
+// counter starts at 1.
+//
+// Unlike NewTenant this function does NOT validate inputs (the row has
+// already been validated at insert time by the table-level CHECKs); it
+// does, however, fall back to StatusPending if data.Status is
+// unrecognized.
+func ReconstructFromData(data TenantData) *Tenant {
+	status := StatusPending
+	switch Status(data.Status) {
+	case StatusPending, StatusProvisioning, StatusApproved,
+		StatusProvisioningFailed, StatusSuspended:
+		status = Status(data.Status)
+	}
+
+	return &Tenant{
+		id:              data.ID,
+		userID:          data.UserID,
+		dbName:          data.DBName,
+		status:          status,
+		schemaVersion:   data.SchemaVersion,
+		provisionedAt:   data.ProvisionedAt,
+		failureReason:   data.FailureReason,
+		createdAt:       data.CreatedAt,
+		updatedAt:       data.UpdatedAt,
+		version:         1,
+		loadedUpdatedAt: data.UpdatedAt,
+		events:          make([]eventbus.Event, 0),
+	}
 }
