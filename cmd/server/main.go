@@ -206,6 +206,73 @@ func main() {
 
 	fmt.Println("✅ Outbox relay worker started")
 
+	// Platform-mode wiring: connect a separate pool to the platform DB
+	// (`duragraph_platform`) so the User/Tenant repositories can drive
+	// platform-admin commands and so the tenant-provisioner subscriber
+	// can complete the async provisioning workflow kicked off by an
+	// admin's Approve click.
+	//
+	// Gated behind MIGRATOR_PLATFORM_ENABLED — same flag the migrator
+	// uses for Bootstrap and MigrateAllTenants. The platform pool, the
+	// User/Tenant repositories and the TenantProvisioner are all
+	// optional today; existing single-DB deployments continue to work
+	// unchanged when the flag is off.
+	//
+	// When the flag is on, this block establishes:
+	//   - `platformPool` — pgxpool against the duragraph_platform DB
+	//   - userRepo + tenantRepo — projection writers for platform.users
+	//     and platform.tenants
+	//   - tenantProvisioner — NATS subscriber that turns
+	//     tenant.provisioning events into CREATE DATABASE + migrate +
+	//     (stubbed) NATS Account creation, then approves the tenant.
+	//
+	// The HTTP admin handlers (POST /api/admin/users/.../approve etc.)
+	// are NOT wired here — that's the next PR (feat/admin-handlers).
+	// The repos and the publisher are constructed so the handlers can
+	// pick them up; the publisher reused for command-side publishing
+	// is the existing `publisher` constructed above.
+	if platformEnabled {
+		platformConfig := postgres.Config{
+			Host:     cfg.Database.Host,
+			Port:     cfg.Database.Port,
+			User:     cfg.Database.User,
+			Password: cfg.Database.Password,
+			Database: "duragraph_platform",
+			SSLMode:  cfg.Database.SSLMode,
+		}
+		platformPool, err := postgres.NewPool(ctx, platformConfig)
+		if err != nil {
+			log.Fatalf("failed to connect to platform DB: %v", err)
+		}
+		defer platformPool.Close()
+		fmt.Println("✅ Platform DB connected (duragraph_platform)")
+
+		userRepo := postgres.NewUserRepository(platformPool)
+		tenantRepo := postgres.NewTenantRepository(platformPool)
+
+		// Suppress unused-variable warnings until feat/admin-handlers
+		// wires the HTTP handlers that consume these.
+		_ = userRepo
+		_ = tenantRepo
+
+		// Tenant provisioner subscriber. The migrator instance built
+		// above is reused — its ProvisionTenant + MigrateTenant methods
+		// are exactly what the subscriber needs.
+		tenantProvisioner := messaging.NewTenantProvisioner(
+			subscriber,
+			tenantRepo,
+			migrator,
+			messaging.NoopNATSAccountProvisioner{}, // operator-JWT wiring is a follow-up PR
+			log.Default(),
+		)
+		go func() {
+			if err := tenantProvisioner.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("tenant provisioner error: %v", err)
+			}
+		}()
+		fmt.Println("✅ Tenant provisioner subscriber started")
+	}
+
 	// Start cleanup worker
 	cleanupWorker := messaging.NewCleanupWorker(outbox, 1*time.Hour, 7)
 	go func() {
