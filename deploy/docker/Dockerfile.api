@@ -7,6 +7,12 @@ RUN go mod download
 
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+# dashboard_embed.go (//go:embed all:dashboard/dist) lives at module root.
+# The dist/ ships with a placeholder index.html so the build works without
+# pnpm; production images use Dockerfile.server which actually builds the
+# React app first.
+COPY dashboard_embed.go ./
+COPY dashboard/dist/ ./dashboard/dist/
 
 # Build the server binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server
