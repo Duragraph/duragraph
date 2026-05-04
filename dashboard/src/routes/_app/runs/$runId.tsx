@@ -334,9 +334,9 @@ function RunDetailPage() {
                       // Use streaming node statuses if available, otherwise fall back to static status
                       Object.keys(nodeStatuses).length > 0
                         ? nodeStatuses
-                        : run.status === "success"
+                        : run.status === "completed"
                           ? Object.fromEntries(graph.nodes.map((n) => [n.id, "completed" as ExecutionStatus]))
-                          : run.status === "error"
+                          : run.status === "failed"
                             ? Object.fromEntries(graph.nodes.map((n) => [n.id, "error" as ExecutionStatus]))
                             : undefined
                     }

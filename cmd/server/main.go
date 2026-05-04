@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ThreeDotsLabs/watermill"
+	duragraph "github.com/duragraph/duragraph"
 	"github.com/duragraph/duragraph/cmd/server/config"
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
@@ -19,6 +20,7 @@ import (
 	"github.com/duragraph/duragraph/internal/infrastructure/auth"
 	infra_exec "github.com/duragraph/duragraph/internal/infrastructure/execution"
 	"github.com/duragraph/duragraph/internal/infrastructure/graph"
+	"github.com/duragraph/duragraph/internal/infrastructure/http/dashboard"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/middleware"
 	"github.com/duragraph/duragraph/internal/infrastructure/mcp"
@@ -680,6 +682,14 @@ func main() {
 			middleware.TenantMiddleware(verifier),
 			middleware.AdminAuthMiddleware(),
 		)
+	}
+
+	// Embedded React dashboard. Must be registered after API routes so Echo's
+	// router prioritises exact /api/v1/... matches over the wildcard.
+	if distFS, err := duragraph.DashboardFS(); err == nil {
+		dashboard.Register(e, distFS)
+	} else {
+		log.Printf("dashboard not available: %v", err)
 	}
 
 	// Start server

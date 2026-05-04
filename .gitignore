@@ -3,8 +3,8 @@ TODO.md
 .DS_Store
 */node_modules
 **/node_modules
-*/dist
-**/dist
+# dist/ is handled per-subdir (e.g. dashboard/.gitignore keeps a placeholder
+# for the //go:embed at dashboard/dist while ignoring real build output)
 */build
 **/build
 */.env

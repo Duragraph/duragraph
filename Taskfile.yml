@@ -2,7 +2,7 @@ version: "3"
 
 vars:
   API_PORT: 8080
-  DASHBOARD_PORT: 5173
+  DASHBOARD_PORT: 3303
   WEBSITE_PORT: 3000
   TEMPORAL_HOST: localhost:7233
 
@@ -53,11 +53,11 @@ tasks:
       TEMPORAL_HOSTPORT: "{{.TEMPORAL_HOST}}"
 
   dashboard:dev:
-    desc: Start Svelte dashboard development server
+    desc: Start React dashboard dev server (Vite). In production the built dashboard is embedded into the server binary.
     dir: dashboard
     cmds:
       - echo "Starting dashboard on :{{.DASHBOARD_PORT}}"
-      - pnpm dev --port {{.DASHBOARD_PORT}}
+      - pnpm dev --port {{.DASHBOARD_PORT}} --host
 
   website:dev:
     desc: Start Next.js website development server
@@ -128,12 +128,12 @@ tasks:
       - bin/api
 
   build:dashboard:
-    desc: Build dashboard for production
+    desc: Build dashboard for production. Vite outputs to dashboard/dist, which is embedded into the server binary via go:embed.
     dir: dashboard
     cmds:
       - pnpm build
     generates:
-      - dashboard/build/**
+      - dashboard/dist/**
 
   build:website:
     desc: Build website for production
@@ -271,12 +271,14 @@ tasks:
       - pnpm format
 
   # === Docker Operations ===
+  # The dashboard is embedded into the server image via go:embed; per platform
+  # CD policy, frontends ship inside the backend image, not as a separate one.
   docker:build:
     desc: Build all Docker images
-    deps: ["docker:build:api", "docker:build:workers", "docker:build:dashboard"]
+    deps: ["docker:build:api", "docker:build:workers"]
 
   docker:build:api:
-    desc: Build API Docker image
+    desc: Build API Docker image (also builds + embeds the React dashboard)
     cmds:
       - docker build -f deploy/docker/Dockerfile.api -t duragraph/api:latest .
 
@@ -285,11 +287,6 @@ tasks:
     cmds:
       - docker build -f deploy/docker/Dockerfile.go-worker -t duragraph/go-worker:latest workers/runtime/go-adapter/
       - docker build -f deploy/docker/Dockerfile.python-worker -t duragraph/python-worker:latest workers/runtime/python-adapter/
-
-  docker:build:dashboard:
-    desc: Build dashboard Docker image
-    cmds:
-      - docker build -f deploy/docker/Dockerfile.dashboard -t duragraph/dashboard:latest dashboard/
 
   docker:run:api:
     desc: Run API in Docker
@@ -310,8 +307,7 @@ tasks:
     cmds:
       - docker-compose up -d
       - echo "Services starting..."
-      - "echo \"API: http://localhost:{{.API_PORT}}\""
-      - "echo \"Dashboard: http://localhost:{{.DASHBOARD_PORT}}\""
+      - "echo \"API + Dashboard: http://localhost:{{.API_PORT}}\""
       - "echo \"Website: http://localhost:{{.WEBSITE_PORT}}\""
 
   up:test:
@@ -382,7 +378,7 @@ tasks:
     desc: Clean build artifacts and dependencies
     cmds:
       - rm -rf bin/
-      - rm -rf dashboard/build/
+      - rm -rf dashboard/dist/
       - rm -rf website/out/
       - rm -rf website/.next/
       - go clean -cache
@@ -403,8 +399,8 @@ tasks:
     cmds:
       - echo "Checking API health..."
       - curl -f http://localhost:{{.API_PORT}}/health || echo "API not responding"
-      - echo "Checking dashboard..."
-      - curl -f http://localhost:{{.DASHBOARD_PORT}} || echo "Dashboard not responding"
+      - echo "Checking dashboard (served from same port)..."
+      - curl -f http://localhost:{{.API_PORT}}/ || echo "Dashboard not responding"
 
   ps:
     desc: Show running containers
