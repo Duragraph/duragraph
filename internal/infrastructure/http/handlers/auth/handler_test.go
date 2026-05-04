@@ -22,10 +22,12 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +35,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/markbates/goth"
+	"github.com/markbates/goth/providers/github"
+	"github.com/markbates/goth/providers/google"
 
 	authpkg "github.com/duragraph/duragraph/internal/infrastructure/auth"
 
@@ -40,6 +44,36 @@ import (
 	"github.com/duragraph/duragraph/internal/domain/user"
 	pkgerrors "github.com/duragraph/duragraph/internal/pkg/errors"
 )
+
+// TestMain registers stub google + github providers with goth before the
+// suite runs. Login/Callback now check goth.GetProvider up front and would
+// otherwise reject every test that uses a "google" or "github" path param.
+// The stub provider constructors don't make HTTP calls, so registration is
+// cheap and pure; tests that exercise the not-registered branch snapshot
+// + restore the global state via t.Cleanup.
+func TestMain(m *testing.M) {
+	goth.UseProviders(
+		google.New("test-google-id", "test-google-secret", "http://test/api/auth/google/callback"),
+		github.New("test-github-id", "test-github-secret", "http://test/api/auth/github/callback"),
+	)
+	os.Exit(m.Run())
+}
+
+// withClearedProviders snapshots goth's provider table, clears it for the
+// caller, and restores it on test cleanup. Used by tests that need to
+// observe behaviour when a provider is in supportedProviders but not
+// registered with goth.
+func withClearedProviders(t *testing.T) {
+	t.Helper()
+	saved := goth.GetProviders()
+	t.Cleanup(func() {
+		goth.ClearProviders()
+		for _, p := range saved {
+			goth.UseProviders(p)
+		}
+	})
+	goth.ClearProviders()
+}
 
 // ---- shared test fixtures ------------------------------------------------
 
@@ -775,6 +809,10 @@ func TestLogout_CookieRefererFallback(t *testing.T) {
 // ---- refresh -------------------------------------------------------------
 
 // Valid bearer token → new token returned in JSON.
+//
+// Asserts the response body's exp is exactly equal to the freshly-issued
+// token's exp claim (no clock-skew off-by-one between IssueJWT's internal
+// time.Now() and a separately-computed time.Now() in the handler).
 func TestRefresh_Valid(t *testing.T) {
 	h := newTestHandler(t)
 	// Mint a current token.
@@ -796,9 +834,32 @@ func TestRefresh_Valid(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `"token"`) || !strings.Contains(body, `"exp"`) {
-		t.Errorf("expected token+exp in body, got %s", body)
+
+	var body struct {
+		Token string `json:"token"`
+		Exp   int64  `json:"exp"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v (body=%s)", err, rec.Body.String())
+	}
+	if body.Token == "" {
+		t.Errorf("expected non-empty token, got %q", body.Token)
+	}
+	if body.Exp == 0 {
+		t.Errorf("expected non-zero exp, got %d", body.Exp)
+	}
+
+	// The exp in the body must match the freshly-issued JWT's exp claim
+	// exactly. Any drift means we're computing two different time.Now()s.
+	verified, err := authpkg.VerifyJWT([]byte(testJWTSecret), body.Token)
+	if err != nil {
+		t.Fatalf("verify refreshed token: %v", err)
+	}
+	if verified.ExpiresAt == nil {
+		t.Fatal("refreshed token has no ExpiresAt claim")
+	}
+	if got, want := body.Exp, verified.ExpiresAt.Unix(); got != want {
+		t.Errorf("body exp does not match token exp: body=%d token=%d (drift=%d)", got, want, got-want)
 	}
 }
 
@@ -865,7 +926,10 @@ func TestOriginMatchesBaseURL(t *testing.T) {
 		referer string
 		want    bool
 	}{
-		{"empty base url permits", "", "https://anywhere.test", "", true},
+		// originMatchesBaseURL is now fail-closed when BaseURL is unparseable
+		// or empty (NewHandler rejects empty BaseURL, but the helper itself
+		// must remain safe under direct struct construction).
+		{"empty base url rejects", "", "https://anywhere.test", "", false},
 		{"matching origin", testBaseURL, testBaseURL, "", true},
 		{"mismatched origin", testBaseURL, "https://other.example", "", false},
 		{"no origin no referer", testBaseURL, "", "", false},
@@ -960,6 +1024,56 @@ func TestNewHandler_RequiredArgs(t *testing.T) {
 	}
 	if _, err := NewHandler(&stubUserRepo{}, &stubTenantRepo{}, nil, verifier, &stubExchanger{}, &stubLocker{}, cfg); err == nil {
 		t.Error("expected error when migrator is nil")
+	}
+
+	// Empty BaseURL must be rejected — accepting it would silently disable
+	// the cookie-logout CSRF defence (originMatchesBaseURL is fail-closed
+	// on an unparseable BaseURL).
+	emptyBase := cfg
+	emptyBase.BaseURL = ""
+	if _, err := NewHandler(&stubUserRepo{}, &stubTenantRepo{}, nil, verifier, &stubExchanger{}, &stubLocker{}, emptyBase); err == nil {
+		t.Error("expected error when BaseURL is empty")
+	}
+}
+
+// /login when the provider is in supportedProviders but not registered
+// with goth (e.g. OAUTH_GOOGLE_CLIENT_ID was empty in env, so
+// ConfigureProviders skipped it) → 400 unknown_provider, NOT 502.
+func TestLogin_ProviderNotRegistered(t *testing.T) {
+	withClearedProviders(t)
+
+	h := newTestHandler(t)
+	c, rec, _ := newEchoCtx(t, http.MethodGet, "/api/auth/google/login", "")
+	pathParam(c, "provider", "google")
+
+	if err := h.Login(c); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 when provider not registered, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "unknown_provider") {
+		t.Errorf("expected unknown_provider error code, got %s", rec.Body.String())
+	}
+}
+
+// /callback when the provider is in supportedProviders but not registered
+// with goth → 400 unknown_provider, NOT 502 provider_exchange_failed.
+func TestCallback_ProviderNotRegistered(t *testing.T) {
+	withClearedProviders(t)
+
+	h := newTestHandler(t)
+	c, rec, _ := newEchoCtx(t, http.MethodGet, "/api/auth/github/callback?code=x&state=y", "")
+	pathParam(c, "provider", "github")
+
+	if err := h.Callback(c); err != nil {
+		t.Fatalf("Callback: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 when provider not registered, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "unknown_provider") {
+		t.Errorf("expected unknown_provider error code, got %s", rec.Body.String())
 	}
 }
 

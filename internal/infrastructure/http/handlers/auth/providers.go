@@ -28,10 +28,16 @@ type ProviderConfig struct {
 	// SessionSecret keys the gorilla/sessions cookie store goth uses to
 	// hold the OAuth state token between /login and /callback. Spec
 	// auth/oauth.yml § state_csrf identifies this cookie as
-	// `_gothic_session`. The secret MUST be 32 or 64 bytes for AES-CBC;
-	// the constructor returns an error if it's empty (a misconfigured
-	// store would silently fall back to gothic's default secret of "",
-	// which makes the state cookie forgeable).
+	// `_gothic_session`.
+	//
+	// With a single key, sessions.NewCookieStore uses HMAC-SHA256 for
+	// integrity-only signing of the state cookie (encryption is opt-in
+	// by passing a second blockKey; we don't — the CSRF state token is
+	// short-lived and integrity is sufficient). Recommend at least 32
+	// bytes of entropy; longer is fine but provides no extra benefit
+	// past the HMAC-SHA256 block boundary (~64 bytes). The constructor
+	// rejects anything shorter than 32 bytes so misconfigurations fail
+	// at startup rather than silently weakening the state-cookie defence.
 	SessionSecret string
 
 	// CookieSecure controls the Secure attribute on the gothic state
@@ -52,8 +58,12 @@ func ConfigureProviders(cfg ProviderConfig) error {
 	if cfg.BaseURL == "" {
 		return fmt.Errorf("configure providers: BaseURL is required")
 	}
-	if cfg.SessionSecret == "" {
-		return fmt.Errorf("configure providers: SessionSecret is required (32 or 64 bytes)")
+	// SessionSecret keys the HMAC-SHA256 signature on the gothic state
+	// cookie. 32 bytes matches HMAC-SHA256's natural key size and is the
+	// shortest length that gives full-strength signatures; reject anything
+	// shorter at startup.
+	if len(cfg.SessionSecret) < 32 {
+		return fmt.Errorf("configure providers: SessionSecret must be at least 32 bytes (got %d)", len(cfg.SessionSecret))
 	}
 
 	// Configure the gothic session store BEFORE goth.UseProviders. The

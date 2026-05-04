@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
+	"github.com/markbates/goth"
 
 	authpkg "github.com/duragraph/duragraph/internal/infrastructure/auth"
 	"github.com/duragraph/duragraph/internal/infrastructure/persistence/postgres"
@@ -49,34 +50,41 @@ var supportedProviders = map[string]struct{}{
 	"github": {},
 }
 
-// Config bundles the runtime configuration of the OAuth handler. All
-// fields are required at construction time — there is no graceful
-// fallback for any of them.
+// Config bundles the runtime configuration of the OAuth handler.
+//
+// Validated by NewHandler (must be non-zero): SessionTTL, BaseURL, JWTSecret.
+// Optional: CookieDomain (empty → host-only cookie, the dev default),
+// CookieSecure (defaults false; set true in production).
 type Config struct {
 	// SessionTTL is the JWT lifetime stamped on tokens minted at callback.
 	// Spec default: 24h (auth/jwt.yml § exp.default_lifetime_seconds).
+	// Required (must be > 0).
 	SessionTTL time.Duration
 
 	// CookieDomain is the value passed into Set-Cookie's Domain attribute.
 	// Empty string means host-only (the default in dev). Sourced from
 	// PLATFORM_COOKIE_DOMAIN env var per spec auth/oauth.yml § host.
 	// MUST NOT include a scheme or port — Set-Cookie's Domain attribute
-	// silently rejects those.
+	// silently rejects those. Optional.
 	CookieDomain string
 
 	// CookieSecure controls the Secure attribute on the session cookie.
 	// True in production (HTTPS-only), false in dev for plain-HTTP testing.
+	// Optional (defaults to false).
 	CookieSecure bool
 
 	// BaseURL is the platform's externally-facing URL (e.g.
 	// "https://platform.duragraph.ai"). Used as the Origin/Referer reference
-	// for logout CSRF checks. Must include scheme.
+	// for logout CSRF checks. Must include scheme. Required — the constructor
+	// rejects an empty value because empty BaseURL would silently disable the
+	// logout CSRF defence (originMatchesBaseURL is fail-closed and only
+	// permits requests when BaseURL is set and matches).
 	BaseURL string
 
 	// JWTSecret is the shared HMAC key used to sign tokens at callback and
 	// to verify them at /api/auth/refresh. Must match the engine
 	// middleware's secret (the spec calls this contract out in
-	// auth/jwt.yml § signing.secret).
+	// auth/jwt.yml § signing.secret). Required.
 	JWTSecret []byte
 }
 
@@ -139,6 +147,13 @@ func NewHandler(
 	if len(cfg.JWTSecret) == 0 {
 		return nil, fmt.Errorf("oauth handler: JWTSecret is required")
 	}
+	// BaseURL must be set: originMatchesBaseURL is fail-closed when BaseURL
+	// is empty, so accepting "" here would result in every cookie-auth POST
+	// /api/auth/logout returning 403. Failing fast at construction time
+	// surfaces the misconfiguration at startup rather than first request.
+	if cfg.BaseURL == "" {
+		return nil, fmt.Errorf("oauth handler: BaseURL is required")
+	}
 
 	return &Handler{
 		userRepo:   userRepo,
@@ -162,6 +177,14 @@ func NewHandler(
 func (h *Handler) Login(c echo.Context) error {
 	provider := c.Param("provider")
 	if _, ok := supportedProviders[provider]; !ok {
+		return unknownProvider(c, provider)
+	}
+	// A provider may be in the supported set but not registered with goth at
+	// runtime (e.g. OAUTH_GITHUB_CLIENT_ID empty in env → ConfigureProviders
+	// skipped registration). Surface that as the same 400 unknown_provider
+	// the spec mandates, rather than letting gothic.BeginAuthHandler error
+	// out and producing a misleading 502.
+	if _, err := goth.GetProvider(provider); err != nil {
 		return unknownProvider(c, provider)
 	}
 
@@ -189,6 +212,13 @@ func (h *Handler) Callback(c echo.Context) error {
 	ctx := c.Request().Context()
 	provider := c.Param("provider")
 	if _, ok := supportedProviders[provider]; !ok {
+		return unknownProvider(c, provider)
+	}
+	// Same registration check as Login: a provider in the supported set may
+	// not be registered with goth (e.g. its OAUTH_*_CLIENT_ID was empty).
+	// Map that to 400 unknown_provider rather than letting gothic surface a
+	// 502 provider_exchange_failed.
+	if _, err := goth.GetProvider(provider); err != nil {
 		return unknownProvider(c, provider)
 	}
 
@@ -315,10 +345,19 @@ func (h *Handler) Refresh(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, errorBody("internal_error", "failed to issue token"))
 	}
 
-	exp := time.Now().Add(h.cfg.SessionTTL).Unix()
+	// Read exp back from the freshly-signed token so the response body
+	// matches the JWT's exp claim exactly. Computing a new time.Now() here
+	// would race IssueJWT's internal time.Now() and, after second-truncation,
+	// could be off-by-one from the token's actual exp.
+	verified, err := authpkg.VerifyJWT(h.cfg.JWTSecret, newToken)
+	if err != nil || verified.ExpiresAt == nil {
+		// Defensive: we just signed this with our own secret, so verify
+		// failure is a programming error, not user input.
+		return c.JSON(http.StatusInternalServerError, errorBody("internal_error", "failed to read issued token"))
+	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"token": newToken,
-		"exp":   exp,
+		"exp":   verified.ExpiresAt.Unix(),
 	})
 }
 
@@ -538,16 +577,13 @@ func (h *Handler) clearSessionCookie(c echo.Context) {
 // request's Origin header (or, if absent, Referer) MUST match the origin
 // of cfg.BaseURL.
 //
-// If cfg.BaseURL is unset (e.g. in tests that don't configure it), the
-// check passes — there's no reference origin to compare against, and the
-// caller has explicitly opted out of the safeguard. Production deployments
-// MUST set PLATFORM_BASE_URL.
+// Fail-closed: if cfg.BaseURL can't be parsed into a usable origin, the
+// check rejects. NewHandler enforces a non-empty BaseURL so the empty
+// case isn't reachable through the public constructor — only direct
+// struct construction (in tests) can trigger it, and we fail those too.
 func (h *Handler) originMatchesBaseURL(r *http.Request) bool {
-	if h.cfg.BaseURL == "" {
-		return true
-	}
 	want, err := url.Parse(h.cfg.BaseURL)
-	if err != nil || want.Host == "" {
+	if err != nil || want.Scheme == "" || want.Host == "" {
 		return false
 	}
 
