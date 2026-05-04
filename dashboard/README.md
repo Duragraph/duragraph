@@ -1,73 +1,81 @@
-# React + TypeScript + Vite
+# DuraGraph Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The React dashboard for the DuraGraph control plane. Lets users view runs, manage assistants and threads, inspect traces, and monitor analytics.
 
-Currently, two official plugins are available:
+## How it ships
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+In **production** the dashboard is **built into the same binary as the Go API server** via `go:embed`. There is no separate dashboard container. The flow:
 
-## React Compiler
+1. `pnpm build` outputs static assets to `dashboard/dist/`
+2. `go build ./cmd/server` picks them up via `//go:embed all:dashboard/dist` in `dashboard_embed.go` at the module root
+3. The server registers a SPA-fallback handler at `/*` that serves `dist/` files and falls back to `index.html` for any path not under `/api/v1/`, `/health`, `/metrics`, `/ok`, or `/info`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+`deploy/docker/Dockerfile.server` runs both build steps in a multi-stage image. See `internal/infrastructure/http/dashboard/handler.go` for the runtime serving logic.
 
-## Expanding the ESLint configuration
+> **Why is `dashboard/dist/index.html` committed?** It's a tiny placeholder so `go build` succeeds before anyone has run `pnpm build`. Real builds overwrite it. See `dashboard/.gitignore` — only `index.html` is whitelisted, every other file in `dist/` is ignored.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **React 19** + TypeScript (strict)
+- **Vite 7** for build + HMR
+- **TanStack Router** for type-safe routing (file-based)
+- **TanStack Query** for server state
+- **Zustand** for client state
+- **shadcn/ui** + Radix + Tailwind for components
+- **@xyflow/react** for graph visualization
+- **next-themes** for dark mode
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Local development
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# from the repo root
+task dashboard:dev      # starts vite on :3303
+task api:dev            # starts the Go API on :8080
+
+# or directly:
+cd dashboard && pnpm install && pnpm dev --port 3303 --host
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Set `VITE_API_URL=http://localhost:8080/api/v1` in `dashboard/.env.local` if the API is on a different host. By default the client uses `/api/v1` (relative), which works when the dashboard is served from the same origin as the API.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Building
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+task build:dashboard    # produces dashboard/dist/
+task build:server       # rebuilds the Go binary with the new dist embedded
 ```
+
+In CI both steps run on every PR — see `.github/workflows/ci.yml`.
+
+## Layout
+
+```
+dashboard/
+├── src/
+│   ├── api/             # Thin fetch wrapper around the duragraph REST API
+│   ├── components/
+│   │   ├── assistants/  # Assistant management (list, form, card)
+│   │   ├── chat/        # Chat-style interaction with threads
+│   │   ├── graph/       # xyflow-based graph rendering
+│   │   ├── layout/      # Sidebar, topbar, app shell
+│   │   ├── runs/        # Run list + detail
+│   │   ├── threads/     # Thread list + messages
+│   │   └── ui/          # shadcn primitives
+│   ├── routes/_app/     # File-based routes: runs, assistants, threads,
+│   │                    # traces, analytics, costs, settings, profile
+│   ├── stores/          # Zustand stores
+│   └── lib/             # Utilities
+├── dist/                # Build output (gitignored except for the placeholder)
+└── public/
+```
+
+## Specifications
+
+The full design spec lives in [duragraph-spec/frontend/](https://github.com/Duragraph/duragraph-spec/tree/main/frontend):
+
+- `frontend.yml` — overview, stack, routing
+- `components.yml` — shadcn component inventory
+- `wireframes.yml` — ASCII wireframes for every screen
+- `design-system.yml` — tokens (zero border-radius, Space Grotesk, coral accent)
+- `user-flows.yml`, `user-journeys.yml` — UX flows
+- `graph-builder.yml`, `graph-visualization.yml` — visual editor specs (deferred)

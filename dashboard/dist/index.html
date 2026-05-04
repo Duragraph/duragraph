@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DuraGraph Dashboard — not built</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; line-height: 1.5; color: #1f2937; }
+    code, pre { background: #f3f4f6; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.95em; }
+    pre { padding: 0.6em 0.8em; overflow-x: auto; }
+    h1 { font-size: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Dashboard placeholder</h1>
+  <p>
+    This file ships with the source tree so the Go server can
+    <code>//go:embed</code> <code>dashboard/dist</code> even before the React
+    app is built. If you're seeing this in a browser, the dashboard hasn't been
+    compiled into this server binary.
+  </p>
+  <p>To replace it with the real dashboard, run:</p>
+  <pre><code>cd dashboard && pnpm install && pnpm build</code></pre>
+  <p>or from the repo root:</p>
+  <pre><code>task build:dashboard</code></pre>
+  <p>
+    Production Docker images do this automatically — see
+    <code>deploy/docker/Dockerfile.server</code>.
+  </p>
+</body>
+</html>

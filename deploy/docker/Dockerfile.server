@@ -1,33 +1,48 @@
-# Build stage
+# syntax=docker/dockerfile:1.6
+#
+# Multi-stage build for the duragraph server. The React dashboard is built
+# first and its dist/ output is embedded into the Go binary via go:embed
+# (see dashboard_embed.go at the module root).
+
+# --- Stage 1: build the React dashboard ---
+FROM node:20-alpine AS dashboard-builder
+
+RUN corepack enable
+
+WORKDIR /app/dashboard
+
+COPY dashboard/package.json dashboard/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY dashboard/ ./
+RUN pnpm build
+
+# --- Stage 2: build the Go binary with the dashboard embedded ---
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies
 RUN apk add --no-cache git
 
-# Copy go mod files
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
 COPY . .
 
-# Build the binary
+# Replace the placeholder dist with the freshly built one before compiling.
+COPY --from=dashboard-builder /app/dashboard/dist ./dashboard/dist
+
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/bin/server ./cmd/server
 
-# Runtime stage
+# --- Stage 3: runtime ---
 FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /root/
 
-# Copy binary from builder
 COPY --from=builder /app/bin/server .
 
-# Expose port
 EXPOSE 8080
 
-# Run the binary
 CMD ["./server"]

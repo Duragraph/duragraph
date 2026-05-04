@@ -77,7 +77,7 @@ function AssistantDetailPage() {
 
   const recentRuns = runs?.slice(0, 5) || []
   const totalRuns = runs?.length || 0
-  const successfulRuns = runs?.filter((r) => r.status === "success").length || 0
+  const successfulRuns = runs?.filter((r) => r.status === "completed").length || 0
   const successRate = totalRuns > 0 ? ((successfulRuns / totalRuns) * 100).toFixed(1) : "0"
 
   return (

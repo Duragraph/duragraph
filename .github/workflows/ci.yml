@@ -46,6 +46,54 @@ jobs:
       - name: Go Unit Tests
         run: go test ./... -cover -short
 
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('dashboard/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        # 8 pre-existing ESLint errors (unused vars, any-types, fast-refresh
+        # exports) predate this CI gate. Surfaced as warnings here; promote
+        # to a hard failure once the existing warnings are cleared.
+        run: pnpm lint
+        continue-on-error: true
+
+      - name: Typecheck
+        run: pnpm exec tsc -b --noEmit
+
+      - name: Build
+        run: pnpm build
+
   # Docs have been migrated to duragraph-docs repository
   # build_docs:
   #   name: Build Docs
