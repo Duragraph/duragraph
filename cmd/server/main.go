@@ -16,6 +16,7 @@ import (
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
 	"github.com/duragraph/duragraph/internal/application/service"
+	"github.com/duragraph/duragraph/internal/infrastructure/auth"
 	infra_exec "github.com/duragraph/duragraph/internal/infrastructure/execution"
 	"github.com/duragraph/duragraph/internal/infrastructure/graph"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers"
@@ -483,15 +484,49 @@ func main() {
 		fmt.Printf("✅ Rate limiting enabled (%.0f req/s, burst %d)\n", rps, burst)
 	}
 
-	// Optional authentication (can be made required by setting env var)
+	// Authentication.
+	//
+	// When AUTH_ENABLED=true, every authenticated request flows through
+	// TenantMiddleware: it verifies the platform JWT (HS256, iss claim
+	// must equal "duragraph-platform" — see auth/jwt.yml) and populates
+	// the request context with user_id, tenant_id, role, and email.
+	//
+	// We deliberately replace the legacy middleware.OptionalAuth here.
+	// OptionalAuth uses the older middleware.JWTClaims shape ({user_id,
+	// username, email, roles}); the new platform contract uses
+	// auth.Claims ({user_id, tenant_id, role, email}). Stacking both
+	// would attempt to verify each request twice with mutually-
+	// incompatible structs and reject every new-shape token. The legacy
+	// JWT/OptionalAuth/APIKeyAuth helpers remain in middleware/auth.go
+	// for now (their unit tests still cover them), but they are no
+	// longer wired into main.go's AUTH_ENABLED branch.
+	//
+	// Public/auth-only routes (/health, /metrics, /api/auth/*) bypass
+	// TenantMiddleware via Echo's per-route middleware semantics: they
+	// are registered on the bare *echo.Echo (not under a group with
+	// TenantMiddleware applied). Future /api/auth/login, /callback,
+	// /logout endpoints will live alongside /health below.
+	//
+	// Backwards compat: when AUTH_ENABLED=false (the default), no auth
+	// middleware runs at all. Existing single-tenant deployments keep
+	// working unchanged. This gate is intentionally NOT tied to
+	// MIGRATOR_PLATFORM_ENABLED — middleware applies whether or not
+	// the multi-tenant migrator is active. The two flags are
+	// orthogonal: AUTH_ENABLED gates JWT verification, the migrator
+	// flag gates platform-DB provisioning.
 	authEnabled := os.Getenv("AUTH_ENABLED") == "true"
+	var verifier *auth.Verifier
 	if authEnabled {
 		jwtSecret := os.Getenv("JWT_SECRET")
 		if jwtSecret == "" {
 			jwtSecret = "default-secret-change-in-production"
 		}
-		e.Use(middleware.OptionalAuth(jwtSecret))
-		fmt.Println("✅ Authentication enabled")
+		v, err := auth.NewVerifier([]byte(jwtSecret))
+		if err != nil {
+			log.Fatalf("failed to construct JWT verifier: %v", err)
+		}
+		verifier = v
+		fmt.Println("✅ Authentication enabled (TenantMiddleware)")
 	}
 
 	// Routes
@@ -509,8 +544,18 @@ func main() {
 	e.GET("/ok", systemHandler.Ok)
 	e.GET("/info", systemHandler.Info)
 
-	// API routes
-	api := e.Group("/api/v1")
+	// API routes.
+	//
+	// Build the /api/v1 group with platform middleware when AUTH_ENABLED.
+	// Order matters: TenantMiddleware MUST run before RequireTenant
+	// (RequireTenant reads what TenantMiddleware writes). RequireTenant
+	// is /api/v1-only — pending users still need /api/platform/me etc.
+	var apiMiddleware []echo.MiddlewareFunc
+	if authEnabled {
+		apiMiddleware = append(apiMiddleware, middleware.TenantMiddleware(verifier))
+		apiMiddleware = append(apiMiddleware, middleware.RequireTenant())
+	}
+	api := e.Group("/api/v1", apiMiddleware...)
 
 	// Thread Run routes (LangGraph compatible)
 	api.POST("/threads/:thread_id/runs", runHandler.CreateRun)
@@ -621,6 +666,21 @@ func main() {
 	api.POST("/workers/:worker_id/deregister", workerHandler.Deregister)
 	api.POST("/workers/:worker_id/events", workerHandler.ReceiveEvent)
 	api.GET("/workers/graphs/:graph_id", workerHandler.GetGraphDefinition)
+
+	// Admin route group.
+	//
+	// Empty today — handlers land in the next PR alongside the platform
+	// User/Tenant repositories. The middleware is wired now so the chain
+	// is ready: TenantMiddleware verifies the JWT, then
+	// AdminAuthMiddleware enforces role=admin. Until routes are added,
+	// any request hitting /api/admin/* returns 404 (Echo's default for
+	// no-match) which is fine.
+	if authEnabled {
+		_ = e.Group("/api/admin",
+			middleware.TenantMiddleware(verifier),
+			middleware.AdminAuthMiddleware(),
+		)
+	}
 
 	// Start server
 	go func() {
