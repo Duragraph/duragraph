@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
@@ -23,6 +22,10 @@ const (
 	ProviderGoogle Provider = "google"
 	ProviderGitHub Provider = "github"
 )
+
+// defaultSessionTTL is the lifetime stamped onto JWTs minted by the OAuth
+// callback handler. Matches auth/jwt.yml § exp.default_lifetime_seconds.
+const defaultSessionTTL = 24 * time.Hour
 
 // OAuthConfig holds OAuth configuration
 type OAuthConfig struct {
@@ -110,7 +113,22 @@ func (m *OAuthManager) LoginHandler(provider Provider) echo.HandlerFunc {
 	}
 }
 
-// CallbackHandler returns OAuth callback handler
+// CallbackHandler returns OAuth callback handler.
+//
+// NOTE: this handler predates the platform multi-tenant model. It does NOT
+// look up the User/Tenant aggregates, does NOT apply the bootstrap-first-
+// user rule, and does NOT enforce the pending/approved/suspended decision
+// tree from auth/oauth.yml. It exists today only as a thin OAuth-exchange
+// scaffold and is wired up via OAuthConfig but not currently mounted on
+// any route in cmd/server/main.go. The full callback flow will land in the
+// follow-up handlers/auth/* package alongside the User/Tenant repositories.
+//
+// As an interim placeholder until that work lands, the JWT minted here
+// stamps role="user" and tenant_id="" — i.e. treats every callback as a
+// pending user. Anyone reaching protected /api/v1/* routes with such a
+// token will be rejected by RequireTenant (403). This is intentional:
+// keeps backwards compat for any in-flight test that touches this path
+// while ensuring the stub can't accidentally grant tenant access.
 func (m *OAuthManager) CallbackHandler(provider Provider) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		config, exists := m.configs[provider]
@@ -263,19 +281,31 @@ func (m *OAuthManager) getUserInfo(ctx context.Context, provider Provider, token
 	return &userInfo, nil
 }
 
-// generateJWT creates a JWT token for the user
+// generateJWT creates a session JWT for the freshly-authenticated user.
+//
+// The claim shape is the canonical platform shape defined in
+// auth/jwt.yml — user_id, tenant_id, role, email, iat, exp, iss.
+//
+// Earlier iterations of this function emitted {user_id, email, name,
+// provider, exp, iat}. `name` and `provider` are NOT canonical claims;
+// the engine middleware does not consume them. They've been dropped here
+// to align with the spec. UserInfo.Name and UserInfo.Provider continue to
+// exist as transient fields on the OAuth-userinfo struct (returned in the
+// callback response body for diagnostic purposes), but they no longer
+// round-trip through the JWT.
+//
+// tenant_id is intentionally left empty here — see the CallbackHandler doc
+// comment for why this code path treats every login as a pending user
+// until the full handlers/auth/* package replaces it.
 func (m *OAuthManager) generateJWT(userInfo *UserInfo) (string, error) {
-	claims := jwt.MapClaims{
-		"user_id":  userInfo.ID,
-		"email":    userInfo.Email,
-		"name":     userInfo.Name,
-		"provider": userInfo.Provider,
-		"exp":      time.Now().Add(24 * time.Hour).Unix(),
-		"iat":      time.Now().Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(m.jwtSecret)
+	return IssueJWT(
+		m.jwtSecret,
+		userInfo.ID,
+		userInfo.Email,
+		"user", // pending users get role=user; admin elevation lives in the platform User aggregate
+		"",     // no tenant_id — provisioning happens via the platform admin UI
+		defaultSessionTTL,
+	)
 }
 
 // generateStateToken generates a random state token
