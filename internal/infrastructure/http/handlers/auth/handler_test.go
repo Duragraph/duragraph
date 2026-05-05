@@ -139,6 +139,12 @@ func (r *stubUserRepo) ListByStatus(ctx context.Context, status user.Status, lim
 	}
 	return nil, nil
 }
+func (r *stubUserRepo) List(ctx context.Context, status *user.Status, limit, offset int) ([]*user.User, error) {
+	return nil, nil
+}
+func (r *stubUserRepo) CountByStatus(ctx context.Context, status *user.Status) (int, error) {
+	return 0, nil
+}
 func (r *stubUserRepo) CountAll(ctx context.Context) (int, error) {
 	if r.countAllFn != nil {
 		return r.countAllFn(ctx)

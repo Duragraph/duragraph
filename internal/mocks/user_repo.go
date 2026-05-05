@@ -19,11 +19,13 @@ type UserRepository struct {
 	// Index by (oauth_provider, oauth_id) for GetByOAuth.
 	usersByOAuth map[string]*user.User
 
-	SaveFunc         func(ctx context.Context, u *user.User) error
-	GetByIDFunc      func(ctx context.Context, id string) (*user.User, error)
-	GetByOAuthFunc   func(ctx context.Context, provider, oauthID string) (*user.User, error)
-	ListByStatusFunc func(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error)
-	CountAllFunc     func(ctx context.Context) (int, error)
+	SaveFunc          func(ctx context.Context, u *user.User) error
+	GetByIDFunc       func(ctx context.Context, id string) (*user.User, error)
+	GetByOAuthFunc    func(ctx context.Context, provider, oauthID string) (*user.User, error)
+	ListByStatusFunc  func(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error)
+	ListFunc          func(ctx context.Context, status *user.Status, limit, offset int) ([]*user.User, error)
+	CountByStatusFunc func(ctx context.Context, status *user.Status) (int, error)
+	CountAllFunc      func(ctx context.Context) (int, error)
 }
 
 // NewUserRepository constructs an empty in-memory UserRepository mock.
@@ -120,4 +122,56 @@ func (m *UserRepository) CountAll(ctx context.Context) (int, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.Users), nil
+}
+
+// List returns users with optional status filter, sorted by CreatedAt
+// ascending (ID as tiebreaker) for deterministic behavior. Mirrors the
+// postgres repo's ORDER BY semantics.
+func (m *UserRepository) List(ctx context.Context, status *user.Status, limit, offset int) ([]*user.User, error) {
+	if m.ListFunc != nil {
+		return m.ListFunc(ctx, status, limit, offset)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*user.User, 0)
+	for _, u := range m.Users {
+		if status != nil && u.Status() != *status {
+			continue
+		}
+		out = append(out, u)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt().Equal(out[j].CreatedAt()) {
+			return out[i].ID() < out[j].ID()
+		}
+		return out[i].CreatedAt().Before(out[j].CreatedAt())
+	})
+	if offset >= len(out) {
+		return []*user.User{}, nil
+	}
+	out = out[offset:]
+	if limit > 0 && limit < len(out) {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// CountByStatus returns the count matching the given status, or all
+// users when status is nil.
+func (m *UserRepository) CountByStatus(ctx context.Context, status *user.Status) (int, error) {
+	if m.CountByStatusFunc != nil {
+		return m.CountByStatusFunc(ctx, status)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if status == nil {
+		return len(m.Users), nil
+	}
+	n := 0
+	for _, u := range m.Users {
+		if u.Status() == *status {
+			n++
+		}
+	}
+	return n, nil
 }

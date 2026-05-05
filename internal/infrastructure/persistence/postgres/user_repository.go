@@ -218,6 +218,86 @@ func (r *UserRepository) ListByStatus(ctx context.Context, status user.Status, l
 	return users, nil
 }
 
+// List retrieves users with optional status filter and pagination.
+// Mirrors ListByStatus's ORDER BY created_at ASC so the admin UI sees
+// the same fairness ordering whether it scopes by status or not.
+//
+// A nil status applies no filter. Branching at the SQL layer rather
+// than building dynamic WHERE clauses keeps query plans cacheable on
+// the PG side.
+func (r *UserRepository) List(ctx context.Context, status *user.Status, limit, offset int) ([]*user.User, error) {
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if status == nil {
+		const q = `
+			SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+			FROM platform.users
+			ORDER BY created_at ASC
+			LIMIT $1 OFFSET $2
+		`
+		rows, err = r.pool.Query(ctx, q, limit, offset)
+	} else {
+		const q = `
+			SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+			FROM platform.users
+			WHERE status = $1
+			ORDER BY created_at ASC
+			LIMIT $2 OFFSET $3
+		`
+		rows, err = r.pool.Query(ctx, q, string(*status), limit, offset)
+	}
+	if err != nil {
+		return nil, pkgerrors.Internal("failed to list users", err)
+	}
+	defer rows.Close()
+
+	users := make([]*user.User, 0)
+	for rows.Next() {
+		var data user.UserData
+		if err := rows.Scan(
+			&data.ID,
+			&data.OAuthProvider,
+			&data.OAuthID,
+			&data.Email,
+			&data.Role,
+			&data.Status,
+			&data.CreatedAt,
+			&data.UpdatedAt,
+		); err != nil {
+			return nil, pkgerrors.Internal("failed to scan user", err)
+		}
+		users = append(users, user.ReconstructFromData(data))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, pkgerrors.Internal("failed to iterate users", err)
+	}
+	return users, nil
+}
+
+// CountByStatus returns the number of users matching the given status,
+// or all users when status is nil. Used by the admin handler to
+// populate AdminUserListResponse.total independently of pagination.
+func (r *UserRepository) CountByStatus(ctx context.Context, status *user.Status) (int, error) {
+	var (
+		count int
+		err   error
+	)
+	if status == nil {
+		err = r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM platform.users`).Scan(&count)
+	} else {
+		err = r.pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM platform.users WHERE status = $1`,
+			string(*status),
+		).Scan(&count)
+	}
+	if err != nil {
+		return 0, pkgerrors.Internal("failed to count users", err)
+	}
+	return count, nil
+}
+
 // CountAll returns the total number of users in the platform DB. Used
 // by the OAuth callback to detect the bootstrap-first-user branch
 // (count==0 ⇒ auto-elevate to admin per auth/oauth.yml).
