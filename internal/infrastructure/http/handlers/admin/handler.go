@@ -66,10 +66,14 @@ type Handler struct {
 }
 
 // NewHandler constructs a Handler. metricsBackend may be nil — the
-// metrics endpoints then fail closed with 503. The user/tenant repos
-// and the four user-action command handlers must all be non-nil
-// (passing nil yields lazy nil-deref panics on first request, which
-// is harder to diagnose than a constructor-time check).
+// metrics endpoints then fail closed with 503 (this is the spec's
+// documented behaviour when MIMIR_URL is unconfigured). The user/tenant
+// repos and the five command handlers must all be non-nil; passing nil
+// would yield a lazy nil-deref panic on first request, which is harder
+// to diagnose than a constructor-time check. We follow the same
+// fail-fast convention as command.NewApproveUserHandler /
+// command.NewRetryTenantMigrationHandler, which panic on a nil
+// publisher for the same reason.
 func NewHandler(
 	userRepo user.Repository,
 	tenantRepo tenant.Repository,
@@ -80,6 +84,27 @@ func NewHandler(
 	retryMigrate *command.RetryTenantMigrationHandler,
 	metricsBackend MetricsBackend,
 ) *Handler {
+	if userRepo == nil {
+		panic("admin.NewHandler: userRepo must not be nil")
+	}
+	if tenantRepo == nil {
+		panic("admin.NewHandler: tenantRepo must not be nil")
+	}
+	if approve == nil {
+		panic("admin.NewHandler: approve handler must not be nil")
+	}
+	if reject == nil {
+		panic("admin.NewHandler: reject handler must not be nil")
+	}
+	if suspend == nil {
+		panic("admin.NewHandler: suspend handler must not be nil")
+	}
+	if resume == nil {
+		panic("admin.NewHandler: resume handler must not be nil")
+	}
+	if retryMigrate == nil {
+		panic("admin.NewHandler: retryMigrate handler must not be nil")
+	}
 	return &Handler{
 		userRepo:       userRepo,
 		tenantRepo:     tenantRepo,

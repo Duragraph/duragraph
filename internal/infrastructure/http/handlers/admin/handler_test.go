@@ -43,13 +43,37 @@ const (
 // ----------------------------------------------------------------------
 
 // fakeMetricsBackend captures issued PromQL strings and returns canned
-// samples. Each entry maps a substring of the PromQL expression to the
-// samples that should come back. Order-of-iteration safe: the matcher
-// finds the first key whose substring appears in the query.
+// samples. responses is an ordered slice of (needle, samples) pairs:
+// the first needle that appears as a substring of the query wins.
+// Insertion order is the priority order — a slice (not a map) is used
+// deliberately because Go's `for k := range m` is non-deterministic, so
+// a map of needles would let two overlapping needles return either
+// canned response on different runs. Tests should ideally seed
+// mutually-exclusive needles; when needles overlap, the test relies on
+// insertion order via setResponse.
 type fakeMetricsBackend struct {
-	responses map[string][]Sample
+	responses []fakeMetricsResponse
 	queries   []string
 	err       error
+}
+
+type fakeMetricsResponse struct {
+	needle  string
+	samples []Sample
+}
+
+// setResponse appends or overrides a canned response for queries that
+// contain `needle` as a substring. Same-needle inserts replace in place
+// so tests can reseed without growing the slice; new needles append to
+// the end (giving earlier-seeded needles higher match priority).
+func (f *fakeMetricsBackend) setResponse(needle string, samples []Sample) {
+	for i := range f.responses {
+		if f.responses[i].needle == needle {
+			f.responses[i].samples = samples
+			return
+		}
+	}
+	f.responses = append(f.responses, fakeMetricsResponse{needle: needle, samples: samples})
 }
 
 func (f *fakeMetricsBackend) Query(ctx context.Context, q string) ([]Sample, error) {
@@ -57,9 +81,9 @@ func (f *fakeMetricsBackend) Query(ctx context.Context, q string) ([]Sample, err
 	if f.err != nil {
 		return nil, f.err
 	}
-	for needle, samples := range f.responses {
-		if strings.Contains(q, needle) {
-			return samples, nil
+	for _, r := range f.responses {
+		if strings.Contains(q, r.needle) {
+			return r.samples, nil
 		}
 	}
 	return nil, nil
@@ -81,7 +105,7 @@ func newAdminHandler(t *testing.T) *stubs {
 	users := mocks.NewUserRepository()
 	tenants := mocks.NewTenantRepository()
 	pub := mocks.NewEventPublisher()
-	metrics := &fakeMetricsBackend{responses: map[string][]Sample{}}
+	metrics := &fakeMetricsBackend{}
 
 	h := NewHandler(
 		users,
@@ -130,6 +154,30 @@ func seedPending(t *testing.T, users *mocks.UserRepository, n int) *user.User {
 	}
 	if err := users.Save(context.Background(), u); err != nil {
 		t.Fatalf("seedPending Save: %v", err)
+	}
+	return u
+}
+
+// seedPendingAt registers a pending user with an explicit CreatedAt
+// timestamp by going through user.ReconstructFromData (the same path
+// the postgres repository takes when loading rows). This sidesteps
+// time.Sleep-based stagger in tests that care about list ordering —
+// each row's timestamp is set deterministically rather than relying
+// on wall-clock progression between RegisterUser calls.
+func seedPendingAt(t *testing.T, users *mocks.UserRepository, n int, createdAt time.Time) *user.User {
+	t.Helper()
+	u := user.ReconstructFromData(user.UserData{
+		ID:            fmt.Sprintf("00000000-0000-0000-0000-%012d", n),
+		Email:         fmt.Sprintf("user%d@example.com", n),
+		OAuthProvider: "google",
+		OAuthID:       fmt.Sprintf("google-id-%d", n),
+		Role:          string(user.RoleUser),
+		Status:        string(user.StatusPending),
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
+	})
+	if err := users.Save(context.Background(), u); err != nil {
+		t.Fatalf("seedPendingAt Save: %v", err)
 	}
 	return u
 }
@@ -233,10 +281,14 @@ func TestListUsers_FilterByStatus(t *testing.T) {
 func TestListUsers_Pagination(t *testing.T) {
 	s := newAdminHandler(t)
 	admin := seedAdmin(t, s.users)
+	// Use seedPendingAt with explicit, monotonically-increasing
+	// timestamps. Avoids time.Sleep-based stagger (which is flaky
+	// under load and slows the test) and documents test intent: row i
+	// is "i seconds older than i+1", so paginated order is fully
+	// determined by the seeding loop.
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 1; i <= 5; i++ {
-		// Stagger CreatedAt so the deterministic sort gives predictable order.
-		_ = seedPending(t, s.users, i)
-		time.Sleep(time.Microsecond)
+		_ = seedPendingAt(t, s.users, i, base.Add(time.Duration(i)*time.Second))
 	}
 
 	e := echo.New()
@@ -607,13 +659,13 @@ func TestGetMetrics_HappyPath(t *testing.T) {
 	admin := seedAdmin(t, s.users)
 
 	// Two tenants, runs_per_sec=1.5 and 0.3, runs_active=2 and 0.
-	s.metrics.responses["rate(duragraph_runs_total"] = []Sample{
+	s.metrics.setResponse("rate(duragraph_runs_total", []Sample{
 		{Labels: map[string]string{"tenant_id": "tenant-A"}, Value: 1.5},
 		{Labels: map[string]string{"tenant_id": "tenant-B"}, Value: 0.3},
-	}
-	s.metrics.responses["duragraph_runs_active"] = []Sample{
+	})
+	s.metrics.setResponse("duragraph_runs_active", []Sample{
 		{Labels: map[string]string{"tenant_id": "tenant-A"}, Value: 2},
-	}
+	})
 
 	e := echo.New()
 	c, w := newCtx(t, e, http.MethodGet, "/api/admin/metrics", "", admin.ID())
@@ -722,9 +774,9 @@ func TestGetTenantMetrics_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.metrics.responses["rate(duragraph_runs_total"] = []Sample{
+	s.metrics.setResponse("rate(duragraph_runs_total", []Sample{
 		{Labels: map[string]string{"tenant_id": tn.ID()}, Value: 0.42},
-	}
+	})
 
 	e := echo.New()
 	c, w := newCtx(t, e, http.MethodGet, "/api/admin/metrics/"+tn.ID(), "", admin.ID())

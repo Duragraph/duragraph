@@ -180,13 +180,16 @@ func (r *UserRepository) GetByOAuth(ctx context.Context, provider, oauthID strin
 // ListByStatus retrieves users matching the given status with pagination.
 // Ordered by created_at ascending so the admin UI sees pending users in
 // the order they signed up (oldest first — fairness on the
-// approval queue).
+// approval queue). `id` breaks ties: created_at is timestamptz to
+// microsecond resolution, but a single INSERT batch can give two rows
+// the exact same timestamp, and without a deterministic tiebreaker
+// LIMIT/OFFSET pagination can drop or duplicate rows across pages.
 func (r *UserRepository) ListByStatus(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error) {
 	const q = `
 		SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
 		FROM platform.users
 		WHERE status = $1
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 		LIMIT $2 OFFSET $3
 	`
 	rows, err := r.pool.Query(ctx, q, string(status), limit, offset)
@@ -219,8 +222,11 @@ func (r *UserRepository) ListByStatus(ctx context.Context, status user.Status, l
 }
 
 // List retrieves users with optional status filter and pagination.
-// Mirrors ListByStatus's ORDER BY created_at ASC so the admin UI sees
-// the same fairness ordering whether it scopes by status or not.
+// Mirrors ListByStatus's ORDER BY (created_at ASC, id ASC) so the admin
+// UI sees the same fairness ordering — and the same stable pagination —
+// whether it scopes by status or not. The `id` tiebreaker is required:
+// without it, two rows that share a created_at timestamp can be reordered
+// across LIMIT/OFFSET pages, leaving rows duplicated or skipped.
 //
 // A nil status applies no filter. Branching at the SQL layer rather
 // than building dynamic WHERE clauses keeps query plans cacheable on
@@ -234,7 +240,7 @@ func (r *UserRepository) List(ctx context.Context, status *user.Status, limit, o
 		const q = `
 			SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
 			FROM platform.users
-			ORDER BY created_at ASC
+			ORDER BY created_at ASC, id ASC
 			LIMIT $1 OFFSET $2
 		`
 		rows, err = r.pool.Query(ctx, q, limit, offset)
@@ -243,7 +249,7 @@ func (r *UserRepository) List(ctx context.Context, status *user.Status, limit, o
 			SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
 			FROM platform.users
 			WHERE status = $1
-			ORDER BY created_at ASC
+			ORDER BY created_at ASC, id ASC
 			LIMIT $2 OFFSET $3
 		`
 		rows, err = r.pool.Query(ctx, q, string(*status), limit, offset)

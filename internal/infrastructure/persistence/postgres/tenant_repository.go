@@ -173,7 +173,10 @@ func (r *TenantRepository) GetByUserID(ctx context.Context, userID string) (*ten
 
 // ListByStatus retrieves tenants in a particular status with pagination.
 // Ordered by created_at ascending — same fairness convention as
-// UserRepository.ListByStatus.
+// UserRepository.ListByStatus. `id` is appended as a deterministic
+// tiebreaker so LIMIT/OFFSET pagination is stable when two tenants share
+// a created_at timestamp (microsecond collisions on batch inserts would
+// otherwise let pages drop or duplicate rows).
 func (r *TenantRepository) ListByStatus(ctx context.Context, status tenant.Status, limit, offset int) ([]*tenant.Tenant, error) {
 	const q = `
 		SELECT id::text, user_id::text, db_name, status,
@@ -181,7 +184,7 @@ func (r *TenantRepository) ListByStatus(ctx context.Context, status tenant.Statu
 		       created_at, updated_at
 		FROM platform.tenants
 		WHERE status = $1
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 		LIMIT $2 OFFSET $3
 	`
 	rows, err := r.pool.Query(ctx, q, string(status), limit, offset)
