@@ -10,6 +10,7 @@ import (
 
 	"github.com/duragraph/duragraph/internal/domain/tenant"
 	"github.com/duragraph/duragraph/internal/mocks"
+	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 )
 
 // fakeMigrator implements TenantMigrator with adjustable hooks.
@@ -17,25 +18,19 @@ type fakeMigrator struct {
 	mu sync.Mutex
 
 	provisionCalls []string
-	migrateCalls   []string
 
 	provisionErr error
-	migrateErr   error
 	version      uint
 }
 
-func (f *fakeMigrator) ProvisionTenant(_ context.Context, tenantID string) error {
+func (f *fakeMigrator) ProvisionTenantWithVersion(_ context.Context, tenantID string) (uint, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.provisionCalls = append(f.provisionCalls, tenantID)
-	return f.provisionErr
-}
-
-func (f *fakeMigrator) MigrateTenant(_ context.Context, tenantID string) (uint, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.migrateCalls = append(f.migrateCalls, tenantID)
-	return f.version, f.migrateErr
+	if f.provisionErr != nil {
+		return 0, f.provisionErr
+	}
+	return f.version, nil
 }
 
 // fakeNATSAccount records calls; can be set to error.
@@ -59,7 +54,9 @@ type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// helper: persist a tenant in the given starting status.
+// helper: persist a tenant in the given starting status. Setup
+// transitions are checked with t.Fatalf so a state-machine guard
+// regression doesn't silently produce a tenant in the wrong state.
 func seedTenant(t *testing.T, repo *mocks.TenantRepository, status tenant.Status) *tenant.Tenant {
 	t.Helper()
 	te, err := tenant.NewTenant("user-1")
@@ -70,17 +67,33 @@ func seedTenant(t *testing.T, repo *mocks.TenantRepository, status tenant.Status
 	case tenant.StatusPending:
 		// already pending
 	case tenant.StatusProvisioning:
-		_ = te.StartProvisioning()
+		if err := te.StartProvisioning(); err != nil {
+			t.Fatalf("seed StartProvisioning: %v", err)
+		}
 	case tenant.StatusApproved:
-		_ = te.StartProvisioning()
-		_ = te.Approve("admin-1", 1)
+		if err := te.StartProvisioning(); err != nil {
+			t.Fatalf("seed StartProvisioning: %v", err)
+		}
+		if err := te.Approve("admin-1", 1); err != nil {
+			t.Fatalf("seed Approve: %v", err)
+		}
 	case tenant.StatusProvisioningFailed:
-		_ = te.StartProvisioning()
-		_ = te.MarkProvisioningFailed("test")
+		if err := te.StartProvisioning(); err != nil {
+			t.Fatalf("seed StartProvisioning: %v", err)
+		}
+		if err := te.MarkProvisioningFailed("test"); err != nil {
+			t.Fatalf("seed MarkProvisioningFailed: %v", err)
+		}
 	case tenant.StatusSuspended:
-		_ = te.StartProvisioning()
-		_ = te.Approve("admin-1", 1)
-		_ = te.Suspend("admin-2", "x")
+		if err := te.StartProvisioning(); err != nil {
+			t.Fatalf("seed StartProvisioning: %v", err)
+		}
+		if err := te.Approve("admin-1", 1); err != nil {
+			t.Fatalf("seed Approve: %v", err)
+		}
+		if err := te.Suspend("admin-2", "x"); err != nil {
+			t.Fatalf("seed Suspend: %v", err)
+		}
 	}
 	if err := repo.Save(context.Background(), te); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -95,6 +108,24 @@ func TestTenantProvisioner_Success(t *testing.T) {
 
 	te := seedTenant(t, repo, tenant.StatusProvisioning)
 
+	// Capture the events emitted by the SECOND Save (the
+	// approval). The seed's Save was already cleared by the mock's
+	// ClearEvents contract, so we install the SaveFunc only after
+	// seeding — otherwise we'd snapshot the seed's
+	// (provisioning_started) events, not the (approved) events we
+	// want to inspect.
+	var capturedEvents []eventbus.Event
+	repo.SaveFunc = func(_ context.Context, te *tenant.Tenant) error {
+		// Snapshot the events on this tenant BEFORE we clear them.
+		for _, ev := range te.Events() {
+			capturedEvents = append(capturedEvents, ev)
+		}
+		// Persist + clear, mirroring the default mock behavior.
+		repo.Tenants[te.ID()] = te
+		te.ClearEvents()
+		return nil
+	}
+
 	p := &TenantProvisioner{
 		tenantRepo:  repo,
 		migrator:    mig,
@@ -108,7 +139,7 @@ func TestTenantProvisioner_Success(t *testing.T) {
 	}
 
 	if len(mig.provisionCalls) != 1 || mig.provisionCalls[0] != te.ID() {
-		t.Errorf("expected ProvisionTenant called once with %s, got %v", te.ID(), mig.provisionCalls)
+		t.Errorf("expected ProvisionTenantWithVersion called once with %s, got %v", te.ID(), mig.provisionCalls)
 	}
 	if len(nats.calls) != 1 {
 		t.Errorf("expected NATS account provisioned once, got %d", len(nats.calls))
@@ -120,11 +151,30 @@ func TestTenantProvisioner_Success(t *testing.T) {
 	if saved.SchemaVersion() == nil || *saved.SchemaVersion() != 7 {
 		t.Errorf("expected schema version 7, got %v", saved.SchemaVersion())
 	}
-	// Must use the system-actor sentinel, NOT the user's own ID.
-	for _, ev := range saved.Events() {
-		// events were cleared by Save, so this loop is empty in
-		// practice. The actor check is implicit in not-erroring.
-		_ = ev
+
+	// Find the tenant.approved event; assert the actor is the
+	// system-actor sentinel (NOT the user's own ID). This protects
+	// the documented design choice that the subscriber's terminal
+	// transition is performed as the platform itself, not as any
+	// human admin.
+	var approved *tenant.TenantApproved
+	for _, ev := range capturedEvents {
+		if a, ok := ev.(tenant.TenantApproved); ok {
+			a := a
+			approved = &a
+			break
+		}
+	}
+	if approved == nil {
+		var types []string
+		for _, ev := range capturedEvents {
+			types = append(types, ev.EventType())
+		}
+		t.Fatalf("expected tenant.approved event captured; got types=%v", types)
+	}
+	if approved.ApprovedByUserID != tenant.SystemActorUserID {
+		t.Errorf("ApprovedByUserID = %q, want SystemActorUserID %q",
+			approved.ApprovedByUserID, tenant.SystemActorUserID)
 	}
 }
 
@@ -179,6 +229,10 @@ func TestTenantProvisioner_StaleEventOnFailedTenant(t *testing.T) {
 }
 
 func TestTenantProvisioner_ProvisionFailureMarksFailed(t *testing.T) {
+	// Terminal-failure-already-persisted: processEvent returns nil
+	// (so handleMessage Acks; redelivery would just no-op against
+	// the now-failed tenant). Verification is on the persisted
+	// state, not the return value.
 	repo := mocks.NewTenantRepository()
 	mig := &fakeMigrator{provisionErr: errors.New("create db: permission denied")}
 	te := seedTenant(t, repo, tenant.StatusProvisioning)
@@ -189,8 +243,8 @@ func TestTenantProvisioner_ProvisionFailureMarksFailed(t *testing.T) {
 		logger:     newSilentLogger(),
 	}
 	payload, _ := json.Marshal(tenant.TenantProvisioning{TenantID: te.ID()})
-	if err := p.processEvent(context.Background(), payload); err == nil {
-		t.Fatal("expected error from failed provisioning")
+	if err := p.processEvent(context.Background(), payload); err != nil {
+		t.Fatalf("terminal failure should return nil (already persisted): %v", err)
 	}
 	saved := repo.Tenants[te.ID()]
 	if saved.Status() != tenant.StatusProvisioningFailed {
@@ -214,8 +268,8 @@ func TestTenantProvisioner_NATSAccountFailureMarksFailed(t *testing.T) {
 		logger:      newSilentLogger(),
 	}
 	payload, _ := json.Marshal(tenant.TenantProvisioning{TenantID: te.ID()})
-	if err := p.processEvent(context.Background(), payload); err == nil {
-		t.Fatal("expected error from NATS account failure")
+	if err := p.processEvent(context.Background(), payload); err != nil {
+		t.Fatalf("terminal failure should return nil (already persisted): %v", err)
 	}
 	saved := repo.Tenants[te.ID()]
 	if saved.Status() != tenant.StatusProvisioningFailed {
@@ -224,6 +278,9 @@ func TestTenantProvisioner_NATSAccountFailureMarksFailed(t *testing.T) {
 }
 
 func TestTenantProvisioner_TenantNotFound(t *testing.T) {
+	// NotFound is non-retryable but distinct from a transient blip.
+	// processEvent wraps with errTenantNotFound so handleMessage
+	// classifies it as Term-able. Test asserts the sentinel.
 	repo := mocks.NewTenantRepository()
 	mig := &fakeMigrator{}
 	p := &TenantProvisioner{
@@ -232,8 +289,12 @@ func TestTenantProvisioner_TenantNotFound(t *testing.T) {
 		logger:     newSilentLogger(),
 	}
 	payload, _ := json.Marshal(tenant.TenantProvisioning{TenantID: "nonexistent"})
-	if err := p.processEvent(context.Background(), payload); err == nil {
+	err := p.processEvent(context.Background(), payload)
+	if err == nil {
 		t.Fatal("expected error for missing tenant")
+	}
+	if !errors.Is(err, errTenantNotFound) {
+		t.Errorf("expected errTenantNotFound sentinel, got %v", err)
 	}
 }
 
@@ -259,6 +320,26 @@ func TestTenantProvisioner_ExtractTenantID_NoIDError(t *testing.T) {
 	payload := []byte(`{"foo":"bar"}`)
 	if _, err := extractTenantID(payload); err == nil {
 		t.Fatal("expected error when payload has no tenant_id or aggregate_id")
+	}
+}
+
+func TestTenantProvisioner_MalformedPayloadIsTermable(t *testing.T) {
+	// processEvent on garbage bytes should return an error wrapping
+	// errMalformedPayload so handleMessage routes it to Term (no
+	// further redelivery from JetStream).
+	repo := mocks.NewTenantRepository()
+	mig := &fakeMigrator{}
+	p := &TenantProvisioner{
+		tenantRepo: repo,
+		migrator:   mig,
+		logger:     newSilentLogger(),
+	}
+	err := p.processEvent(context.Background(), []byte(`not-json`))
+	if err == nil {
+		t.Fatal("expected error from malformed payload")
+	}
+	if !errors.Is(err, errMalformedPayload) {
+		t.Errorf("expected errMalformedPayload sentinel, got %v", err)
 	}
 }
 

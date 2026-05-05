@@ -255,11 +255,27 @@ func main() {
 		_ = userRepo
 		_ = tenantRepo
 
-		// Tenant provisioner subscriber. The migrator instance built
-		// above is reused — its ProvisionTenant + MigrateTenant methods
-		// are exactly what the subscriber needs.
+		// Tenant provisioner subscriber. Uses a JetStream durable
+		// consumer (durable name "tenant-provisioner") bound to the
+		// existing duragraph-events stream — so tenant.provisioning
+		// events published while the engine was offline still get
+		// delivered when it comes back. Separate from the plain-NATS
+		// `subscriber` used by run/execution events because the
+		// platform-admin loop needs at-least-once durability.
+		jsSubscriber, err := nats.NewJetStreamSubscriber(nats.JetStreamSubscriberConfig{
+			URL:           cfg.NATS.URL,
+			StreamName:    messaging.JetStreamStreamName,
+			FilterSubject: messaging.TenantProvisioningTopic,
+			Durable:       messaging.DurableName,
+			MaxDeliver:    10, // bound poison-message redelivery loops
+		})
+		if err != nil {
+			log.Fatalf("failed to construct tenant provisioner JetStream subscriber: %v", err)
+		}
+		defer jsSubscriber.Close()
+
 		tenantProvisioner := messaging.NewTenantProvisioner(
-			subscriber,
+			jsSubscriber,
 			tenantRepo,
 			migrator,
 			messaging.NoopNATSAccountProvisioner{}, // operator-JWT wiring is a follow-up PR
@@ -270,7 +286,7 @@ func main() {
 				log.Printf("tenant provisioner error: %v", err)
 			}
 		}()
-		fmt.Println("✅ Tenant provisioner subscriber started")
+		fmt.Println("✅ Tenant provisioner JetStream subscriber started (durable: tenant-provisioner)")
 	}
 
 	// Start cleanup worker

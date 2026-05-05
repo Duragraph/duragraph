@@ -160,15 +160,22 @@ func TestApproveUserHandler_AlreadyApprovedTenantInWrongState(t *testing.T) {
 	if err := uRepo.Save(context.Background(), pending); err != nil {
 		t.Fatalf("setup: save user: %v", err)
 	}
-	te, _ := tenant.NewTenant(pending.ID())
-	_ = te.StartProvisioning()
-	_ = te.Approve(admin.ID(), 5)
+	te, err := tenant.NewTenant(pending.ID())
+	if err != nil {
+		t.Fatalf("setup: NewTenant: %v", err)
+	}
+	if err := te.StartProvisioning(); err != nil {
+		t.Fatalf("setup: StartProvisioning: %v", err)
+	}
+	if err := te.Approve(admin.ID(), 5); err != nil {
+		t.Fatalf("setup: Approve: %v", err)
+	}
 	if err := tRepo.Save(context.Background(), te); err != nil {
 		t.Fatalf("setup: save tenant: %v", err)
 	}
 
 	h := NewApproveUserHandler(uRepo, tRepo, pub)
-	err := h.Handle(context.Background(), ApproveUser{
+	err = h.Handle(context.Background(), ApproveUser{
 		UserID:           pending.ID(),
 		ApprovedByUserID: admin.ID(),
 	})
@@ -188,8 +195,12 @@ func TestApproveUserHandler_BootstrapHalfDoneRecovery(t *testing.T) {
 	pub := mocks.NewEventPublisher()
 	admin := seedAdminUser(t, uRepo)
 	pending := seedPendingUser(t, uRepo)
-	_ = pending.Approve(admin.ID())
-	_ = uRepo.Save(context.Background(), pending)
+	if err := pending.Approve(admin.ID()); err != nil {
+		t.Fatalf("setup approve: %v", err)
+	}
+	if err := uRepo.Save(context.Background(), pending); err != nil {
+		t.Fatalf("setup save: %v", err)
+	}
 
 	h := NewApproveUserHandler(uRepo, tRepo, pub)
 	err := h.Handle(context.Background(), ApproveUser{
@@ -202,6 +213,78 @@ func TestApproveUserHandler_BootstrapHalfDoneRecovery(t *testing.T) {
 	if len(tRepo.Tenants) != 1 {
 		t.Errorf("expected tenant created on recovery, got %d", len(tRepo.Tenants))
 	}
+}
+
+func TestApproveUserHandler_AlreadyApprovedFailedTenantRecovers(t *testing.T) {
+	// Edge case: user is approved + tenant in `provisioning_failed`
+	// (a previous approval got past user.Save but the async
+	// provisioning ultimately failed). Re-clicking Approve should
+	// fall through to StartProvisioning + publish so the admin can
+	// recover without going to the dedicated retry-migration
+	// endpoint. This is the #4 review-comment fix; without it the
+	// idempotency branch returns InvalidState and the admin's
+	// natural "click Approve again" gesture is rejected.
+	uRepo := mocks.NewUserRepository()
+	tRepo := mocks.NewTenantRepository()
+	pub := mocks.NewEventPublisher()
+	admin := seedAdminUser(t, uRepo)
+	pending := seedPendingUser(t, uRepo)
+	if err := pending.Approve(admin.ID()); err != nil {
+		t.Fatalf("setup Approve: %v", err)
+	}
+	if err := uRepo.Save(context.Background(), pending); err != nil {
+		t.Fatalf("setup Save user: %v", err)
+	}
+	te, err := tenant.NewTenant(pending.ID())
+	if err != nil {
+		t.Fatalf("setup NewTenant: %v", err)
+	}
+	if err := te.StartProvisioning(); err != nil {
+		t.Fatalf("setup StartProvisioning: %v", err)
+	}
+	if err := te.MarkProvisioningFailed("prior failure"); err != nil {
+		t.Fatalf("setup MarkProvisioningFailed: %v", err)
+	}
+	if err := tRepo.Save(context.Background(), te); err != nil {
+		t.Fatalf("setup Save tenant: %v", err)
+	}
+
+	h := NewApproveUserHandler(uRepo, tRepo, pub)
+	if err := h.Handle(context.Background(), ApproveUser{
+		UserID:           pending.ID(),
+		ApprovedByUserID: admin.ID(),
+	}); err != nil {
+		t.Fatalf("approve should recover from provisioning_failed, got: %v", err)
+	}
+	if got := tRepo.Tenants[te.ID()].Status(); got != tenant.StatusProvisioning {
+		t.Errorf("tenant should be back in provisioning, got %s", got)
+	}
+	if pub.Count() != 1 {
+		t.Errorf("expected 1 publish on recovery path, got %d", pub.Count())
+	}
+}
+
+func TestApproveUserHandler_NilPublisherPanics(t *testing.T) {
+	// Constructor must panic when publisher is nil — a misconfigured
+	// handler that silently drops the trigger appears to succeed but
+	// never starts the async workflow. #5 review-comment fix.
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic when constructing with nil publisher")
+		}
+	}()
+	NewApproveUserHandler(mocks.NewUserRepository(), mocks.NewTenantRepository(), nil)
+}
+
+func TestRetryTenantMigrationHandler_NilPublisherPanics(t *testing.T) {
+	// Same rationale as ApproveUserHandler — constructor enforces
+	// non-nil publisher.
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic when constructing with nil publisher")
+		}
+	}()
+	NewRetryTenantMigrationHandler(mocks.NewTenantRepository(), nil)
 }
 
 func TestApproveUserHandler_SaveError(t *testing.T) {
@@ -253,8 +336,12 @@ func TestRejectUserHandler_NotPending(t *testing.T) {
 	uRepo := mocks.NewUserRepository()
 	admin := seedAdminUser(t, uRepo)
 	pending := seedPendingUser(t, uRepo)
-	_ = pending.Approve(admin.ID())
-	_ = uRepo.Save(context.Background(), pending)
+	if err := pending.Approve(admin.ID()); err != nil {
+		t.Fatalf("setup approve: %v", err)
+	}
+	if err := uRepo.Save(context.Background(), pending); err != nil {
+		t.Fatalf("setup save: %v", err)
+	}
 
 	h := NewRejectUserHandler(uRepo)
 	err := h.Handle(context.Background(), RejectUser{
@@ -289,12 +376,25 @@ func TestSuspendUserHandler_Success(t *testing.T) {
 	tRepo := mocks.NewTenantRepository()
 	admin := seedAdminUser(t, uRepo)
 	pending := seedPendingUser(t, uRepo)
-	_ = pending.Approve(admin.ID())
-	_ = uRepo.Save(context.Background(), pending)
-	te, _ := tenant.NewTenant(pending.ID())
-	_ = te.StartProvisioning()
-	_ = te.Approve(admin.ID(), 5)
-	_ = tRepo.Save(context.Background(), te)
+	if err := pending.Approve(admin.ID()); err != nil {
+		t.Fatalf("setup approve: %v", err)
+	}
+	if err := uRepo.Save(context.Background(), pending); err != nil {
+		t.Fatalf("setup save: %v", err)
+	}
+	te, err := tenant.NewTenant(pending.ID())
+	if err != nil {
+		t.Fatalf("setup NewTenant: %v", err)
+	}
+	if err := te.StartProvisioning(); err != nil {
+		t.Fatalf("setup StartProvisioning: %v", err)
+	}
+	if err := te.Approve(admin.ID(), 5); err != nil {
+		t.Fatalf("setup Approve: %v", err)
+	}
+	if err := tRepo.Save(context.Background(), te); err != nil {
+		t.Fatalf("setup Save: %v", err)
+	}
 
 	h := NewSuspendUserHandler(uRepo, tRepo)
 	if err := h.Handle(context.Background(), SuspendUser{
@@ -317,8 +417,12 @@ func TestSuspendUserHandler_AlreadySuspended(t *testing.T) {
 	tRepo := mocks.NewTenantRepository()
 	admin := seedAdminUser(t, uRepo)
 	pending := seedPendingUser(t, uRepo)
-	_ = pending.Reject(admin.ID(), "spam") // rejected → suspended
-	_ = uRepo.Save(context.Background(), pending)
+	if err := pending.Reject(admin.ID(), "spam"); err != nil { // rejected → suspended
+		t.Fatalf("setup Reject: %v", err)
+	}
+	if err := uRepo.Save(context.Background(), pending); err != nil {
+		t.Fatalf("setup Save: %v", err)
+	}
 
 	h := NewSuspendUserHandler(uRepo, tRepo)
 	if err := h.Handle(context.Background(), SuspendUser{
@@ -337,8 +441,12 @@ func TestSuspendUserHandler_NoTenantOK(t *testing.T) {
 	tRepo := mocks.NewTenantRepository()
 	admin := seedAdminUser(t, uRepo)
 	pending := seedPendingUser(t, uRepo)
-	_ = pending.Approve(admin.ID())
-	_ = uRepo.Save(context.Background(), pending)
+	if err := pending.Approve(admin.ID()); err != nil {
+		t.Fatalf("setup approve: %v", err)
+	}
+	if err := uRepo.Save(context.Background(), pending); err != nil {
+		t.Fatalf("setup save: %v", err)
+	}
 
 	h := NewSuspendUserHandler(uRepo, tRepo)
 	if err := h.Handle(context.Background(), SuspendUser{
@@ -375,9 +483,15 @@ func TestResumeUserHandler_Success(t *testing.T) {
 	uRepo := mocks.NewUserRepository()
 	admin := seedAdminUser(t, uRepo)
 	pending := seedPendingUser(t, uRepo)
-	_ = pending.Approve(admin.ID())
-	_ = pending.Suspend(admin.ID(), "x")
-	_ = uRepo.Save(context.Background(), pending)
+	if err := pending.Approve(admin.ID()); err != nil {
+		t.Fatalf("setup Approve: %v", err)
+	}
+	if err := pending.Suspend(admin.ID(), "x"); err != nil {
+		t.Fatalf("setup Suspend: %v", err)
+	}
+	if err := uRepo.Save(context.Background(), pending); err != nil {
+		t.Fatalf("setup Save: %v", err)
+	}
 
 	h := NewResumeUserHandler(uRepo)
 	if err := h.Handle(context.Background(), ResumeUser{
@@ -395,8 +509,12 @@ func TestResumeUserHandler_AlreadyApproved(t *testing.T) {
 	uRepo := mocks.NewUserRepository()
 	admin := seedAdminUser(t, uRepo)
 	pending := seedPendingUser(t, uRepo)
-	_ = pending.Approve(admin.ID())
-	_ = uRepo.Save(context.Background(), pending)
+	if err := pending.Approve(admin.ID()); err != nil {
+		t.Fatalf("setup approve: %v", err)
+	}
+	if err := uRepo.Save(context.Background(), pending); err != nil {
+		t.Fatalf("setup save: %v", err)
+	}
 
 	h := NewResumeUserHandler(uRepo)
 	if err := h.Handle(context.Background(), ResumeUser{
@@ -435,7 +553,9 @@ func TestResumeUserHandler_SelfResume(t *testing.T) {
 	if err := suspended.Reject(admin.ID(), "x"); err != nil {
 		t.Fatalf("setup reject: %v", err)
 	}
-	_ = uRepo.Save(context.Background(), suspended)
+	if err := uRepo.Save(context.Background(), suspended); err != nil {
+		t.Fatalf("setup Save: %v", err)
+	}
 
 	h := NewResumeUserHandler(uRepo)
 	// Self-resume: resumed_by == user_id. Allowed.
@@ -454,10 +574,19 @@ func TestResumeUserHandler_SelfResume(t *testing.T) {
 func TestRetryTenantMigrationHandler_Success(t *testing.T) {
 	tRepo := mocks.NewTenantRepository()
 	pub := mocks.NewEventPublisher()
-	te, _ := tenant.NewTenant("user-1")
-	_ = te.StartProvisioning()
-	_ = te.MarkProvisioningFailed("migrate failed")
-	_ = tRepo.Save(context.Background(), te)
+	te, err := tenant.NewTenant("user-1")
+	if err != nil {
+		t.Fatalf("setup NewTenant: %v", err)
+	}
+	if err := te.StartProvisioning(); err != nil {
+		t.Fatalf("setup StartProvisioning: %v", err)
+	}
+	if err := te.MarkProvisioningFailed("migrate failed"); err != nil {
+		t.Fatalf("setup MarkProvisioningFailed: %v", err)
+	}
+	if err := tRepo.Save(context.Background(), te); err != nil {
+		t.Fatalf("setup Save: %v", err)
+	}
 
 	h := NewRetryTenantMigrationHandler(tRepo, pub)
 	if err := h.Handle(context.Background(), RetryTenantMigration{
@@ -477,13 +606,22 @@ func TestRetryTenantMigrationHandler_Success(t *testing.T) {
 func TestRetryTenantMigrationHandler_WrongState(t *testing.T) {
 	tRepo := mocks.NewTenantRepository()
 	pub := mocks.NewEventPublisher()
-	te, _ := tenant.NewTenant("user-1")
-	_ = te.StartProvisioning()
-	_ = te.Approve("admin-1", 5)
-	_ = tRepo.Save(context.Background(), te)
+	te, err := tenant.NewTenant("user-1")
+	if err != nil {
+		t.Fatalf("setup NewTenant: %v", err)
+	}
+	if err := te.StartProvisioning(); err != nil {
+		t.Fatalf("setup StartProvisioning: %v", err)
+	}
+	if err := te.Approve("admin-1", 5); err != nil {
+		t.Fatalf("setup Approve: %v", err)
+	}
+	if err := tRepo.Save(context.Background(), te); err != nil {
+		t.Fatalf("setup Save: %v", err)
+	}
 
 	h := NewRetryTenantMigrationHandler(tRepo, pub)
-	err := h.Handle(context.Background(), RetryTenantMigration{
+	err = h.Handle(context.Background(), RetryTenantMigration{
 		TenantID:        te.ID(),
 		RetriedByUserID: "admin-1",
 	})
@@ -511,9 +649,16 @@ func TestRetryTenantMigrationHandler_NotFound(t *testing.T) {
 func TestRetryTenantMigrationHandler_AlreadyProvisioning(t *testing.T) {
 	tRepo := mocks.NewTenantRepository()
 	pub := mocks.NewEventPublisher()
-	te, _ := tenant.NewTenant("user-1")
-	_ = te.StartProvisioning()
-	_ = tRepo.Save(context.Background(), te)
+	te, err := tenant.NewTenant("user-1")
+	if err != nil {
+		t.Fatalf("setup NewTenant: %v", err)
+	}
+	if err := te.StartProvisioning(); err != nil {
+		t.Fatalf("setup StartProvisioning: %v", err)
+	}
+	if err := tRepo.Save(context.Background(), te); err != nil {
+		t.Fatalf("setup Save: %v", err)
+	}
 
 	h := NewRetryTenantMigrationHandler(tRepo, pub)
 	if err := h.Handle(context.Background(), RetryTenantMigration{
@@ -533,13 +678,22 @@ func TestRetryTenantMigrationHandler_PublishError(t *testing.T) {
 	pub.PublishFunc = func(ctx context.Context, topic string, payload interface{}) error {
 		return errors.New("nats down")
 	}
-	te, _ := tenant.NewTenant("user-1")
-	_ = te.StartProvisioning()
-	_ = te.MarkProvisioningFailed("x")
-	_ = tRepo.Save(context.Background(), te)
+	te, err := tenant.NewTenant("user-1")
+	if err != nil {
+		t.Fatalf("setup NewTenant: %v", err)
+	}
+	if err := te.StartProvisioning(); err != nil {
+		t.Fatalf("setup StartProvisioning: %v", err)
+	}
+	if err := te.MarkProvisioningFailed("x"); err != nil {
+		t.Fatalf("setup MarkProvisioningFailed: %v", err)
+	}
+	if err := tRepo.Save(context.Background(), te); err != nil {
+		t.Fatalf("setup Save: %v", err)
+	}
 
 	h := NewRetryTenantMigrationHandler(tRepo, pub)
-	err := h.Handle(context.Background(), RetryTenantMigration{
+	err = h.Handle(context.Background(), RetryTenantMigration{
 		TenantID:        te.ID(),
 		RetriedByUserID: "admin-1",
 	})

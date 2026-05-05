@@ -31,11 +31,17 @@ type RetryTenantMigrationHandler struct {
 }
 
 // NewRetryTenantMigrationHandler constructs a
-// RetryTenantMigrationHandler.
+// RetryTenantMigrationHandler. Panics if publisher is nil — same
+// rationale as ApproveUserHandler: a misconfigured handler that
+// silently drops the trigger appears to succeed but never re-runs the
+// async workflow.
 func NewRetryTenantMigrationHandler(
 	tenantRepo tenant.Repository,
 	publisher EventPublisher,
 ) *RetryTenantMigrationHandler {
+	if publisher == nil {
+		panic("command.NewRetryTenantMigrationHandler: publisher must not be nil")
+	}
 	return &RetryTenantMigrationHandler{
 		tenantRepo: tenantRepo,
 		publisher:  publisher,
@@ -86,11 +92,8 @@ func (h *RetryTenantMigrationHandler) Handle(ctx context.Context, cmd RetryTenan
 // publishProvisioning emits the tenant.provisioning event for this
 // retry attempt. Mirrors ApproveUserHandler.publishProvisioning so the
 // subscriber sees a uniform payload regardless of which handler
-// originated it.
+// originated it. Constructor guarantees h.publisher is non-nil.
 func (h *RetryTenantMigrationHandler) publishProvisioning(ctx context.Context, t *tenant.Tenant) error {
-	if h.publisher == nil {
-		return nil
-	}
 	payload := tenant.TenantProvisioning{
 		TenantID:   t.ID(),
 		OccurredAt: time.Now(),

@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/duragraph/duragraph/internal/domain/user"
@@ -34,7 +35,10 @@ func NewUserRepository() *UserRepository {
 }
 
 // Save stores u under both ID and (provider, oauth_id) indexes. Func
-// override takes precedence.
+// override takes precedence. Mirrors the postgres repository's contract
+// of clearing emitted domain events after persistence — without this,
+// tests that snapshot Events() at a different point in the flow can
+// double-count.
 func (m *UserRepository) Save(ctx context.Context, u *user.User) error {
 	if m.SaveFunc != nil {
 		return m.SaveFunc(ctx, u)
@@ -43,6 +47,7 @@ func (m *UserRepository) Save(ctx context.Context, u *user.User) error {
 	defer m.mu.Unlock()
 	m.Users[u.ID()] = u
 	m.usersByOAuth[u.OAuthProvider()+"/"+u.OAuthID()] = u
+	u.ClearEvents()
 	return nil
 }
 
@@ -74,7 +79,11 @@ func (m *UserRepository) GetByOAuth(ctx context.Context, provider, oauthID strin
 	return u, nil
 }
 
-// ListByStatus returns users matching status with pagination.
+// ListByStatus returns users matching status with pagination. Results
+// are sorted by CreatedAt ascending (ID as tiebreaker) for
+// deterministic behavior — the postgres repo uses ORDER BY in its
+// SELECT, so without sorting here a test that compares results
+// position-by-position would be flaky against the map iteration order.
 func (m *UserRepository) ListByStatus(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error) {
 	if m.ListByStatusFunc != nil {
 		return m.ListByStatusFunc(ctx, status, limit, offset)
@@ -87,6 +96,12 @@ func (m *UserRepository) ListByStatus(ctx context.Context, status user.Status, l
 			out = append(out, u)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt().Equal(out[j].CreatedAt()) {
+			return out[i].ID() < out[j].ID()
+		}
+		return out[i].CreatedAt().Before(out[j].CreatedAt())
+	})
 	if offset >= len(out) {
 		return []*user.User{}, nil
 	}

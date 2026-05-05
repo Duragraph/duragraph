@@ -31,10 +31,16 @@
 //     RetryTenantMigration is for, so keeping that responsibility on
 //     one endpoint avoids accidental double-publishes from impatient
 //     admin clicks.
+//   - If user.Status == approved AND a tenant exists in
+//     `provisioning_failed`: defensively fall through to
+//     StartProvisioning + publish so a half-failed prior approval can
+//     recover by re-clicking Approve. (The dedicated retry-migration
+//     endpoint is the primary path; this is a safety net for admins
+//     who didn't notice the failure on the first click.)
 //   - If user.Status == approved AND a tenant exists in `approved` /
-//     `provisioning_failed` / `suspended` / `pending`: not a re-approve
-//     scenario; admin should use the retry-migration / resume / suspend
-//     endpoints instead. We return an InvalidState error.
+//     `suspended` / `pending`: not a re-approve scenario; admin should
+//     use the resume / suspend endpoints instead. We return an
+//     InvalidState error.
 //   - If user.Status != pending and != approved (i.e. suspended): the
 //     state machine on user.Approve will reject — no separate guard
 //     needed.
@@ -68,16 +74,17 @@ type EventPublisher interface {
 }
 
 // TenantProvisioningTopic is the NATS subject the platform-provisioner
-// subscriber listens on. The asyncapi spec specifies bare
-// `tenant.provisioning` in a `PLATFORM_TENANTS` JetStream stream that
-// does not yet exist in this engine's runtime; the engine's
-// publisher.ensureStreams only declares `duragraph-events`,
+// subscriber listens on as a JetStream durable consumer. The asyncapi
+// spec specifies bare `tenant.provisioning` in a `PLATFORM_TENANTS`
+// JetStream stream that does not yet exist in this engine's runtime;
+// the engine's publisher.ensureStreams declares `duragraph-events`,
 // `duragraph-executions`, `duragraph-runs`, and `duragraph-stream`. We
 // publish under `duragraph.events.tenant.provisioning` so the message
 // is captured by the existing `duragraph-events` stream (subjects
-// `duragraph.events.>`) and survives broker restart. A follow-up PR
-// will reconcile by adding the PLATFORM_TENANTS stream and switching to
-// the bare subject — at which point this constant changes in one place.
+// `duragraph.events.>`) and the consumer is durable — together that
+// gives at-least-once delivery across broker restarts. A follow-up PR
+// will reconcile the spec by adding the PLATFORM_TENANTS stream and
+// switching to the bare subject; this constant changes in one place.
 const TenantProvisioningTopic = "duragraph.events.tenant.provisioning"
 
 // ApproveUser is the input command for ApproveUserHandler.
@@ -98,14 +105,19 @@ type ApproveUserHandler struct {
 	publisher  EventPublisher
 }
 
-// NewApproveUserHandler constructs an ApproveUserHandler. publisher may
-// be nil only in unit tests that explicitly assert publisher==nil
-// short-circuits; production wiring always passes the real publisher.
+// NewApproveUserHandler constructs an ApproveUserHandler. Panics if
+// publisher is nil — a misconfigured handler that silently drops the
+// provisioning trigger appears to succeed but never starts the async
+// workflow, which is a footgun. Production wiring and unit tests both
+// pass an EventPublisher (real or mock).
 func NewApproveUserHandler(
 	userRepo user.Repository,
 	tenantRepo tenant.Repository,
 	publisher EventPublisher,
 ) *ApproveUserHandler {
+	if publisher == nil {
+		panic("command.NewApproveUserHandler: publisher must not be nil")
+	}
 	return &ApproveUserHandler{
 		userRepo:   userRepo,
 		tenantRepo: tenantRepo,
@@ -130,19 +142,26 @@ func (h *ApproveUserHandler) Handle(ctx context.Context, cmd ApproveUser) error 
 		return err
 	}
 
-	// Idempotency short-circuit: user already approved + tenant already
-	// in provisioning. No-op success — re-driving a stuck subscriber is
-	// the RetryTenantMigration endpoint's job; keeping Approve out of
-	// that loop avoids accidental double-publishes when an admin
-	// double-clicks the Approve button.
+	// Idempotency short-circuit: user already approved.
+	//   - tenant in `provisioning` → no-op success (double-click /
+	//     retry of an in-flight approval).
+	//   - tenant in `provisioning_failed` → fall through to
+	//     StartProvisioning + publish so a half-failed prior approval
+	//     can recover by re-clicking Approve.
+	//   - tenant missing → fall through (bootstrap-half-done).
+	//   - tenant in any other state → InvalidState; admin should use
+	//     resume / suspend.
 	if u.Status() == user.StatusApproved {
 		existing, getErr := h.tenantRepo.GetByUserID(ctx, cmd.UserID)
 		switch {
 		case getErr == nil && existing.Status() == tenant.StatusProvisioning:
 			return nil
+		case getErr == nil && existing.Status() == tenant.StatusProvisioningFailed:
+			// Fall through: re-emit StartProvisioning + publish below.
+			// The state machine on tenant.StartProvisioning permits
+			// provisioning_failed → provisioning, so this is safe.
 		case getErr == nil:
-			// User is approved but tenant is in some other state (approved,
-			// failed, suspended, pending). This is not a re-approve case.
+			// approved / suspended / pending: not a re-approve case.
 			return errors.InvalidState(string(existing.Status()), "approve")
 		case errors.Is(getErr, errors.ErrNotFound):
 			// Approved user with no tenant — drop through and create one.
@@ -197,11 +216,9 @@ func (h *ApproveUserHandler) Handle(ctx context.Context, cmd ApproveUser) error 
 // Payload shape mirrors tenant.TenantProvisioning (the canonical domain
 // event from internal/domain/tenant/events.go) so a future migration
 // to the outbox/audit-log path is a one-line topic change.
+//
+// Constructor guarantees h.publisher is non-nil; no nil check here.
 func (h *ApproveUserHandler) publishProvisioning(ctx context.Context, t *tenant.Tenant) error {
-	if h.publisher == nil {
-		// Unwired test path — caller asserted no publish.
-		return nil
-	}
 	payload := tenant.TenantProvisioning{
 		TenantID:   t.ID(),
 		OccurredAt: time.Now(),

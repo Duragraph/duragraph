@@ -291,22 +291,36 @@ func (m *Migrator) MigrateMainDB(ctx context.Context, dbName string) error {
 //
 // tenantID must be a UUID string; the DB name is derived via
 // tenant.DBName (which validates the UUID).
+//
+// Discards the resulting schema version; callers that need it should use
+// ProvisionTenantWithVersion instead (avoids a second migrate.Up()
+// round-trip just to read the version table).
 func (m *Migrator) ProvisionTenant(ctx context.Context, tenantID string) error {
+	_, err := m.ProvisionTenantWithVersion(ctx, tenantID)
+	return err
+}
+
+// ProvisionTenantWithVersion is ProvisionTenant that also returns the
+// resulting schema version, avoiding a second MigrateTenant call just to
+// read the version. Used by the tenant_provisioner subscriber where the
+// version is recorded on tenant.Approve.
+func (m *Migrator) ProvisionTenantWithVersion(ctx context.Context, tenantID string) (uint, error) {
 	dbName, err := tenant.DBName(tenantID)
 	if err != nil {
-		return fmt.Errorf("provision tenant: %w", err)
+		return 0, fmt.Errorf("provision tenant: %w", err)
 	}
 	if err := tenant.ValidateDBName(dbName); err != nil {
 		// Defensive: DBName + ValidateDBName should always agree.
-		return fmt.Errorf("provision tenant: derived db name failed validation: %w", err)
+		return 0, fmt.Errorf("provision tenant: derived db name failed validation: %w", err)
 	}
 	if err := m.ensureDatabase(ctx, dbName); err != nil {
-		return fmt.Errorf("provision tenant %s: %w", tenantID, err)
+		return 0, fmt.Errorf("provision tenant %s: %w", tenantID, err)
 	}
-	if _, err := m.MigrateTenant(ctx, tenantID); err != nil {
-		return fmt.Errorf("provision tenant %s: migrate: %w", tenantID, err)
+	version, err := m.MigrateTenant(ctx, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("provision tenant %s: migrate: %w", tenantID, err)
 	}
-	return nil
+	return version, nil
 }
 
 // MigrateTenant runs tenant migrations against an existing tenant DB

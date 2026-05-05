@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/duragraph/duragraph/internal/domain/tenant"
@@ -33,7 +34,8 @@ func NewTenantRepository() *TenantRepository {
 }
 
 // Save stores t under both ID and user_id indexes. Func override takes
-// precedence.
+// precedence. Mirrors the postgres repository's contract of clearing
+// emitted domain events after persistence.
 func (m *TenantRepository) Save(ctx context.Context, t *tenant.Tenant) error {
 	if m.SaveFunc != nil {
 		return m.SaveFunc(ctx, t)
@@ -42,6 +44,7 @@ func (m *TenantRepository) Save(ctx context.Context, t *tenant.Tenant) error {
 	defer m.mu.Unlock()
 	m.Tenants[t.ID()] = t
 	m.tenantsByUser[t.UserID()] = t
+	t.ClearEvents()
 	return nil
 }
 
@@ -74,6 +77,9 @@ func (m *TenantRepository) GetByUserID(ctx context.Context, userID string) (*ten
 }
 
 // ListByStatus returns tenants matching status with pagination.
+// Results are sorted by CreatedAt ascending (ID as tiebreaker) for
+// deterministic behavior — the postgres repo's SELECT uses ORDER BY,
+// so callers expect a stable order.
 func (m *TenantRepository) ListByStatus(ctx context.Context, status tenant.Status, limit, offset int) ([]*tenant.Tenant, error) {
 	if m.ListByStatusFunc != nil {
 		return m.ListByStatusFunc(ctx, status, limit, offset)
@@ -86,6 +92,12 @@ func (m *TenantRepository) ListByStatus(ctx context.Context, status tenant.Statu
 			out = append(out, t)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt().Equal(out[j].CreatedAt()) {
+			return out[i].ID() < out[j].ID()
+		}
+		return out[i].CreatedAt().Before(out[j].CreatedAt())
+	})
 	if offset >= len(out) {
 		return []*tenant.Tenant{}, nil
 	}
