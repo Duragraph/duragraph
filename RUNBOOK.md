@@ -2,6 +2,13 @@
 
 Complete guide for running and managing the DuraGraph application.
 
+> **Multi-tenant deployment?** This runbook covers single-tenant operation.
+> For Platform Mode (multi-tenant SaaS with OAuth, admin UI, per-tenant
+> databases), see the
+> [Platform Mode section in the deployment docs](https://duragraph.ai/docs/ops/deployment/#platform-mode-multi-tenant)
+> — covers `MIGRATOR_PLATFORM_ENABLED`, OAuth provider setup, and the
+> first-user bootstrap flow.
+
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
