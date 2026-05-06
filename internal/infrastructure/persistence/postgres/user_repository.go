@@ -180,13 +180,16 @@ func (r *UserRepository) GetByOAuth(ctx context.Context, provider, oauthID strin
 // ListByStatus retrieves users matching the given status with pagination.
 // Ordered by created_at ascending so the admin UI sees pending users in
 // the order they signed up (oldest first — fairness on the
-// approval queue).
+// approval queue). `id` breaks ties: created_at is timestamptz to
+// microsecond resolution, but a single INSERT batch can give two rows
+// the exact same timestamp, and without a deterministic tiebreaker
+// LIMIT/OFFSET pagination can drop or duplicate rows across pages.
 func (r *UserRepository) ListByStatus(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error) {
 	const q = `
 		SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
 		FROM platform.users
 		WHERE status = $1
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 		LIMIT $2 OFFSET $3
 	`
 	rows, err := r.pool.Query(ctx, q, string(status), limit, offset)
@@ -216,6 +219,89 @@ func (r *UserRepository) ListByStatus(ctx context.Context, status user.Status, l
 		return nil, pkgerrors.Internal("failed to iterate users", err)
 	}
 	return users, nil
+}
+
+// List retrieves users with optional status filter and pagination.
+// Mirrors ListByStatus's ORDER BY (created_at ASC, id ASC) so the admin
+// UI sees the same fairness ordering — and the same stable pagination —
+// whether it scopes by status or not. The `id` tiebreaker is required:
+// without it, two rows that share a created_at timestamp can be reordered
+// across LIMIT/OFFSET pages, leaving rows duplicated or skipped.
+//
+// A nil status applies no filter. Branching at the SQL layer rather
+// than building dynamic WHERE clauses keeps query plans cacheable on
+// the PG side.
+func (r *UserRepository) List(ctx context.Context, status *user.Status, limit, offset int) ([]*user.User, error) {
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if status == nil {
+		const q = `
+			SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+			FROM platform.users
+			ORDER BY created_at ASC, id ASC
+			LIMIT $1 OFFSET $2
+		`
+		rows, err = r.pool.Query(ctx, q, limit, offset)
+	} else {
+		const q = `
+			SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+			FROM platform.users
+			WHERE status = $1
+			ORDER BY created_at ASC, id ASC
+			LIMIT $2 OFFSET $3
+		`
+		rows, err = r.pool.Query(ctx, q, string(*status), limit, offset)
+	}
+	if err != nil {
+		return nil, pkgerrors.Internal("failed to list users", err)
+	}
+	defer rows.Close()
+
+	users := make([]*user.User, 0)
+	for rows.Next() {
+		var data user.UserData
+		if err := rows.Scan(
+			&data.ID,
+			&data.OAuthProvider,
+			&data.OAuthID,
+			&data.Email,
+			&data.Role,
+			&data.Status,
+			&data.CreatedAt,
+			&data.UpdatedAt,
+		); err != nil {
+			return nil, pkgerrors.Internal("failed to scan user", err)
+		}
+		users = append(users, user.ReconstructFromData(data))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, pkgerrors.Internal("failed to iterate users", err)
+	}
+	return users, nil
+}
+
+// CountByStatus returns the number of users matching the given status,
+// or all users when status is nil. Used by the admin handler to
+// populate AdminUserListResponse.total independently of pagination.
+func (r *UserRepository) CountByStatus(ctx context.Context, status *user.Status) (int, error) {
+	var (
+		count int
+		err   error
+	)
+	if status == nil {
+		err = r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM platform.users`).Scan(&count)
+	} else {
+		err = r.pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM platform.users WHERE status = $1`,
+			string(*status),
+		).Scan(&count)
+	}
+	if err != nil {
+		return 0, pkgerrors.Internal("failed to count users", err)
+	}
+	return count, nil
 }
 
 // CountAll returns the total number of users in the platform DB. Used

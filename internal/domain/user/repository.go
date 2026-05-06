@@ -32,6 +32,19 @@ type Repository interface {
 	// whitelist.
 	ListByStatus(ctx context.Context, status Status, limit, offset int) ([]*User, error)
 
+	// List retrieves users with pagination, optionally filtered by
+	// status. A nil status returns users in any status; a non-nil
+	// status filters to that exact value. Used by the admin handler's
+	// GET /api/admin/users endpoint where the `status` query parameter
+	// is optional (per duragraph-spec/api/platform.yaml).
+	List(ctx context.Context, status *Status, limit, offset int) ([]*User, error)
+
+	// CountByStatus returns the count of users matching the given
+	// status, or all users when status is nil. Used by the admin
+	// handler to populate the AdminUserListResponse.total field
+	// independently of the pagination window.
+	CountByStatus(ctx context.Context, status *Status) (int, error)
+
 	// CountAll returns the total number of users in the platform DB.
 	// Used by the OAuth callback to detect the bootstrap-first-user
 	// branch atomically (in conjunction with a serializable transaction

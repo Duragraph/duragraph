@@ -22,6 +22,7 @@ import (
 	"github.com/duragraph/duragraph/internal/infrastructure/graph"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/dashboard"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers"
+	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers/admin"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/middleware"
 	"github.com/duragraph/duragraph/internal/infrastructure/mcp"
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging"
@@ -233,6 +234,14 @@ func main() {
 	// The repos and the publisher are constructed so the handlers can
 	// pick them up; the publisher reused for command-side publishing
 	// is the existing `publisher` constructed above.
+	// adminHandler is constructed inside the platformEnabled block
+	// (the User/Tenant repos and platform-DB pool only exist there)
+	// and consumed downstream where the /api/admin route group is
+	// registered. Stays nil in single-tenant deployments — the route
+	// registration site checks for nil and skips mounting handlers,
+	// preserving the empty-group fail-safe (404 on /api/admin/*).
+	var adminHandler *admin.Handler
+
 	if platformEnabled {
 		platformConfig := postgres.Config{
 			Host:     cfg.Database.Host,
@@ -252,10 +261,39 @@ func main() {
 		userRepo := postgres.NewUserRepository(platformPool)
 		tenantRepo := postgres.NewTenantRepository(platformPool)
 
-		// Suppress unused-variable warnings until feat/admin-handlers
-		// wires the HTTP handlers that consume these.
-		_ = userRepo
-		_ = tenantRepo
+		// Construct the admin command handlers that the HTTP layer
+		// dispatches to. All four user-action commands plus
+		// retry-migration share the same NATS publisher used elsewhere
+		// in main.go for run-event publishing.
+		approveUserCmd := command.NewApproveUserHandler(userRepo, tenantRepo, publisher)
+		rejectUserCmd := command.NewRejectUserHandler(userRepo)
+		suspendUserCmd := command.NewSuspendUserHandler(userRepo, tenantRepo)
+		resumeUserCmd := command.NewResumeUserHandler(userRepo)
+		retryMigrationCmd := command.NewRetryTenantMigrationHandler(tenantRepo, publisher)
+
+		// Optional Mimir backend. MIMIR_URL empty in dev → admin
+		// metrics endpoints return 503 with a diagnosable error rather
+		// than 500. MIMIR_TENANT_HEADER is the X-Scope-OrgID value
+		// some Mimir clusters require for multi-tenant separation —
+		// empty means "don't send the header" (single-tenant Mimir).
+		var metricsBackend admin.MetricsBackend
+		if mimirURL := os.Getenv("MIMIR_URL"); mimirURL != "" {
+			metricsBackend = admin.NewMimirClient(mimirURL, os.Getenv("MIMIR_TENANT_HEADER"))
+			fmt.Printf("✅ Mimir metrics backend wired (%s)\n", mimirURL)
+		} else {
+			fmt.Println("ℹ️  Mimir metrics backend not configured (MIMIR_URL empty); /api/admin/metrics will return 503")
+		}
+
+		adminHandler = admin.NewHandler(
+			userRepo,
+			tenantRepo,
+			approveUserCmd,
+			rejectUserCmd,
+			suspendUserCmd,
+			resumeUserCmd,
+			retryMigrationCmd,
+			metricsBackend,
+		)
 
 		// Tenant provisioner subscriber. Uses a JetStream durable
 		// consumer (durable name "tenant-provisioner") bound to the
@@ -754,17 +792,21 @@ func main() {
 
 	// Admin route group.
 	//
-	// Empty today — handlers land in the next PR alongside the platform
-	// User/Tenant repositories. The middleware is wired now so the chain
-	// is ready: TenantMiddleware verifies the JWT, then
-	// AdminAuthMiddleware enforces role=admin. Until routes are added,
-	// any request hitting /api/admin/* returns 404 (Echo's default for
-	// no-match) which is fine.
+	// The middleware chain is constant: TenantMiddleware verifies the
+	// JWT, then AdminAuthMiddleware enforces role=admin. The handlers
+	// themselves only exist when MIGRATOR_PLATFORM_ENABLED=true —
+	// single-tenant deployments still mount the (empty) admin group so
+	// /api/admin/* uniformly returns 404 from Echo's no-match path
+	// rather than leaking a different status from missing middleware.
 	if authEnabled {
-		_ = e.Group("/api/admin",
+		adminGroup := e.Group("/api/admin",
 			middleware.TenantMiddleware(verifier),
 			middleware.AdminAuthMiddleware(),
 		)
+		if adminHandler != nil {
+			adminHandler.Register(adminGroup)
+			fmt.Println("✅ Admin HTTP handlers registered at /api/admin/*")
+		}
 	}
 
 	// Embedded React dashboard. Must be registered after API routes so Echo's
