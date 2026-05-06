@@ -23,6 +23,8 @@ import (
 	"github.com/duragraph/duragraph/internal/infrastructure/http/dashboard"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/handlers/admin"
+	authhandler "github.com/duragraph/duragraph/internal/infrastructure/http/handlers/auth"
+	platformhandler "github.com/duragraph/duragraph/internal/infrastructure/http/handlers/platform"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/middleware"
 	"github.com/duragraph/duragraph/internal/infrastructure/mcp"
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging"
@@ -240,7 +242,35 @@ func main() {
 	// registered. Stays nil in single-tenant deployments — the route
 	// registration site checks for nil and skips mounting handlers,
 	// preserving the empty-group fail-safe (404 on /api/admin/*).
+	//
+	// oauthHandler and platformHandler follow the same pattern: built
+	// inside the platformEnabled block (their dependencies — userRepo,
+	// tenantRepo, platformPool — only exist there), consumed downstream
+	// where /api/auth/* and /api/platform/* are registered. nil in
+	// single-tenant deployments → those routes simply aren't mounted.
 	var adminHandler *admin.Handler
+	var oauthHandler *authhandler.Handler
+	var platformHandler *platformhandler.Handler
+
+	// JWT verifier: shared between TenantMiddleware (when AUTH_ENABLED)
+	// and the OAuth handler's /api/auth/refresh endpoint (when
+	// MIGRATOR_PLATFORM_ENABLED). Hoisted out of the AUTH_ENABLED branch
+	// so the OAuth handler can depend on it without forcing the two
+	// flags to be coupled at the type level. JWT_SECRET drives both —
+	// they MUST share the same secret so refresh round-trips a token
+	// the middleware will accept on the next request.
+	var verifier *auth.Verifier
+	if os.Getenv("AUTH_ENABLED") == "true" || platformEnabled {
+		jwtSecret := os.Getenv("JWT_SECRET")
+		if jwtSecret == "" {
+			jwtSecret = "default-secret-change-in-production"
+		}
+		v, err := auth.NewVerifier([]byte(jwtSecret))
+		if err != nil {
+			log.Fatalf("failed to construct JWT verifier: %v", err)
+		}
+		verifier = v
+	}
 
 	if platformEnabled {
 		platformConfig := postgres.Config{
@@ -294,6 +324,82 @@ func main() {
 			retryMigrationCmd,
 			metricsBackend,
 		)
+
+		// OAuth handler wiring.
+		//
+		// PLATFORM_BASE_URL is the externally-facing URL of this engine
+		// (e.g. https://platform.duragraph.ai). It feeds three things:
+		//   (1) the goth provider redirect URLs ("<base>/api/auth/<p>/callback");
+		//   (2) the cookie-logout CSRF same-origin check (auth.Config.BaseURL);
+		//   (3) the CookieSecure flag (https → true, http → false).
+		// Required when MIGRATOR_PLATFORM_ENABLED — fail fast at startup
+		// rather than 500ing on first /api/auth/<provider>/login.
+		platformBaseURL := os.Getenv("PLATFORM_BASE_URL")
+		if platformBaseURL == "" {
+			log.Fatal("PLATFORM_BASE_URL is required when MIGRATOR_PLATFORM_ENABLED=true")
+		}
+		// CookieSecure derived from the base-URL scheme: production runs
+		// behind Traefik with https, dev runs plain http. Lower-case for
+		// case-insensitive scheme match — RFC 3986 says scheme is
+		// case-insensitive and we control the env var, but be lenient.
+		cookieSecure := strings.HasPrefix(strings.ToLower(platformBaseURL), "https://")
+
+		// OAUTH_SESSION_SECRET keys the gorilla/sessions cookie store
+		// goth uses to hold the OAuth state token between /login and
+		// /callback. Required + ≥32 bytes; ConfigureProviders enforces
+		// the length floor and rejects misconfigured deployments at
+		// startup.
+		oauthSessionSecret := os.Getenv("OAUTH_SESSION_SECRET")
+		if oauthSessionSecret == "" {
+			log.Fatal("OAUTH_SESSION_SECRET is required when MIGRATOR_PLATFORM_ENABLED=true")
+		}
+
+		if err := authhandler.ConfigureProviders(authhandler.ProviderConfig{
+			BaseURL:            platformBaseURL,
+			GoogleClientID:     os.Getenv("OAUTH_GOOGLE_CLIENT_ID"),
+			GoogleClientSecret: os.Getenv("OAUTH_GOOGLE_CLIENT_SECRET"),
+			GitHubClientID:     os.Getenv("OAUTH_GITHUB_CLIENT_ID"),
+			GitHubClientSecret: os.Getenv("OAUTH_GITHUB_CLIENT_SECRET"),
+			SessionSecret:      oauthSessionSecret,
+			CookieSecure:       cookieSecure,
+		}); err != nil {
+			log.Fatalf("OAuth provider configuration failed: %v", err)
+		}
+
+		// JWT_SECRET (with the verifier's default fallback) drives BOTH
+		// the verifier hoisted above AND the OAuth handler's
+		// IssueJWT/Refresh round-trip. Must be the same bytes — a
+		// refresh-issued token has to verify against the middleware's
+		// secret on the next request.
+		oauthJWTSecret := os.Getenv("JWT_SECRET")
+		if oauthJWTSecret == "" {
+			oauthJWTSecret = "default-secret-change-in-production"
+		}
+
+		oh, err := authhandler.NewHandler(
+			userRepo,
+			tenantRepo,
+			migrator,
+			verifier,
+			authhandler.NewGothExchanger(),
+			authhandler.NewPoolBootstrapLocker(platformPool),
+			authhandler.Config{
+				SessionTTL:   24 * time.Hour,
+				BaseURL:      platformBaseURL,
+				CookieDomain: os.Getenv("PLATFORM_COOKIE_DOMAIN"), // empty = host-only
+				CookieSecure: cookieSecure,
+				JWTSecret:    []byte(oauthJWTSecret),
+			},
+		)
+		if err != nil {
+			log.Fatalf("failed to construct OAuth handler: %v", err)
+		}
+		oauthHandler = oh
+
+		// /api/platform/me handler. Same lifetime + nil-fallback rules
+		// as oauthHandler — only constructed in platform mode.
+		platformHandler = platformhandler.NewHandler(userRepo, tenantRepo)
+		fmt.Println("✅ OAuth + /api/platform/me handlers constructed")
 
 		// Tenant provisioner subscriber. Uses a JetStream durable
 		// consumer (durable name "tenant-provisioner") bound to the
@@ -627,28 +733,22 @@ func main() {
 	// Public/auth-only routes (/health, /metrics, /api/auth/*) bypass
 	// TenantMiddleware via Echo's per-route middleware semantics: they
 	// are registered on the bare *echo.Echo (not under a group with
-	// TenantMiddleware applied). Future /api/auth/login, /callback,
-	// /logout endpoints will live alongside /health below.
+	// TenantMiddleware applied). The /api/auth/{provider}/login,
+	// /callback, /logout, /refresh endpoints are wired below where
+	// oauthHandler is registered (only when MIGRATOR_PLATFORM_ENABLED).
 	//
 	// Backwards compat: when AUTH_ENABLED=false (the default), no auth
 	// middleware runs at all. Existing single-tenant deployments keep
 	// working unchanged. This gate is intentionally NOT tied to
 	// MIGRATOR_PLATFORM_ENABLED — middleware applies whether or not
 	// the multi-tenant migrator is active. The two flags are
-	// orthogonal: AUTH_ENABLED gates JWT verification, the migrator
-	// flag gates platform-DB provisioning.
+	// orthogonal: AUTH_ENABLED gates JWT verification on /api/v1, the
+	// migrator flag gates platform-DB provisioning + the platform
+	// admin/auth/me endpoints. The verifier itself is hoisted above
+	// (constructed when EITHER flag is on) because the OAuth handler
+	// needs it for /api/auth/refresh.
 	authEnabled := os.Getenv("AUTH_ENABLED") == "true"
-	var verifier *auth.Verifier
 	if authEnabled {
-		jwtSecret := os.Getenv("JWT_SECRET")
-		if jwtSecret == "" {
-			jwtSecret = "default-secret-change-in-production"
-		}
-		v, err := auth.NewVerifier([]byte(jwtSecret))
-		if err != nil {
-			log.Fatalf("failed to construct JWT verifier: %v", err)
-		}
-		verifier = v
 		fmt.Println("✅ Authentication enabled (TenantMiddleware)")
 	}
 
@@ -666,6 +766,21 @@ func main() {
 	// System endpoints (LangGraph compatible)
 	e.GET("/ok", systemHandler.Ok)
 	e.GET("/info", systemHandler.Info)
+
+	// OAuth routes — public by design. /login and /callback handle the
+	// 3-leg OAuth dance themselves (state cookie via gothic, Origin
+	// check on cookie-logout, JWT verification on /refresh). Mount on
+	// the bare *echo.Echo BEFORE the /api/v1 group so TenantMiddleware
+	// is never accidentally applied to them. Single-DB / non-platform
+	// deployments leave oauthHandler == nil and these routes simply
+	// don't exist.
+	if oauthHandler != nil {
+		e.GET("/api/auth/:provider/login", oauthHandler.Login)
+		e.GET("/api/auth/:provider/callback", oauthHandler.Callback)
+		e.POST("/api/auth/logout", oauthHandler.Logout)
+		e.POST("/api/auth/refresh", oauthHandler.Refresh)
+		fmt.Println("✅ OAuth routes registered (/api/auth/{provider}/login,callback + /api/auth/logout,refresh)")
+	}
 
 	// API routes.
 	//
@@ -807,6 +922,29 @@ func main() {
 			adminHandler.Register(adminGroup)
 			fmt.Println("✅ Admin HTTP handlers registered at /api/admin/*")
 		}
+	}
+
+	// Platform self-service route group (/api/platform/*).
+	//
+	// Middleware chain is just TenantMiddleware — pending users (valid
+	// token, no tenant_id) need /api/platform/me to render their
+	// "awaiting approval" state, so we deliberately DON'T apply
+	// RequireTenant here. The endpoint itself returns 401 on missing
+	// user_id as defence-in-depth.
+	//
+	// Independent of AUTH_ENABLED: a deployment running in platform
+	// mode (MIGRATOR_PLATFORM_ENABLED=true) needs TenantMiddleware on
+	// /api/platform even when AUTH_ENABLED=false (the two flags are
+	// orthogonal — see the auth comment block above). Gating on
+	// platformHandler != nil is sufficient because platformHandler is
+	// constructed inside the same platformEnabled block as the
+	// verifier, so non-nil platformHandler implies non-nil verifier.
+	if platformHandler != nil {
+		platformGroup := e.Group("/api/platform",
+			middleware.TenantMiddleware(verifier),
+		)
+		platformHandler.Register(platformGroup)
+		fmt.Println("✅ Platform handlers registered at /api/platform/*")
 	}
 
 	// Embedded React dashboard. Must be registered after API routes so Echo's
