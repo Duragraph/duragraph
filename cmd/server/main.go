@@ -548,10 +548,10 @@ func main() {
 	createRunHandler := command.NewCreateRunHandler(runRepo)
 	submitToolOutputsHandler := command.NewSubmitToolOutputsHandler(runRepo, interruptRepo)
 	deleteRunHandler := command.NewDeleteRunHandler(runRepo)
-	createAssistantHandler := command.NewCreateAssistantHandler(assistantRepo)
+	createAssistantHandler := command.NewCreateAssistantHandler(assistantRepo, metrics)
 	updateAssistantHandler := command.NewUpdateAssistantHandler(assistantRepo)
-	deleteAssistantHandler := command.NewDeleteAssistantHandler(assistantRepo)
-	createThreadHandler := command.NewCreateThreadHandler(threadRepo)
+	deleteAssistantHandler := command.NewDeleteAssistantHandler(assistantRepo, metrics)
+	createThreadHandler := command.NewCreateThreadHandler(threadRepo, metrics)
 	updateThreadHandler := command.NewUpdateThreadHandler(threadRepo)
 	addMessageHandler := command.NewAddMessageHandler(threadRepo)
 
@@ -566,7 +566,7 @@ func main() {
 	listThreadsHandler := query.NewListThreadsHandler(threadRepo)
 	searchThreadsHandler := query.NewSearchThreadsHandler(threadRepo)
 	countThreadsHandler := query.NewCountThreadsHandler(threadRepo)
-	deleteThreadHandler := command.NewDeleteThreadHandler(threadRepo)
+	deleteThreadHandler := command.NewDeleteThreadHandler(threadRepo, metrics)
 
 	// Initialize checkpoint handlers
 	getThreadStateHandler := query.NewGetThreadStateHandler(checkpointRepo)

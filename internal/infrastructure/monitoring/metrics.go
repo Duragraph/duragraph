@@ -16,8 +16,15 @@ type Metrics struct {
 
 	RunsTotal            *prometheus.CounterVec
 	RunDuration          *prometheus.HistogramVec
-	RunsActive           prometheus.Gauge
+	RunsActive           *prometheus.GaugeVec
 	RunStatusTransitions *prometheus.CounterVec
+
+	// AssistantsTotal / ThreadsTotal are per-tenant gauges driven by the
+	// command handlers (CreateAssistant/Delete, CreateThread/Delete).
+	// The admin metrics endpoint queries these via Mimir as
+	// `sum by (tenant_id) (duragraph_{assistants,threads}_total)`.
+	AssistantsTotal *prometheus.GaugeVec
+	ThreadsTotal    *prometheus.GaugeVec
 
 	NodesExecutedTotal *prometheus.CounterVec
 	NodeDuration       *prometheus.HistogramVec
@@ -99,7 +106,11 @@ func NewMetrics(namespace string) *Metrics {
 				Name:      "runs_total",
 				Help:      "Total number of runs created",
 			},
-			[]string{"assistant_id"},
+			// tenant_id first by convention; assistant_id retained so
+			// per-assistant slicing remains possible. Empty tenant_id
+			// means "unscoped / single-tenant deployment" — see the
+			// comment on the Record* helpers below.
+			[]string{"tenant_id", "assistant_id"},
 		),
 		RunDuration: promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -108,14 +119,15 @@ func NewMetrics(namespace string) *Metrics {
 				Help:      "Run duration in seconds",
 				Buckets:   prometheus.ExponentialBuckets(0.1, 2, 12),
 			},
-			[]string{"assistant_id", "status"},
+			[]string{"tenant_id", "assistant_id", "status"},
 		),
-		RunsActive: promauto.NewGauge(
+		RunsActive: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: namespace,
 				Name:      "runs_active",
 				Help:      "Number of currently active runs",
 			},
+			[]string{"tenant_id"},
 		),
 		RunStatusTransitions: promauto.NewCounterVec(
 			prometheus.CounterOpts{
@@ -123,7 +135,24 @@ func NewMetrics(namespace string) *Metrics {
 				Name:      "run_status_transitions_total",
 				Help:      "Total number of run status transitions",
 			},
-			[]string{"from_status", "to_status"},
+			[]string{"tenant_id", "from_status", "to_status"},
+		),
+
+		AssistantsTotal: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: namespace,
+				Name:      "assistants_total",
+				Help:      "Number of assistants per tenant",
+			},
+			[]string{"tenant_id"},
+		),
+		ThreadsTotal: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: namespace,
+				Name:      "threads_total",
+				Help:      "Number of threads per tenant",
+			},
+			[]string{"tenant_id"},
 		),
 
 		NodesExecutedTotal: promauto.NewCounterVec(
@@ -158,7 +187,7 @@ func NewMetrics(namespace string) *Metrics {
 				Name:      "llm_requests_total",
 				Help:      "Total number of LLM requests",
 			},
-			[]string{"provider", "model", "status"},
+			[]string{"tenant_id", "provider", "model", "status"},
 		),
 		LLMRequestDuration: promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -167,7 +196,7 @@ func NewMetrics(namespace string) *Metrics {
 				Help:      "LLM request duration in seconds",
 				Buckets:   prometheus.ExponentialBuckets(0.1, 2, 10),
 			},
-			[]string{"provider", "model"},
+			[]string{"tenant_id", "provider", "model"},
 		),
 		LLMTokensTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
@@ -175,7 +204,7 @@ func NewMetrics(namespace string) *Metrics {
 				Name:      "llm_tokens_total",
 				Help:      "Total number of LLM tokens used",
 			},
-			[]string{"provider", "model", "type"},
+			[]string{"tenant_id", "provider", "model", "type"},
 		),
 		LLMErrors: promauto.NewCounterVec(
 			prometheus.CounterOpts{
@@ -183,7 +212,7 @@ func NewMetrics(namespace string) *Metrics {
 				Name:      "llm_errors_total",
 				Help:      "Total number of LLM errors",
 			},
-			[]string{"provider", "model", "error_type"},
+			[]string{"tenant_id", "provider", "model", "error_type"},
 		),
 
 		ToolExecutionsTotal: promauto.NewCounterVec(
@@ -339,26 +368,50 @@ func (m *Metrics) RecordHTTPRequest(method, path string, status int, duration ti
 	m.HTTPResponseSize.WithLabelValues(method, path).Observe(float64(respSize))
 }
 
-func (m *Metrics) RecordRunCreated(assistantID string) {
-	m.RunsTotal.WithLabelValues(assistantID).Inc()
-	m.RunsActive.Inc()
+// tenantID convention: callers should pass the request-scoped tenant_id
+// resolved via middleware.TenantIDFromCtx (or the equivalent on a
+// command struct). Pass empty string ("") when no tenant context exists
+// — this is the documented single-tenant deployment mode (engine
+// running with MIGRATOR_PLATFORM_ENABLED=false). Mimir queries that
+// `sum by (tenant_id)` will surface a single "" series in that case,
+// which is the intended behaviour.
+
+func (m *Metrics) RecordRunCreated(tenantID, assistantID string) {
+	m.RunsTotal.WithLabelValues(tenantID, assistantID).Inc()
+	m.RunsActive.WithLabelValues(tenantID).Inc()
 }
 
-func (m *Metrics) RecordRunCompleted(assistantID, status string, duration time.Duration) {
-	m.RunDuration.WithLabelValues(assistantID, status).Observe(duration.Seconds())
-	m.RunsActive.Dec()
+func (m *Metrics) RecordRunCompleted(tenantID, assistantID, status string, duration time.Duration) {
+	m.RunDuration.WithLabelValues(tenantID, assistantID, status).Observe(duration.Seconds())
+	m.RunsActive.WithLabelValues(tenantID).Dec()
 }
+
+// IncRunsActive / DecRunsActive expose the per-tenant active-runs gauge
+// for callers that don't drive it through RecordRunCreated/Completed
+// (e.g. lease recovery on engine restart).
+func (m *Metrics) IncRunsActive(tenantID string) { m.RunsActive.WithLabelValues(tenantID).Inc() }
+func (m *Metrics) DecRunsActive(tenantID string) { m.RunsActive.WithLabelValues(tenantID).Dec() }
+
+// IncAssistants / DecAssistants are wired into CreateAssistant /
+// DeleteAssistant command handlers to keep the per-tenant gauge in
+// sync. Drift is acceptable at MVP scale (the gauge is observational,
+// not authoritative).
+func (m *Metrics) IncAssistants(tenantID string) { m.AssistantsTotal.WithLabelValues(tenantID).Inc() }
+func (m *Metrics) DecAssistants(tenantID string) { m.AssistantsTotal.WithLabelValues(tenantID).Dec() }
+
+func (m *Metrics) IncThreads(tenantID string) { m.ThreadsTotal.WithLabelValues(tenantID).Inc() }
+func (m *Metrics) DecThreads(tenantID string) { m.ThreadsTotal.WithLabelValues(tenantID).Dec() }
 
 func (m *Metrics) RecordNodeExecution(nodeType, status string, duration time.Duration) {
 	m.NodesExecutedTotal.WithLabelValues(nodeType, status).Inc()
 	m.NodeDuration.WithLabelValues(nodeType).Observe(duration.Seconds())
 }
 
-func (m *Metrics) RecordLLMRequest(provider, model, status string, duration time.Duration, promptTokens, completionTokens int) {
-	m.LLMRequestsTotal.WithLabelValues(provider, model, status).Inc()
-	m.LLMRequestDuration.WithLabelValues(provider, model).Observe(duration.Seconds())
-	m.LLMTokensTotal.WithLabelValues(provider, model, "prompt").Add(float64(promptTokens))
-	m.LLMTokensTotal.WithLabelValues(provider, model, "completion").Add(float64(completionTokens))
+func (m *Metrics) RecordLLMRequest(tenantID, provider, model, status string, duration time.Duration, promptTokens, completionTokens int) {
+	m.LLMRequestsTotal.WithLabelValues(tenantID, provider, model, status).Inc()
+	m.LLMRequestDuration.WithLabelValues(tenantID, provider, model).Observe(duration.Seconds())
+	m.LLMTokensTotal.WithLabelValues(tenantID, provider, model, "prompt").Add(float64(promptTokens))
+	m.LLMTokensTotal.WithLabelValues(tenantID, provider, model, "completion").Add(float64(completionTokens))
 }
 
 func (m *Metrics) RecordToolExecution(toolName, status string, duration time.Duration) {

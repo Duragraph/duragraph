@@ -124,7 +124,7 @@ func TestDeleteRunHandler_NotFound(t *testing.T) {
 
 func TestCreateAssistantHandler_Success(t *testing.T) {
 	repo := mocks.NewAssistantRepository()
-	handler := NewCreateAssistantHandler(repo)
+	handler := NewCreateAssistantHandler(repo, nil)
 
 	id, err := handler.Handle(context.Background(), CreateAssistant{
 		Name:         "my-bot",
@@ -144,7 +144,7 @@ func TestCreateAssistantHandler_Success(t *testing.T) {
 }
 
 func TestCreateAssistantHandler_MissingName(t *testing.T) {
-	handler := NewCreateAssistantHandler(mocks.NewAssistantRepository())
+	handler := NewCreateAssistantHandler(mocks.NewAssistantRepository(), nil)
 	_, err := handler.Handle(context.Background(), CreateAssistant{
 		Model: "gpt-4",
 	})
@@ -158,7 +158,7 @@ func TestCreateAssistantHandler_SaveError(t *testing.T) {
 	repo.SaveFunc = func(ctx context.Context, a *workflow.Assistant) error {
 		return fmt.Errorf("db error")
 	}
-	handler := NewCreateAssistantHandler(repo)
+	handler := NewCreateAssistantHandler(repo, nil)
 
 	_, err := handler.Handle(context.Background(), CreateAssistant{Name: "bot"})
 	if err == nil {
@@ -202,7 +202,7 @@ func TestDeleteAssistantHandler_Success(t *testing.T) {
 	a, _ := workflow.NewAssistant("bot", "desc", "gpt-4", "inst", nil, nil)
 	repo.Assistants[a.ID()] = a
 
-	handler := NewDeleteAssistantHandler(repo)
+	handler := NewDeleteAssistantHandler(repo, nil)
 	err := handler.Handle(context.Background(), DeleteAssistantCommand{AssistantID: a.ID()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -213,7 +213,7 @@ func TestDeleteAssistantHandler_Success(t *testing.T) {
 }
 
 func TestDeleteAssistantHandler_NotFound(t *testing.T) {
-	handler := NewDeleteAssistantHandler(mocks.NewAssistantRepository())
+	handler := NewDeleteAssistantHandler(mocks.NewAssistantRepository(), nil)
 	err := handler.Handle(context.Background(), DeleteAssistantCommand{AssistantID: "x"})
 	if err == nil {
 		t.Fatal("expected error for missing assistant")
@@ -222,7 +222,7 @@ func TestDeleteAssistantHandler_NotFound(t *testing.T) {
 
 func TestCreateThreadHandler_Success(t *testing.T) {
 	repo := mocks.NewThreadRepository()
-	handler := NewCreateThreadHandler(repo)
+	handler := NewCreateThreadHandler(repo, nil)
 
 	id, err := handler.Handle(context.Background(), CreateThread{
 		Metadata: map[string]interface{}{"key": "value"},
@@ -243,7 +243,7 @@ func TestCreateThreadHandler_SaveError(t *testing.T) {
 	repo.SaveFunc = func(ctx context.Context, t *workflow.Thread) error {
 		return fmt.Errorf("db error")
 	}
-	handler := NewCreateThreadHandler(repo)
+	handler := NewCreateThreadHandler(repo, nil)
 
 	_, err := handler.Handle(context.Background(), CreateThread{})
 	if err == nil {
@@ -279,7 +279,7 @@ func TestDeleteThreadHandler_Success(t *testing.T) {
 	th, _ := workflow.NewThread(nil)
 	repo.Threads[th.ID()] = th
 
-	handler := NewDeleteThreadHandler(repo)
+	handler := NewDeleteThreadHandler(repo, nil)
 	err := handler.Handle(context.Background(), DeleteThreadCommand{ThreadID: th.ID()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
