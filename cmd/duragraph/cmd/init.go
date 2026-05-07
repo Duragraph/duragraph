@@ -7,7 +7,7 @@ import "github.com/spf13/cobra"
 // single-binary DX track (binary-modes.yml § migration.phasing.phase_6_init_template).
 var initCmd = &cobra.Command{
 	Use:   "init <project-name>",
-	Short: "Scaffold a new duragraph project",
+	Short: "Scaffold a new duragraph project (stub — not yet implemented)",
 	Long: `Create a new duragraph project directory with starter agent code, project
 config, and run instructions.
 

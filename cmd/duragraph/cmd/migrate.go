@@ -7,7 +7,7 @@ import "github.com/spf13/cobra"
 // serve / multitenant ops debugging once it's filled in.
 var migrateCmd = &cobra.Command{
 	Use:   "migrate [up|down|status]",
-	Short: "Run or inspect database migrations",
+	Short: "Run or inspect database migrations (stub — not yet implemented)",
 	Long: `Explicit migration control for ops debugging — separate from the implicit
 on-startup migration that "serve" performs.
 

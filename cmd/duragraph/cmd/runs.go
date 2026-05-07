@@ -8,7 +8,7 @@ import "github.com/spf13/cobra"
 // Run / RunE.
 var runsCmd = &cobra.Command{
 	Use:   "runs",
-	Short: "CLI access to the runs API",
+	Short: "CLI access to the runs API (stub — not yet implemented)",
 	Long: `Inspect, stream, and trigger runs via the duragraph control plane API.
 
 Not yet implemented. Tracking phase 7 of binary-modes.yml § migration.phasing.phase_7_runs_events_tail.`,

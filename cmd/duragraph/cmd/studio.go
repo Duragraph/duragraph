@@ -7,7 +7,7 @@ import "github.com/spf13/cobra"
 // implementation lands in phase 8 of binary-modes.yml § migration.
 var studioCmd = &cobra.Command{
 	Use:   "studio",
-	Short: "Manage the bundled Studio UI",
+	Short: "Manage the bundled Studio UI (stub — not yet implemented)",
 	Long: `Install or uninstall the optional Studio dist bundle. Studio is opt-in —
 the binary itself does not embed Studio (Studio versions independently and
 inflating the binary for users who don't want it is rejected on size grounds).

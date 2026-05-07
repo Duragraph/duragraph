@@ -7,7 +7,7 @@ import "github.com/spf13/cobra"
 // of the v0.7 single-binary DX track (binary-modes.yml § migration).
 var devCmd = &cobra.Command{
 	Use:   "dev",
-	Short: "Run duragraph with embedded postgres, nats, and watch mode",
+	Short: "Run duragraph with embedded postgres, nats, and watch mode (stub — not yet implemented)",
 	Long: `Zero-config dev mode: embedded Postgres + embedded NATS + dashboard
 + optional Studio + worker watch mode.
 

@@ -21,19 +21,7 @@ var rootCmd = &cobra.Command{
 	Use:   "duragraph",
 	Short: "DuraGraph control plane binary",
 	Long: `duragraph is the control plane binary for the DuraGraph platform.
-
-Run with no subcommand to start the server (equivalent to "duragraph serve") —
-this preserves backwards compatibility with the previous entrypoint.
-
-Subcommands:
-  serve     Run the duragraph server (long-running)
-  dev       Zero-config dev mode (embedded postgres + nats)   [not yet implemented]
-  init      Scaffold a new duragraph project                  [not yet implemented]
-  migrate   Run/inspect database migrations                   [not yet implemented]
-  runs      CLI access to the runs API                        [not yet implemented]
-  events    CLI access to the event sourcing trail            [not yet implemented]
-  studio    Manage the bundled Studio UI                      [not yet implemented]
-  version   Print binary version and build metadata`,
+Run with no subcommand to start the server (equivalent to "duragraph serve").`,
 	SilenceUsage: true,
 }
 

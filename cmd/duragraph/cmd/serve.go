@@ -13,10 +13,10 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill"
 	duragraph "github.com/duragraph/duragraph"
-	"github.com/duragraph/duragraph/cmd/server/config"
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
 	"github.com/duragraph/duragraph/internal/application/service"
+	"github.com/duragraph/duragraph/internal/config"
 	"github.com/duragraph/duragraph/internal/infrastructure/auth"
 	infra_exec "github.com/duragraph/duragraph/internal/infrastructure/execution"
 	"github.com/duragraph/duragraph/internal/infrastructure/graph"

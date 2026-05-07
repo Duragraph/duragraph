@@ -6,7 +6,7 @@ import "github.com/spf13/cobra"
 // only child today; future PRs may add `events search` etc.
 var eventsCmd = &cobra.Command{
 	Use:   "events",
-	Short: "CLI access to the event sourcing trail",
+	Short: "CLI access to the event sourcing trail (stub — not yet implemented)",
 	Long: `Inspect the immutable event log via NATS subscription.
 
 Not yet implemented. Tracking phase 7 of binary-modes.yml § migration.phasing.phase_7_runs_events_tail.`,
