@@ -251,7 +251,19 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	now := time.Now()
+	// Prefer the worker-supplied timestamp so SSE consumers see the
+	// actual event time; fall back to server time if absent.
+	now := req.Timestamp
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	// Resolve NodeID once for node_* events: the DTO has it as a top-level
+	// field, but older workers may still tuck it under data.
+	nodeID := req.NodeID
+	if nodeID == "" {
+		nodeID = stringFromData(req.Data, "node_id")
+	}
 
 	switch req.EventType {
 	case "run_started":
@@ -264,7 +276,11 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 			})
 		}
 
-	case "run_requires_action":
+	// "human_required" is an alias kept for backwards compatibility:
+	// the in-repo Go e2e worker emits this name (see tests/e2e/go_worker/
+	// executor/executor.go), while the Python worker uses the canonical
+	// "run_requires_action". A future PR can converge on one name.
+	case "run_requires_action", "human_required":
 		// HITL pause. Translate to the aggregate transition AND publish
 		// so Studio's ApprovalDialog opens via the SSE stream.
 		if err := h.workerService.UpdateRunStatus(ctx, req.RunID, "requires_action", nil, ""); err != nil {
@@ -314,7 +330,7 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 			input, _ := req.Data["input"].(map[string]interface{})
 			h.eventBus.Publish(ctx, execution.NodeStarted{
 				RunID:      req.RunID,
-				NodeID:     stringFromData(req.Data, "node_id"),
+				NodeID:     nodeID,
 				NodeType:   stringFromData(req.Data, "node_type"),
 				Input:      input,
 				OccurredAt: now,
@@ -326,7 +342,7 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 			output, _ := req.Data["output"].(map[string]interface{})
 			h.eventBus.Publish(ctx, execution.NodeCompleted{
 				RunID:      req.RunID,
-				NodeID:     stringFromData(req.Data, "node_id"),
+				NodeID:     nodeID,
 				NodeType:   stringFromData(req.Data, "node_type"),
 				Output:     output,
 				OccurredAt: now,
@@ -339,7 +355,7 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 			input, _ := req.Data["input"].(map[string]interface{})
 			h.eventBus.Publish(ctx, execution.NodeFailed{
 				RunID:      req.RunID,
-				NodeID:     stringFromData(req.Data, "node_id"),
+				NodeID:     nodeID,
 				NodeType:   stringFromData(req.Data, "node_type"),
 				Error:      errMsg,
 				Input:      input,
