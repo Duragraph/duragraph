@@ -14,11 +14,14 @@ import {
   BarChart3,
   DollarSign,
   User,
+  Users,
+  Gauge,
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useCapabilities } from "@/hooks/useCapabilities"
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -38,10 +41,19 @@ const configItems = [
   { icon: Settings, label: "Settings", path: "/settings" },
 ]
 
+// Admin nav items are only rendered when the engine is in multi-tenant mode
+// (MIGRATOR_PLATFORM_ENABLED=true). The actual /admin/* pages are placeholders
+// until Phase 3 frontend work lands.
+const adminItems = [
+  { icon: Users, label: "Users", path: "/admin/users" },
+  { icon: Gauge, label: "Metrics", path: "/admin/metrics" },
+]
+
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mobileMenuOpen, setMobileMenuOpen } = useUIStore()
   const router = useRouterState()
   const currentPath = router.location.pathname
+  const capabilities = useCapabilities()
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -148,6 +160,27 @@ export function Sidebar() {
               collapsed={sidebarCollapsed && !mobileMenuOpen}
             />
           ))}
+
+          {capabilities.platformEnabled && (
+            <>
+              <Separator className="my-3" />
+
+              <div className={cn("px-3 py-2", sidebarCollapsed && !mobileMenuOpen && "hidden")}>
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Admin
+                </span>
+              </div>
+
+              {adminItems.map((item) => (
+                <NavItem
+                  key={item.path}
+                  {...item}
+                  isActive={currentPath === item.path}
+                  collapsed={sidebarCollapsed && !mobileMenuOpen}
+                />
+              ))}
+            </>
+          )}
         </nav>
 
         {/* Collapse Toggle - hidden on mobile */}

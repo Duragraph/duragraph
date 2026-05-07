@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"os"
 	"runtime"
 
 	"github.com/labstack/echo/v4"
@@ -24,6 +25,21 @@ type OkResponse struct {
 	Ok bool `json:"ok"`
 }
 
+// EngineMode describes how the engine is running.
+//
+// "multitenant" — MIGRATOR_PLATFORM_ENABLED=true, full platform features active.
+// "serve"       — single-tenant `duragraph serve` (default for non-platform mode).
+// "dev"         — `duragraph dev`. Phase 4 will populate this from the cobra
+//
+//	command; for now we never emit "dev" from /info.
+type EngineMode string
+
+const (
+	ModeDev         EngineMode = "dev"
+	ModeServe       EngineMode = "serve"
+	ModeMultitenant EngineMode = "multitenant"
+)
+
 // InfoResponse represents the response for GET /info
 type InfoResponse struct {
 	Version       string   `json:"version"`
@@ -36,6 +52,16 @@ type InfoResponse struct {
 		Checkpointer string `json:"checkpointer"`
 		Store        string `json:"store"`
 	} `json:"runtime_config"`
+	// Mode reports the engine's runtime mode. See EngineMode.
+	Mode EngineMode `json:"mode"`
+	// PlatformEnabled is true when multi-tenant features (admin APIs, tenant
+	// provisioning, etc.) are active. Driven by MIGRATOR_PLATFORM_ENABLED.
+	PlatformEnabled bool `json:"platform_enabled"`
+	// AuthEnabled mirrors the AUTH_ENABLED env toggle (JWT/auth gating).
+	AuthEnabled bool `json:"auth_enabled"`
+	// OAuthProviders lists configured OAuth providers in alphabetical order.
+	// Always non-nil so the JSON shape is `[]` not `null`.
+	OAuthProviders []string `json:"oauth_providers"`
 }
 
 // Ok handles GET /ok - simple health check
@@ -43,8 +69,32 @@ func (h *SystemHandler) Ok(c echo.Context) error {
 	return c.JSON(http.StatusOK, OkResponse{Ok: true})
 }
 
-// Info handles GET /info - system information
+// Info handles GET /info - system information.
+//
+// Capability flags (mode, platform_enabled, auth_enabled, oauth_providers) are
+// read from environment variables on every call. /info is low-frequency (the
+// embedded dashboard fetches once at boot) so we avoid plumbing them through
+// the constructor.
 func (h *SystemHandler) Info(c echo.Context) error {
+	platformEnabled := os.Getenv("MIGRATOR_PLATFORM_ENABLED") == "true"
+	authEnabled := os.Getenv("AUTH_ENABLED") == "true"
+
+	// alphabetical, stable for tests
+	oauthProviders := []string{}
+	if os.Getenv("OAUTH_GITHUB_CLIENT_ID") != "" {
+		oauthProviders = append(oauthProviders, "github")
+	}
+	if os.Getenv("OAUTH_GOOGLE_CLIENT_ID") != "" {
+		oauthProviders = append(oauthProviders, "google")
+	}
+
+	mode := ModeServe
+	if platformEnabled {
+		mode = ModeMultitenant
+	}
+	// TODO(phase-4): when `duragraph dev` is wired, pass a sentinel through the
+	// cobra command so the handler can return ModeDev for that case.
+
 	return c.JSON(http.StatusOK, InfoResponse{
 		Version:      h.version,
 		GoVersion:    runtime.Version(),
@@ -64,5 +114,9 @@ func (h *SystemHandler) Info(c echo.Context) error {
 			Checkpointer: "postgres",
 			Store:        "postgres",
 		},
+		Mode:            mode,
+		PlatformEnabled: platformEnabled,
+		AuthEnabled:     authEnabled,
+		OAuthProviders:  oauthProviders,
 	})
 }
