@@ -5,9 +5,11 @@ name: release
 # Release on this repo, and pushes a Homebrew formula to
 # Duragraph/homebrew-tap.
 #
-# Required secret: HOMEBREW_TAP_TOKEN — fine-grained PAT (or GitHub App
-# token) with `contents:write` on Duragraph/homebrew-tap. Configure under
-# Settings → Secrets and variables → Actions → New repository secret.
+# Required secret: INFISICAL_HOMEBREW_TAP_TOKEN — fine-grained GitHub
+# PAT (or GitHub App token) scoped to Duragraph/homebrew-tap with
+# `contents:write`. Sourced from Infisical, mirrored as a GitHub Actions
+# repository secret with the same name (matches the existing
+# INFISICAL_DOCKER_USERNAME / INFISICAL_DOCKER_PASSWORD convention).
 #
 # Free-tier GoReleaser only — no Pro features used. See
 # duragraph-spec/backend/binary-modes.yml for the distribution plan.
@@ -44,4 +46,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # PAT scoped to Duragraph/homebrew-tap with contents:write.
           # Without this, GoReleaser will fail at the brews step.
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          INFISICAL_HOMEBREW_TAP_TOKEN: ${{ secrets.INFISICAL_HOMEBREW_TAP_TOKEN }}

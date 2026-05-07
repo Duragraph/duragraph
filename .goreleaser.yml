@@ -92,7 +92,7 @@ brews:
       owner: Duragraph
       name: homebrew-tap
       branch: main
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      token: "{{ .Env.INFISICAL_HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/Duragraph/duragraph"
     description: "LangGraph-compatible AI workflow orchestration platform — durable, self-hostable, single binary."
