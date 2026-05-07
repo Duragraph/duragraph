@@ -19,10 +19,14 @@ import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppCostsRouteImport } from './routes/_app/costs'
 import { Route as AppAssistantsRouteImport } from './routes/_app/assistants'
 import { Route as AppAnalyticsRouteImport } from './routes/_app/analytics'
+import { Route as AppAdminRouteImport } from './routes/_app/admin'
+import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
 import { Route as AppTracesTraceIdRouteImport } from './routes/_app/traces/$traceId'
 import { Route as AppThreadsThreadIdRouteImport } from './routes/_app/threads/$threadId'
 import { Route as AppRunsRunIdRouteImport } from './routes/_app/runs/$runId'
 import { Route as AppAssistantsAssistantIdRouteImport } from './routes/_app/assistants/$assistantId'
+import { Route as AppAdminUsersRouteImport } from './routes/_app/admin/users'
+import { Route as AppAdminMetricsRouteImport } from './routes/_app/admin/metrics'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -73,6 +77,16 @@ const AppAnalyticsRoute = AppAnalyticsRouteImport.update({
   path: '/analytics',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAdminIndexRoute = AppAdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppTracesTraceIdRoute = AppTracesTraceIdRouteImport.update({
   id: '/$traceId',
   path: '/$traceId',
@@ -94,8 +108,19 @@ const AppAssistantsAssistantIdRoute =
     path: '/$assistantId',
     getParentRoute: () => AppAssistantsRoute,
   } as any)
+const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminMetricsRoute = AppAdminMetricsRouteImport.update({
+  id: '/metrics',
+  path: '/metrics',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
+  '/admin': typeof AppAdminRouteWithChildren
   '/analytics': typeof AppAnalyticsRoute
   '/assistants': typeof AppAssistantsRouteWithChildren
   '/costs': typeof AppCostsRoute
@@ -105,10 +130,13 @@ export interface FileRoutesByFullPath {
   '/threads': typeof AppThreadsRouteWithChildren
   '/traces': typeof AppTracesRouteWithChildren
   '/': typeof AppIndexRoute
+  '/admin/metrics': typeof AppAdminMetricsRoute
+  '/admin/users': typeof AppAdminUsersRoute
   '/assistants/$assistantId': typeof AppAssistantsAssistantIdRoute
   '/runs/$runId': typeof AppRunsRunIdRoute
   '/threads/$threadId': typeof AppThreadsThreadIdRoute
   '/traces/$traceId': typeof AppTracesTraceIdRoute
+  '/admin/': typeof AppAdminIndexRoute
 }
 export interface FileRoutesByTo {
   '/analytics': typeof AppAnalyticsRoute
@@ -120,14 +148,18 @@ export interface FileRoutesByTo {
   '/threads': typeof AppThreadsRouteWithChildren
   '/traces': typeof AppTracesRouteWithChildren
   '/': typeof AppIndexRoute
+  '/admin/metrics': typeof AppAdminMetricsRoute
+  '/admin/users': typeof AppAdminUsersRoute
   '/assistants/$assistantId': typeof AppAssistantsAssistantIdRoute
   '/runs/$runId': typeof AppRunsRunIdRoute
   '/threads/$threadId': typeof AppThreadsThreadIdRoute
   '/traces/$traceId': typeof AppTracesTraceIdRoute
+  '/admin': typeof AppAdminIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
+  '/_app/admin': typeof AppAdminRouteWithChildren
   '/_app/analytics': typeof AppAnalyticsRoute
   '/_app/assistants': typeof AppAssistantsRouteWithChildren
   '/_app/costs': typeof AppCostsRoute
@@ -137,14 +169,18 @@ export interface FileRoutesById {
   '/_app/threads': typeof AppThreadsRouteWithChildren
   '/_app/traces': typeof AppTracesRouteWithChildren
   '/_app/': typeof AppIndexRoute
+  '/_app/admin/metrics': typeof AppAdminMetricsRoute
+  '/_app/admin/users': typeof AppAdminUsersRoute
   '/_app/assistants/$assistantId': typeof AppAssistantsAssistantIdRoute
   '/_app/runs/$runId': typeof AppRunsRunIdRoute
   '/_app/threads/$threadId': typeof AppThreadsThreadIdRoute
   '/_app/traces/$traceId': typeof AppTracesTraceIdRoute
+  '/_app/admin/': typeof AppAdminIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/admin'
     | '/analytics'
     | '/assistants'
     | '/costs'
@@ -154,10 +190,13 @@ export interface FileRouteTypes {
     | '/threads'
     | '/traces'
     | '/'
+    | '/admin/metrics'
+    | '/admin/users'
     | '/assistants/$assistantId'
     | '/runs/$runId'
     | '/threads/$threadId'
     | '/traces/$traceId'
+    | '/admin/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/analytics'
@@ -169,13 +208,17 @@ export interface FileRouteTypes {
     | '/threads'
     | '/traces'
     | '/'
+    | '/admin/metrics'
+    | '/admin/users'
     | '/assistants/$assistantId'
     | '/runs/$runId'
     | '/threads/$threadId'
     | '/traces/$traceId'
+    | '/admin'
   id:
     | '__root__'
     | '/_app'
+    | '/_app/admin'
     | '/_app/analytics'
     | '/_app/assistants'
     | '/_app/costs'
@@ -185,10 +228,13 @@ export interface FileRouteTypes {
     | '/_app/threads'
     | '/_app/traces'
     | '/_app/'
+    | '/_app/admin/metrics'
+    | '/_app/admin/users'
     | '/_app/assistants/$assistantId'
     | '/_app/runs/$runId'
     | '/_app/threads/$threadId'
     | '/_app/traces/$traceId'
+    | '/_app/admin/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -267,6 +313,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAnalyticsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/admin': {
+      id: '/_app/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/admin/': {
+      id: '/_app/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AppAdminIndexRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/_app/traces/$traceId': {
       id: '/_app/traces/$traceId'
       path: '/$traceId'
@@ -295,8 +355,38 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAssistantsAssistantIdRouteImport
       parentRoute: typeof AppAssistantsRoute
     }
+    '/_app/admin/users': {
+      id: '/_app/admin/users'
+      path: '/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AppAdminUsersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/_app/admin/metrics': {
+      id: '/_app/admin/metrics'
+      path: '/metrics'
+      fullPath: '/admin/metrics'
+      preLoaderRoute: typeof AppAdminMetricsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
   }
 }
+
+interface AppAdminRouteChildren {
+  AppAdminMetricsRoute: typeof AppAdminMetricsRoute
+  AppAdminUsersRoute: typeof AppAdminUsersRoute
+  AppAdminIndexRoute: typeof AppAdminIndexRoute
+}
+
+const AppAdminRouteChildren: AppAdminRouteChildren = {
+  AppAdminMetricsRoute: AppAdminMetricsRoute,
+  AppAdminUsersRoute: AppAdminUsersRoute,
+  AppAdminIndexRoute: AppAdminIndexRoute,
+}
+
+const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
+  AppAdminRouteChildren,
+)
 
 interface AppAssistantsRouteChildren {
   AppAssistantsAssistantIdRoute: typeof AppAssistantsAssistantIdRoute
@@ -346,6 +436,7 @@ const AppTracesRouteWithChildren = AppTracesRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
+  AppAdminRoute: typeof AppAdminRouteWithChildren
   AppAnalyticsRoute: typeof AppAnalyticsRoute
   AppAssistantsRoute: typeof AppAssistantsRouteWithChildren
   AppCostsRoute: typeof AppCostsRoute
@@ -358,6 +449,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAdminRoute: AppAdminRouteWithChildren,
   AppAnalyticsRoute: AppAnalyticsRoute,
   AppAssistantsRoute: AppAssistantsRouteWithChildren,
   AppCostsRoute: AppCostsRoute,
