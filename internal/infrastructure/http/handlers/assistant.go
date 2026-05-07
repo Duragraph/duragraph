@@ -8,6 +8,7 @@ import (
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/dto"
+	"github.com/duragraph/duragraph/internal/infrastructure/http/middleware"
 	"github.com/labstack/echo/v4"
 )
 
@@ -79,8 +80,14 @@ func (h *AssistantHandler) Create(c echo.Context) error {
 		})
 	}
 
+	// Resolve tenant_id from middleware-populated context. Empty string
+	// (single-tenant mode / no TenantMiddleware) is forwarded as-is to
+	// drive the unscoped "" series in metrics.
+	tenantID, _ := middleware.TenantIDFromCtx(c)
+
 	// Create assistant
 	assistantID, err := h.createHandler.Handle(c.Request().Context(), command.CreateAssistant{
+		TenantID:     tenantID,
 		GraphID:      req.GraphID,
 		Name:         req.Name,
 		Description:  req.Description,
@@ -216,7 +223,9 @@ func (h *AssistantHandler) Update(c echo.Context) error {
 func (h *AssistantHandler) Delete(c echo.Context) error {
 	assistantID := c.Param("assistant_id")
 
+	tenantID, _ := middleware.TenantIDFromCtx(c)
 	cmd := command.DeleteAssistantCommand{
+		TenantID:    tenantID,
 		AssistantID: assistantID,
 	}
 

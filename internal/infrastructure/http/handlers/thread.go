@@ -8,6 +8,7 @@ import (
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/dto"
+	"github.com/duragraph/duragraph/internal/infrastructure/http/middleware"
 	"github.com/labstack/echo/v4"
 )
 
@@ -56,8 +57,13 @@ func (h *ThreadHandler) Create(c echo.Context) error {
 		})
 	}
 
+	// Resolve tenant_id from middleware-populated context. Empty string
+	// (single-tenant mode / no TenantMiddleware) is forwarded as-is.
+	tenantID, _ := middleware.TenantIDFromCtx(c)
+
 	// Create thread
 	threadID, err := h.createHandler.Handle(c.Request().Context(), command.CreateThread{
+		TenantID: tenantID,
 		Metadata: req.Metadata,
 	})
 
@@ -223,7 +229,9 @@ func (h *ThreadHandler) AddMessage(c echo.Context) error {
 func (h *ThreadHandler) Delete(c echo.Context) error {
 	threadID := c.Param("thread_id")
 
+	tenantID, _ := middleware.TenantIDFromCtx(c)
 	cmd := command.DeleteThreadCommand{
+		TenantID: tenantID,
 		ThreadID: threadID,
 	}
 

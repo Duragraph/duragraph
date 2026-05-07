@@ -272,6 +272,23 @@ func main() {
 		verifier = v
 	}
 
+	// Initialize Prometheus metrics. Hoisted above the platformEnabled
+	// block so the per-tenant gauge bootstrap (bootstrapTenantMetrics)
+	// can seed AssistantsTotal/ThreadsTotal from the DB at startup —
+	// otherwise those gauges start at 0 on every restart and the first
+	// delete after restart can produce a negative value.
+	metrics := monitoring.NewMetrics("duragraph")
+
+	// Register DB pool collectors for Prometheus
+	writePoolCollector := monitoring.NewDBPoolCollector(pools.Write, "duragraph", "write")
+	prometheus.MustRegister(writePoolCollector)
+	if pools.Read != pools.Write {
+		readPoolCollector := monitoring.NewDBPoolCollector(pools.Read, "duragraph", "read")
+		prometheus.MustRegister(readPoolCollector)
+	}
+
+	fmt.Println("✅ Prometheus metrics + DB pool collectors registered")
+
 	if platformEnabled {
 		platformConfig := postgres.Config{
 			Host:     cfg.Database.Host,
@@ -433,6 +450,16 @@ func main() {
 			}
 		}()
 		fmt.Println("✅ Tenant provisioner JetStream subscriber started (durable: tenant-provisioner)")
+
+		// Seed per-tenant assistants_total / threads_total gauges from
+		// the DB before the HTTP server starts. Otherwise those gauges
+		// start at 0 on every restart and the first delete after
+		// restart can produce a negative value. Per-tenant errors are
+		// logged + skipped so a single broken tenant DB doesn't block
+		// engine startup.
+		if err := bootstrapTenantMetrics(ctx, writeConfig, tenantRepo, metrics, log.Default()); err != nil {
+			log.Printf("metrics bootstrap returned error: %v (engine continues)", err)
+		}
 	}
 
 	// Start cleanup worker
@@ -511,19 +538,6 @@ func main() {
 		}
 	}()
 
-	// Initialize Prometheus metrics
-	metrics := monitoring.NewMetrics("duragraph")
-
-	// Register DB pool collectors for Prometheus
-	writePoolCollector := monitoring.NewDBPoolCollector(pools.Write, "duragraph", "write")
-	prometheus.MustRegister(writePoolCollector)
-	if pools.Read != pools.Write {
-		readPoolCollector := monitoring.NewDBPoolCollector(pools.Read, "duragraph", "read")
-		prometheus.MustRegister(readPoolCollector)
-	}
-
-	fmt.Println("✅ Prometheus metrics + DB pool collectors registered")
-
 	// Initialize tool registry with built-in tools
 	toolRegistry := tools.NewRegistry()
 	if err := tools.RegisterBuiltinTools(toolRegistry); err != nil {
@@ -548,10 +562,10 @@ func main() {
 	createRunHandler := command.NewCreateRunHandler(runRepo)
 	submitToolOutputsHandler := command.NewSubmitToolOutputsHandler(runRepo, interruptRepo)
 	deleteRunHandler := command.NewDeleteRunHandler(runRepo)
-	createAssistantHandler := command.NewCreateAssistantHandler(assistantRepo)
+	createAssistantHandler := command.NewCreateAssistantHandler(assistantRepo, metrics)
 	updateAssistantHandler := command.NewUpdateAssistantHandler(assistantRepo)
-	deleteAssistantHandler := command.NewDeleteAssistantHandler(assistantRepo)
-	createThreadHandler := command.NewCreateThreadHandler(threadRepo)
+	deleteAssistantHandler := command.NewDeleteAssistantHandler(assistantRepo, metrics)
+	createThreadHandler := command.NewCreateThreadHandler(threadRepo, metrics)
 	updateThreadHandler := command.NewUpdateThreadHandler(threadRepo)
 	addMessageHandler := command.NewAddMessageHandler(threadRepo)
 
@@ -566,7 +580,7 @@ func main() {
 	listThreadsHandler := query.NewListThreadsHandler(threadRepo)
 	searchThreadsHandler := query.NewSearchThreadsHandler(threadRepo)
 	countThreadsHandler := query.NewCountThreadsHandler(threadRepo)
-	deleteThreadHandler := command.NewDeleteThreadHandler(threadRepo)
+	deleteThreadHandler := command.NewDeleteThreadHandler(threadRepo, metrics)
 
 	// Initialize checkpoint handlers
 	getThreadStateHandler := query.NewGetThreadStateHandler(checkpointRepo)
