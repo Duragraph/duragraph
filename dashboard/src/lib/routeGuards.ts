@@ -1,10 +1,19 @@
 /**
  * Route guards for TanStack Router.
  *
- * These run synchronously in `beforeLoad`. They read engine capabilities from
- * the QueryClient cache populated by `<CapabilitiesProvider>` at app boot.
- * Attach them to admin-only routes to redirect users away from features that
- * are unavailable in the current engine mode.
+ * These run in `beforeLoad`, BEFORE child components mount. They cannot rely
+ * on `<CapabilitiesProvider>` having already populated the query cache —
+ * that provider only runs once the route's component subtree mounts, which
+ * is *after* `beforeLoad`. Cold loads / deep links / page refreshes hit
+ * empty cache.
+ *
+ * We use `queryClient.ensureQueryData` so the guard:
+ *   - returns cached capabilities if present (warm in-app navigation), or
+ *   - fires the query and awaits it (cold load), or
+ *   - rethrows on fetch failure (TanStack Router surfaces it).
+ *
+ * The query key + queryFn + staleTime: Infinity must match `useCapabilities`
+ * so both code paths share the same query identity in the cache.
  *
  * Usage in a route file:
  *   import { adminOnlyGuard } from '@/lib/routeGuards'
@@ -15,19 +24,24 @@
  */
 
 import { redirect } from "@tanstack/react-router"
-import type { Capabilities } from "@/api/info"
+import { fetchInfo, type Capabilities } from "@/api/info"
 import { CAPABILITIES_QUERY_KEY } from "@/hooks/useCapabilities"
 import { queryClient } from "@/lib/queryClient"
 
 /**
  * adminOnlyGuard redirects to "/" when the engine is not in multi-tenant mode.
  *
- * Reads from the QueryClient cache; does not fetch. Safe to use synchronously
- * because `<CapabilitiesProvider>` blocks rendering until data is populated.
+ * Async: uses `ensureQueryData` so it works on cold load (deep link / refresh)
+ * before `<CapabilitiesProvider>` mounts. TanStack Router's `beforeLoad`
+ * accepts async functions and awaits them.
  */
-export function adminOnlyGuard() {
-  const caps = queryClient.getQueryData<Capabilities>(CAPABILITIES_QUERY_KEY)
-  if (!caps?.platformEnabled) {
+export async function adminOnlyGuard() {
+  const caps = await queryClient.ensureQueryData<Capabilities>({
+    queryKey: CAPABILITIES_QUERY_KEY,
+    queryFn: fetchInfo,
+    staleTime: Infinity,
+  })
+  if (!caps.platformEnabled) {
     throw redirect({ to: "/" })
   }
 }
