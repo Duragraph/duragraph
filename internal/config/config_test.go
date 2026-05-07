@@ -19,13 +19,18 @@ func TestLoad_Defaults(t *testing.T) {
 	os.Unsetenv("DB_NAME")
 	os.Unsetenv("DB_SSLMODE")
 	os.Unsetenv("NATS_URL")
+	os.Unsetenv("NATS_MODE")
 	os.Unsetenv("DB_READ_HOST")
+	os.Unsetenv("MIGRATOR_PLATFORM_ENABLED")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	if cfg.NATS.Mode != "external" {
+		t.Errorf("default NATS mode: got %q, want external", cfg.NATS.Mode)
+	}
 	if cfg.Server.Port != 8080 {
 		t.Errorf("default port: got %d, want 8080", cfg.Server.Port)
 	}
@@ -380,6 +385,237 @@ func TestLoad_InvalidPort(t *testing.T) {
 
 	if cfg.Server.Port != 8080 {
 		t.Errorf("invalid PORT should fall back to default: got %d", cfg.Server.Port)
+	}
+}
+
+// TestLoad_EmbeddedNATSDefaults verifies that NATS_MODE=embedded picks
+// up the spec-defined defaults: 127.0.0.1, port 4222, monitoring off,
+// and the XDG-derived data directory.
+func TestLoad_EmbeddedNATSDefaults(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	// Unset everything else so we observe the embedded defaults rather
+	// than carry-over from the surrounding process env.
+	os.Unsetenv("NATS_URL")
+	os.Unsetenv("NATS_EMBEDDED_PORT")
+	os.Unsetenv("NATS_EMBEDDED_DATA_DIR")
+	os.Unsetenv("NATS_EMBEDDED_MONITOR_PORT")
+	os.Unsetenv("NATS_EMBEDDED_START_TIMEOUT")
+	os.Unsetenv("MIGRATOR_PLATFORM_ENABLED")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.NATS.Mode; got != "embedded" {
+		t.Errorf("Mode: got %q, want embedded", got)
+	}
+	if got := cfg.NATS.EmbeddedPort; got != 4222 {
+		t.Errorf("EmbeddedPort: got %d, want 4222", got)
+	}
+	if got := cfg.NATS.URL; got != "nats://127.0.0.1:4222" {
+		t.Errorf("URL: got %q, want nats://127.0.0.1:4222 (forced in embedded mode)", got)
+	}
+	if got := cfg.NATS.EmbeddedMonitorPort; got != 0 {
+		t.Errorf("EmbeddedMonitorPort: got %d, want 0 (disabled by default)", got)
+	}
+	if cfg.NATS.EmbeddedDataDir == "" {
+		t.Error("EmbeddedDataDir should default to <XDGDataHome>/duragraph/nats")
+	}
+	if !filepath.IsAbs(cfg.NATS.EmbeddedDataDir) {
+		t.Errorf("EmbeddedDataDir should be absolute: got %q", cfg.NATS.EmbeddedDataDir)
+	}
+	wantSuffix := filepath.Join("duragraph", "nats")
+	gotSuffix := filepath.Base(filepath.Dir(cfg.NATS.EmbeddedDataDir)) +
+		string(filepath.Separator) + filepath.Base(cfg.NATS.EmbeddedDataDir)
+	if gotSuffix != wantSuffix {
+		t.Errorf("EmbeddedDataDir suffix: got suffix %q, want suffix %q (full path %q)",
+			gotSuffix, wantSuffix, cfg.NATS.EmbeddedDataDir)
+	}
+	if got := cfg.NATS.EmbeddedStartTimeout; got != 10*time.Second {
+		t.Errorf("EmbeddedStartTimeout: got %v, want 10s", got)
+	}
+}
+
+// TestLoad_EmbeddedNATSForcesURL enforces the silent-mode-change
+// guardrail in binary-modes.yml: when NATS_MODE=embedded, an operator's
+// stale NATS_URL must NOT leak through. The engine has to dial its own
+// in-process server.
+func TestLoad_EmbeddedNATSForcesURL(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	t.Setenv("NATS_URL", "nats://should-be-ignored.example.com:4222")
+	t.Setenv("NATS_EMBEDDED_PORT", "4223")
+	os.Unsetenv("MIGRATOR_PLATFORM_ENABLED")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.NATS.URL; got != "nats://127.0.0.1:4223" {
+		t.Errorf("URL should be forced to nats://127.0.0.1:4223 in embedded mode, got %q", got)
+	}
+	if got := cfg.NATS.EmbeddedPort; got != 4223 {
+		t.Errorf("EmbeddedPort: got %d, want 4223", got)
+	}
+}
+
+// TestLoad_EmbeddedNATSDataDirOverride verifies NATS_EMBEDDED_DATA_DIR
+// wins over the XDG-derived default.
+func TestLoad_EmbeddedNATSDataDirOverride(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	t.Setenv("NATS_EMBEDDED_DATA_DIR", "/var/lib/duragraph-nats")
+	os.Unsetenv("MIGRATOR_PLATFORM_ENABLED")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.NATS.EmbeddedDataDir; got != "/var/lib/duragraph-nats" {
+		t.Errorf("EmbeddedDataDir: got %q, want /var/lib/duragraph-nats", got)
+	}
+}
+
+// TestLoad_EmbeddedNATSMonitorPort verifies that opting into the
+// HTTP /varz monitor port plumbs through correctly.
+func TestLoad_EmbeddedNATSMonitorPort(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	t.Setenv("NATS_EMBEDDED_MONITOR_PORT", "8222")
+	os.Unsetenv("MIGRATOR_PLATFORM_ENABLED")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.NATS.EmbeddedMonitorPort; got != 8222 {
+		t.Errorf("EmbeddedMonitorPort: got %d, want 8222", got)
+	}
+}
+
+// TestLoad_EmbeddedNATSStartTimeoutOverride verifies that
+// NATS_EMBEDDED_START_TIMEOUT (Go duration syntax) plumbs through.
+func TestLoad_EmbeddedNATSStartTimeoutOverride(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	t.Setenv("NATS_EMBEDDED_START_TIMEOUT", "30s")
+	os.Unsetenv("MIGRATOR_PLATFORM_ENABLED")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.NATS.EmbeddedStartTimeout; got != 30*time.Second {
+		t.Errorf("EmbeddedStartTimeout: got %v, want 30s", got)
+	}
+}
+
+// TestLoad_RejectsBadNATSMode covers the same DB_MODE typo guard for
+// NATS_MODE. Silent fall-through to "external" on a typo violates
+// binary-modes.yml § no_silent_mode_changes.
+func TestLoad_RejectsBadNATSMode(t *testing.T) {
+	t.Setenv("NATS_MODE", "embeddd")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatalf("expected error for NATS_MODE=embeddd, got cfg=%+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "NATS_MODE") {
+		t.Errorf("error should mention NATS_MODE, got: %v", err)
+	}
+}
+
+// TestLoad_RejectsBadNATSPort covers the out-of-range port guard for
+// NATS_EMBEDDED_PORT. Same reasoning as DB_EMBEDDED_PORT — typos like
+// 70000 must fail at startup, not silently wrap or bind to a wrong
+// port.
+func TestLoad_RejectsBadNATSPort(t *testing.T) {
+	cases := []struct {
+		name string
+		port string
+	}{
+		{"zero", "0"},
+		{"negative", "-1"},
+		{"too-large", "70000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NATS_MODE", "embedded")
+			t.Setenv("NATS_EMBEDDED_PORT", tc.port)
+			os.Unsetenv("MIGRATOR_PLATFORM_ENABLED")
+
+			cfg, err := Load()
+			if err == nil {
+				t.Fatalf("expected error for NATS_EMBEDDED_PORT=%s, got cfg=%+v", tc.port, cfg)
+			}
+			if !strings.Contains(err.Error(), "NATS_EMBEDDED_PORT") {
+				t.Errorf("error should mention NATS_EMBEDDED_PORT, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoad_RejectsBadNATSMonitorPort verifies that an out-of-range
+// monitor port (when opted in) is rejected, but that the 0 sentinel
+// (disabled, the spec default) is NOT — those are exercised by other
+// tests above.
+func TestLoad_RejectsBadNATSMonitorPort(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	t.Setenv("NATS_EMBEDDED_MONITOR_PORT", "70000")
+	os.Unsetenv("MIGRATOR_PLATFORM_ENABLED")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatalf("expected error for NATS_EMBEDDED_MONITOR_PORT=70000, got cfg=%+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "NATS_EMBEDDED_MONITOR_PORT") {
+		t.Errorf("error should mention NATS_EMBEDDED_MONITOR_PORT, got: %v", err)
+	}
+}
+
+// TestLoad_RejectsEmbeddedNATSWithMultitenant verifies the multitenant
+// constraint from binary-modes.yml § nats_jetstream.multitenant_constraint:
+// embedded NATS does not support operator-JWT, so the combination of
+// NATS_MODE=embedded + MIGRATOR_PLATFORM_ENABLED=true must be refused
+// at startup with a clear pointer at the resolution.
+func TestLoad_RejectsEmbeddedNATSWithMultitenant(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	t.Setenv("MIGRATOR_PLATFORM_ENABLED", "true")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatalf("expected error for embedded NATS + multitenant, got cfg=%+v", cfg)
+	}
+	// The error message should mention the actual remediation paths so
+	// an operator immediately knows whether to flip NATS_MODE or unset
+	// MIGRATOR_PLATFORM_ENABLED.
+	for _, want := range []string{"NATS_MODE=external", "MIGRATOR_PLATFORM_ENABLED"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestLoad_ExternalNATSWithMultitenantAllowed is the defensive inverse:
+// the multitenant guard is mode-specific, NOT a blanket prohibition.
+// External NATS + MIGRATOR_PLATFORM_ENABLED=true must continue to work
+// (it's the canonical platform-mode deployment shape).
+func TestLoad_ExternalNATSWithMultitenantAllowed(t *testing.T) {
+	t.Setenv("NATS_MODE", "external")
+	t.Setenv("MIGRATOR_PLATFORM_ENABLED", "true")
+	t.Setenv("NATS_URL", "nats://prod-nats:4222")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.NATS.Mode; got != "external" {
+		t.Errorf("Mode: got %q, want external", got)
+	}
+	if got := cfg.NATS.URL; got != "nats://prod-nats:4222" {
+		t.Errorf("URL: got %q, want nats://prod-nats:4222 (external mode preserves NATS_URL)", got)
 	}
 }
 

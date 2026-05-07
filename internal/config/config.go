@@ -59,9 +59,38 @@ type DatabaseConfig struct {
 	EmbeddedStartTimeout time.Duration
 }
 
-// NATSConfig holds NATS configuration
+// NATSConfig holds NATS configuration.
+//
+// Mode controls whether the engine connects to an externally provisioned
+// NATS server ("external", default — preserves legacy behaviour) or
+// spawns an embedded NATS server (with JetStream) in-process as a
+// goroutine ("embedded", per binary-modes.yml § embedded_components.nats_jetstream).
+//
+// When Mode == "embedded", URL is forced to nats://127.0.0.1:<EmbeddedPort>
+// so the existing publisher / subscriber / task-queue wiring (which all
+// consume cfg.NATS.URL) transparently dial the in-process server. This
+// is the same "force coordinates" pattern DatabaseConfig uses in
+// embedded mode (see binary-modes.yml § no_silent_mode_changes).
+//
+// Multitenant constraint: embedded NATS does NOT support operator-JWT
+// mode in any clean way (operator JWT signing keys are an out-of-band
+// setup). When MIGRATOR_PLATFORM_ENABLED=true the binary refuses to
+// start with NATS_MODE=embedded — the operator must point at an
+// externally provisioned NATS with operator-JWT configured.
 type NATSConfig struct {
-	URL string
+	Mode string // "external" (default) | "embedded"
+	URL  string
+
+	EmbeddedPort        int    // only meaningful when Mode == "embedded"
+	EmbeddedDataDir     string // JetStream store directory
+	EmbeddedMonitorPort int    // 0 = disabled (default per spec); otherwise HTTP /varz port
+
+	// EmbeddedStartTimeout caps how long the embedded NATS server has
+	// to become ready for client connections before Start() errors out.
+	// Defaults to 10s — embedded NATS starts quickly (sub-second on a
+	// warm cache), 10s is comfortable headroom even on slow CI runners.
+	// Override via NATS_EMBEDDED_START_TIMEOUT (Go duration syntax).
+	EmbeddedStartTimeout time.Duration
 }
 
 // Default values for embedded mode. Defined as constants so tests can
@@ -74,6 +103,14 @@ const (
 	defaultEmbeddedVersion      = "15" // matches prod-postgres major
 	defaultEmbeddedDBName       = "duragraph"
 	defaultEmbeddedStartTimeout = 60 * time.Second
+
+	// NATS-specific embedded defaults. 4222 is the canonical NATS
+	// client port. Monitor port intentionally defaults to 0 (disabled)
+	// per binary-modes.yml § nats_jetstream.port — the HTTP /varz
+	// endpoint is a security surface and the embedded mode is opt-in
+	// for ops who explicitly want it.
+	defaultNATSEmbeddedPort         = 4222
+	defaultNATSEmbeddedStartTimeout = 10 * time.Second
 )
 
 // defaultEmbeddedUser / defaultEmbeddedPassword / defaultEmbeddedDatabase
@@ -176,15 +213,72 @@ func Load() (*Config, error) {
 		}
 	}
 
+	natsMode := getEnv("NATS_MODE", "external")
+	if natsMode != "external" && natsMode != "embedded" {
+		return nil, fmt.Errorf("NATS_MODE must be 'external' or 'embedded', got %q", natsMode)
+	}
+
+	natsCfg := NATSConfig{
+		Mode: natsMode,
+		URL:  getEnv("NATS_URL", "nats://localhost:4222"),
+	}
+
+	if natsMode == "embedded" {
+		// Multitenant constraint (binary-modes.yml § nats_jetstream.multitenant_constraint).
+		// Embedded NATS does NOT support operator-JWT signing in any clean
+		// way — it requires out-of-band signing keys. Tenant isolation in
+		// platform mode depends on operator-JWT, so the combination is
+		// refused at startup with a clear pointer at the resolution
+		// (NATS_MODE=external, OR drop MIGRATOR_PLATFORM_ENABLED).
+		if os.Getenv("MIGRATOR_PLATFORM_ENABLED") == "true" {
+			return nil, fmt.Errorf(
+				"multitenant mode requires external NATS (operator-JWT). " +
+					"Set NATS_MODE=external or unset MIGRATOR_PLATFORM_ENABLED",
+			)
+		}
+
+		natsCfg.EmbeddedPort = getEnvInt("NATS_EMBEDDED_PORT", defaultNATSEmbeddedPort)
+		natsCfg.EmbeddedDataDir = getEnv(
+			"NATS_EMBEDDED_DATA_DIR",
+			filepath.Join(XDGDataHome(), "duragraph", "nats"),
+		)
+		// 0 keeps monitoring off (spec default). Operators opt in by
+		// setting NATS_EMBEDDED_MONITOR_PORT to a non-zero port.
+		natsCfg.EmbeddedMonitorPort = getEnvInt("NATS_EMBEDDED_MONITOR_PORT", 0)
+		natsCfg.EmbeddedStartTimeout = getEnvDuration(
+			"NATS_EMBEDDED_START_TIMEOUT", defaultNATSEmbeddedStartTimeout,
+		)
+
+		// Validate port range BEFORE downstream code uses it. Same
+		// reasoning as DB_EMBEDDED_PORT — catch typos like
+		// NATS_EMBEDDED_PORT=70000 at startup.
+		if natsCfg.EmbeddedPort < 1 || natsCfg.EmbeddedPort > 65535 {
+			return nil, fmt.Errorf("NATS_EMBEDDED_PORT must be in 1..65535, got %d", natsCfg.EmbeddedPort)
+		}
+		// 0 is a valid sentinel (disabled); only validate when the
+		// operator opted in.
+		if natsCfg.EmbeddedMonitorPort != 0 &&
+			(natsCfg.EmbeddedMonitorPort < 1 || natsCfg.EmbeddedMonitorPort > 65535) {
+			return nil, fmt.Errorf(
+				"NATS_EMBEDDED_MONITOR_PORT must be 0 (disabled) or in 1..65535, got %d",
+				natsCfg.EmbeddedMonitorPort)
+		}
+
+		// Force URL so every downstream reader of cfg.NATS.URL (publisher,
+		// subscriber, JetStreamSubscriber, task queue) transparently dials
+		// the in-process server without per-site mode checks. Done in
+		// Load() rather than at the call site for the same reason
+		// DatabaseConfig forces Host/Port.
+		natsCfg.URL = fmt.Sprintf("nats://127.0.0.1:%d", natsCfg.EmbeddedPort)
+	}
+
 	cfg := &Config{
 		Server: ServerConfig{
 			Port: getEnvInt("PORT", 8080),
 			Host: getEnv("HOST", "0.0.0.0"),
 		},
 		Database: dbCfg,
-		NATS: NATSConfig{
-			URL: getEnv("NATS_URL", "nats://localhost:4222"),
-		},
+		NATS:     natsCfg,
 	}
 
 	if readHost := os.Getenv("DB_READ_HOST"); readHost != "" {

@@ -138,6 +138,57 @@ func runServe(_ *cobra.Command, _ []string) error {
 			cfg.Database.EmbeddedPort, cfg.Database.EmbeddedDataDir)
 	}
 
+	// Embedded NATS (binary-modes.yml § embedded_components.nats_jetstream).
+	//
+	// When NATS_MODE=embedded, run a real NATS server (with JetStream
+	// enabled) in-process as a goroutine BEFORE any nats.Publisher /
+	// Subscriber / TaskQueue is constructed. config.Load already forced
+	// cfg.NATS.URL to nats://127.0.0.1:<port>, so the existing wiring
+	// downstream picks up the embedded coordinates without further
+	// plumbing.
+	//
+	// Defer ordering matters here. This defer is registered BEFORE the
+	// publisher/subscriber/taskQueue defers below. LIFO unwind on
+	// shutdown is therefore: taskQueue.Close → subscriber.Close →
+	// publisher.Close → pgxpool close → embedded NATS Stop → embedded
+	// Postgres Stop. Clients drain before the server they're attached
+	// to shuts down. Reversing this would tear down the NATS server
+	// while clients still hold connections, producing noisy errors at
+	// best and dropped messages at worst.
+	//
+	// Multitenant guard already triggered in config.Load — by the time
+	// we reach this branch we know MIGRATOR_PLATFORM_ENABLED is not
+	// set (or NATS_MODE is "external"). No second check needed here.
+	//
+	// Loud startup print is mandated by spec § no_silent_mode_changes.
+	if cfg.NATS.Mode == "embedded" {
+		embeddedNATS, err := nats.NewEmbedded(nats.EmbeddedConfig{
+			Port:         cfg.NATS.EmbeddedPort,
+			DataDir:      cfg.NATS.EmbeddedDataDir,
+			MonitorPort:  cfg.NATS.EmbeddedMonitorPort,
+			StartTimeout: cfg.NATS.EmbeddedStartTimeout,
+		})
+		if err != nil {
+			return fmt.Errorf("embedded nats construct: %w", err)
+		}
+		monitorMsg := "monitoring disabled"
+		if cfg.NATS.EmbeddedMonitorPort > 0 {
+			monitorMsg = fmt.Sprintf("monitor port %d", cfg.NATS.EmbeddedMonitorPort)
+		}
+		fmt.Printf("⏳ Starting embedded NATS on 127.0.0.1:%d (data: %s, %s)\n",
+			cfg.NATS.EmbeddedPort, cfg.NATS.EmbeddedDataDir, monitorMsg)
+		if err := embeddedNATS.Start(ctx); err != nil {
+			return fmt.Errorf("embedded nats start: %w", err)
+		}
+		defer func() {
+			if err := embeddedNATS.Stop(context.Background()); err != nil {
+				log.Printf("embedded nats stop: %v", err)
+			}
+		}()
+		fmt.Printf("✅ Embedded NATS started on 127.0.0.1:%d (data: %s)\n",
+			cfg.NATS.EmbeddedPort, cfg.NATS.EmbeddedDataDir)
+	}
+
 	// Initialize OpenTelemetry tracing (opt-in via OTEL_ENABLED)
 	if os.Getenv("OTEL_ENABLED") == "true" {
 		shutdownTracer, err := tracing.Init(ctx, "duragraph-server", version)
