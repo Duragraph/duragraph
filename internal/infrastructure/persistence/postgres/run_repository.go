@@ -242,7 +242,8 @@ func (r *RunRepository) FindAll(ctx context.Context, limit, offset int) ([]*run.
 // FindByThreadID retrieves runs for a specific thread
 func (r *RunRepository) FindByThreadID(ctx context.Context, threadID string, limit, offset int) ([]*run.Run, error) {
 	rows, err := r.readPool.Query(ctx, `
-		SELECT id, thread_id, assistant_id, status, input, metadata, created_at
+		SELECT id, thread_id, assistant_id, status, input, output, error, metadata,
+		       created_at, started_at, completed_at, updated_at
 		FROM runs
 		WHERE thread_id = $1
 		ORDER BY created_at DESC
@@ -257,21 +258,45 @@ func (r *RunRepository) FindByThreadID(ctx context.Context, threadID string, lim
 	runs := make([]*run.Run, 0)
 
 	for rows.Next() {
-		var runID, threadID, assistantID, status string
-		var inputJSON, metadataJSON []byte
-		var createdAt time.Time
+		var runID, tID, assistantID, status string
+		var errorMsg *string
+		var inputJSON, outputJSON, metadataJSON []byte
+		var createdAt, updatedAt time.Time
+		var startedAt, completedAt *time.Time
 
-		err := rows.Scan(&runID, &threadID, &assistantID, &status, &inputJSON, &metadataJSON, &createdAt)
+		err := rows.Scan(
+			&runID, &tID, &assistantID, &status,
+			&inputJSON, &outputJSON, &errorMsg, &metadataJSON,
+			&createdAt, &startedAt, &completedAt, &updatedAt,
+		)
 		if err != nil {
 			return nil, errors.Internal("failed to scan run", err)
 		}
 
-		var input, metadata map[string]interface{}
+		var input, output, metadata map[string]interface{}
 		json.Unmarshal(inputJSON, &input)
+		json.Unmarshal(outputJSON, &output)
 		json.Unmarshal(metadataJSON, &metadata)
 
-		runAgg, _ := run.NewRun(threadID, assistantID, input)
-		runs = append(runs, runAgg)
+		errStr := ""
+		if errorMsg != nil {
+			errStr = *errorMsg
+		}
+
+		runs = append(runs, run.ReconstructFromData(run.RunData{
+			ID:          runID,
+			ThreadID:    tID,
+			AssistantID: assistantID,
+			Status:      status,
+			Input:       input,
+			Output:      output,
+			Error:       errStr,
+			Metadata:    metadata,
+			CreatedAt:   createdAt,
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			UpdatedAt:   updatedAt,
+		}))
 	}
 
 	return runs, nil
