@@ -677,6 +677,7 @@ func main() {
 	)
 	workerHandler := handlers.NewWorkerHandler(
 		workerService,
+		eventBus,
 		30*time.Second, // Health threshold
 		fmt.Sprintf("http://%s", cfg.ServerAddr()),
 	)

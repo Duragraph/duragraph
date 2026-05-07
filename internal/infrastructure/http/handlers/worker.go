@@ -6,22 +6,27 @@ import (
 	"time"
 
 	"github.com/duragraph/duragraph/internal/application/service"
+	"github.com/duragraph/duragraph/internal/domain/execution"
+	"github.com/duragraph/duragraph/internal/domain/run"
 	"github.com/duragraph/duragraph/internal/domain/worker"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/dto"
+	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 	"github.com/labstack/echo/v4"
 )
 
 // WorkerHandler handles worker-related HTTP requests
 type WorkerHandler struct {
 	workerService   *service.WorkerService
+	eventBus        *eventbus.EventBus
 	healthThreshold time.Duration
 	baseURL         string
 }
 
 // NewWorkerHandler creates a new WorkerHandler
-func NewWorkerHandler(workerService *service.WorkerService, healthThreshold time.Duration, baseURL string) *WorkerHandler {
+func NewWorkerHandler(workerService *service.WorkerService, eventBus *eventbus.EventBus, healthThreshold time.Duration, baseURL string) *WorkerHandler {
 	return &WorkerHandler{
 		workerService:   workerService,
+		eventBus:        eventBus,
 		healthThreshold: healthThreshold,
 		baseURL:         baseURL,
 	}
@@ -245,25 +250,115 @@ func (h *WorkerHandler) ReceiveEvent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	if req.EventType == "run_completed" || req.EventType == "run_failed" {
-		status := "success"
-		errMsg := ""
-		if req.EventType == "run_failed" {
-			status = "error"
-			if e, ok := req.Data["error"].(string); ok {
-				errMsg = e
-			}
+	ctx := c.Request().Context()
+	now := time.Now()
+
+	switch req.EventType {
+	case "run_started":
+		// Aggregate already transitioned to in_progress at dispatch; we
+		// just need to publish so SSE/streaming clients see the start.
+		if h.eventBus != nil {
+			h.eventBus.Publish(ctx, run.RunStarted{
+				RunID:      req.RunID,
+				OccurredAt: now,
+			})
 		}
 
+	case "run_requires_action":
+		// HITL pause. Translate to the aggregate transition AND publish
+		// so Studio's ApprovalDialog opens via the SSE stream.
+		if err := h.workerService.UpdateRunStatus(ctx, req.RunID, "requires_action", nil, ""); err != nil {
+			c.Logger().Warnf("failed to set run %s to requires_action: %v", req.RunID, err)
+		}
+		if h.eventBus != nil {
+			reason, _ := req.Data["action_type"].(string)
+			if reason == "" {
+				reason = "tool_call"
+			}
+			h.eventBus.Publish(ctx, run.RunRequiresAction{
+				RunID:       req.RunID,
+				InterruptID: stringFromData(req.Data, "interrupt_id"),
+				Reason:      reason,
+				OccurredAt:  now,
+			})
+		}
+
+	case "run_completed":
 		output, _ := req.Data["output"].(map[string]interface{})
-		if err := h.workerService.UpdateRunStatus(c.Request().Context(), req.RunID, status, output, errMsg); err != nil {
+		if err := h.workerService.UpdateRunStatus(ctx, req.RunID, "success", output, ""); err != nil {
 			c.Logger().Warnf("failed to update run status: %v", err)
+		}
+		if h.eventBus != nil {
+			h.eventBus.Publish(ctx, run.RunCompleted{
+				RunID:      req.RunID,
+				Output:     output,
+				OccurredAt: now,
+			})
+		}
+
+	case "run_failed":
+		errMsg, _ := req.Data["error"].(string)
+		if err := h.workerService.UpdateRunStatus(ctx, req.RunID, "error", nil, errMsg); err != nil {
+			c.Logger().Warnf("failed to update run status: %v", err)
+		}
+		if h.eventBus != nil {
+			h.eventBus.Publish(ctx, run.RunFailed{
+				RunID:      req.RunID,
+				Error:      errMsg,
+				OccurredAt: now,
+			})
+		}
+
+	case "node_started":
+		if h.eventBus != nil {
+			input, _ := req.Data["input"].(map[string]interface{})
+			h.eventBus.Publish(ctx, execution.NodeStarted{
+				RunID:      req.RunID,
+				NodeID:     stringFromData(req.Data, "node_id"),
+				NodeType:   stringFromData(req.Data, "node_type"),
+				Input:      input,
+				OccurredAt: now,
+			})
+		}
+
+	case "node_completed":
+		if h.eventBus != nil {
+			output, _ := req.Data["output"].(map[string]interface{})
+			h.eventBus.Publish(ctx, execution.NodeCompleted{
+				RunID:      req.RunID,
+				NodeID:     stringFromData(req.Data, "node_id"),
+				NodeType:   stringFromData(req.Data, "node_type"),
+				Output:     output,
+				OccurredAt: now,
+			})
+		}
+
+	case "node_failed":
+		if h.eventBus != nil {
+			errMsg, _ := req.Data["error"].(string)
+			input, _ := req.Data["input"].(map[string]interface{})
+			h.eventBus.Publish(ctx, execution.NodeFailed{
+				RunID:      req.RunID,
+				NodeID:     stringFromData(req.Data, "node_id"),
+				NodeType:   stringFromData(req.Data, "node_type"),
+				Error:      errMsg,
+				Input:      input,
+				OccurredAt: now,
+			})
 		}
 	}
 
 	return c.JSON(http.StatusOK, dto.WorkerEventResponse{
 		Received: true,
 	})
+}
+
+// stringFromData safely extracts a string field from an event payload map.
+func stringFromData(data map[string]interface{}, key string) string {
+	if v, ok := data[key].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // GetGraphDefinition handles GET /workers/graphs/:graph_id
