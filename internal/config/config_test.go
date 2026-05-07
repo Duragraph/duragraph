@@ -3,7 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad_Defaults(t *testing.T) {
@@ -71,9 +73,11 @@ func TestLoad_EmbeddedDefaults(t *testing.T) {
 	os.Unsetenv("DB_USER")
 	os.Unsetenv("DB_PASSWORD")
 	os.Unsetenv("DB_NAME")
+	os.Unsetenv("DB_SSLMODE")
 	os.Unsetenv("DB_EMBEDDED_PORT")
 	os.Unsetenv("DB_EMBEDDED_DATA_DIR")
 	os.Unsetenv("DB_EMBEDDED_VERSION")
+	os.Unsetenv("DB_EMBEDDED_START_TIMEOUT")
 
 	cfg, err := Load()
 	if err != nil {
@@ -114,6 +118,15 @@ func TestLoad_EmbeddedDefaults(t *testing.T) {
 	if filepath.Base(filepath.Dir(cfg.Database.EmbeddedDataDir))+
 		string(filepath.Separator)+filepath.Base(cfg.Database.EmbeddedDataDir) != wantSuffix {
 		t.Errorf("EmbeddedDataDir suffix: got %q, want suffix %q", cfg.Database.EmbeddedDataDir, wantSuffix)
+	}
+	// Embedded mode must force SSLMode=disable regardless of the
+	// process default, since the embedded postgres has no SSL
+	// configured.
+	if got := cfg.Database.SSLMode; got != "disable" {
+		t.Errorf("SSLMode: got %q, want disable (forced in embedded mode)", got)
+	}
+	if got := cfg.Database.EmbeddedStartTimeout; got != 60*time.Second {
+		t.Errorf("EmbeddedStartTimeout: got %v, want 60s", got)
 	}
 }
 
@@ -167,6 +180,84 @@ func TestLoad_EmbeddedHonoursCredentialOverrides(t *testing.T) {
 	}
 	if got := cfg.Database.Database; got != "custom_db" {
 		t.Errorf("Database override should win: got %q", got)
+	}
+}
+
+// TestLoad_EmbeddedForcesSSLModeDisable verifies that an operator's
+// stale DB_SSLMODE=require (left over from external setup) does NOT
+// leak through to the embedded-mode connection. The embedded postgres
+// has no SSL configured, so anything but "disable" causes a confusing
+// "server does not support SSL" error at first connect.
+func TestLoad_EmbeddedForcesSSLModeDisable(t *testing.T) {
+	t.Setenv("DB_MODE", "embedded")
+	t.Setenv("DB_SSLMODE", "require")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Database.SSLMode; got != "disable" {
+		t.Errorf("SSLMode should be forced to 'disable' in embedded mode, got %q", got)
+	}
+}
+
+// TestLoad_EmbeddedStartTimeoutOverride verifies that
+// DB_EMBEDDED_START_TIMEOUT (Go duration syntax) plumbs through to
+// EmbeddedStartTimeout.
+func TestLoad_EmbeddedStartTimeoutOverride(t *testing.T) {
+	t.Setenv("DB_MODE", "embedded")
+	t.Setenv("DB_EMBEDDED_START_TIMEOUT", "90s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Database.EmbeddedStartTimeout; got != 90*time.Second {
+		t.Errorf("EmbeddedStartTimeout: got %v, want 90s", got)
+	}
+}
+
+// TestLoad_RejectsBadMode covers Fix 5: DB_MODE typos must fail loud
+// at startup rather than silently behaving like "external".
+func TestLoad_RejectsBadMode(t *testing.T) {
+	t.Setenv("DB_MODE", "embedd")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatalf("expected error for DB_MODE=embedd, got cfg=%+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "DB_MODE") {
+		t.Errorf("error should mention DB_MODE, got: %v", err)
+	}
+}
+
+// TestLoad_RejectsBadEmbeddedPort covers Fix 4: out-of-range
+// EmbeddedPort values must be rejected before downstream code casts to
+// uint32 (which would silently wrap negatives and >65535 values).
+func TestLoad_RejectsBadEmbeddedPort(t *testing.T) {
+	cases := []struct {
+		name string
+		port string
+	}{
+		{"zero", "0"},
+		{"negative", "-1"},
+		{"too-large", "70000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DB_MODE", "embedded")
+			t.Setenv("DB_EMBEDDED_PORT", tc.port)
+
+			cfg, err := Load()
+			if err == nil {
+				t.Fatalf("expected error for DB_EMBEDDED_PORT=%s, got cfg=%+v", tc.port, cfg)
+			}
+			if !strings.Contains(err.Error(), "DB_EMBEDDED_PORT") {
+				t.Errorf("error should mention DB_EMBEDDED_PORT, got: %v", err)
+			}
+		})
 	}
 }
 

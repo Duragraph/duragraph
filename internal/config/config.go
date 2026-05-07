@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // Config holds application configuration
@@ -49,6 +50,13 @@ type DatabaseConfig struct {
 	EmbeddedPort    int    // only meaningful when Mode == "embedded"
 	EmbeddedDataDir string // persistent data directory for embedded mode
 	EmbeddedVersion string // postgres major version, e.g. "15"
+
+	// EmbeddedStartTimeout caps how long the embedded postgres process
+	// has to become healthy before Start() errors out. Operator escape
+	// hatch for slow-disk CI runners or first-run binary downloads on
+	// poor links — bumped via DB_EMBEDDED_START_TIMEOUT (Go duration
+	// syntax, e.g. "90s", "2m"). Defaults to 60s.
+	EmbeddedStartTimeout time.Duration
 }
 
 // NATSConfig holds NATS configuration
@@ -62,9 +70,10 @@ type NATSConfig struct {
 // embedded server only listens on 127.0.0.1 and never holds production
 // data — the password is functionally a placeholder, not a secret.
 const (
-	defaultEmbeddedPort    = 5435
-	defaultEmbeddedVersion = "15" // matches prod-postgres major
-	defaultEmbeddedDBName  = "duragraph"
+	defaultEmbeddedPort         = 5435
+	defaultEmbeddedVersion      = "15" // matches prod-postgres major
+	defaultEmbeddedDBName       = "duragraph"
+	defaultEmbeddedStartTimeout = 60 * time.Second
 )
 
 // defaultEmbeddedUser / defaultEmbeddedPassword / defaultEmbeddedDatabase
@@ -100,6 +109,14 @@ func XDGDataHome() string {
 func Load() (*Config, error) {
 	mode := getEnv("DB_MODE", "external")
 
+	// Validate DB_MODE explicitly. Silent fall-through to "external" on a
+	// typo (e.g. DB_MODE=embedd) violates binary-modes.yml §
+	// no_silent_mode_changes — operators should never wonder which path
+	// the engine actually took.
+	if mode != "external" && mode != "embedded" {
+		return nil, fmt.Errorf("DB_MODE must be 'external' or 'embedded', got %q", mode)
+	}
+
 	dbCfg := DatabaseConfig{
 		Mode:     mode,
 		Host:     getEnv("DB_HOST", "localhost"),
@@ -117,6 +134,16 @@ func Load() (*Config, error) {
 			filepath.Join(XDGDataHome(), "duragraph", "pg"),
 		)
 		dbCfg.EmbeddedVersion = getEnv("DB_EMBEDDED_VERSION", defaultEmbeddedVersion)
+		dbCfg.EmbeddedStartTimeout = getEnvDuration(
+			"DB_EMBEDDED_START_TIMEOUT", defaultEmbeddedStartTimeout,
+		)
+
+		// Validate the embedded port range BEFORE downstream code casts
+		// it to uint32 (which silently wraps on negative or overflow
+		// values). Catches typos like DB_EMBEDDED_PORT=70000.
+		if dbCfg.EmbeddedPort < 1 || dbCfg.EmbeddedPort > 65535 {
+			return nil, fmt.Errorf("DB_EMBEDDED_PORT must be in 1..65535, got %d", dbCfg.EmbeddedPort)
+		}
 
 		// Force Host/Port to point at the embedded server. Done in Load()
 		// rather than at the call site so every downstream reader of
@@ -125,6 +152,15 @@ func Load() (*Config, error) {
 		// per-site mode checks.
 		dbCfg.Host = "127.0.0.1"
 		dbCfg.Port = dbCfg.EmbeddedPort
+
+		// Embedded postgres has no SSL configured — initdb runs with
+		// defaults and the listener is 127.0.0.1-only. An operator's
+		// stale DB_SSLMODE=require (left over from external setup) would
+		// cause the local pgx connection to fail with "server does not
+		// support SSL". Force "disable" here for the same reason we
+		// force Host/Port: the engine talks to its own child process,
+		// not whatever DB_SSLMODE described before.
+		dbCfg.SSLMode = "disable"
 
 		// User/Password/Database get sensible defaults but remain
 		// override-able. Useful when an operator wants to share an
@@ -178,6 +214,18 @@ func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
 			return intValue
+		}
+	}
+	return defaultValue
+}
+
+// getEnvDuration gets a Go duration environment variable (e.g. "90s",
+// "2m") with a default value. Falls back to the default on parse error,
+// matching the lenient behaviour of getEnvInt.
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if d, err := time.ParseDuration(value); err == nil {
+			return d
 		}
 	}
 	return defaultValue

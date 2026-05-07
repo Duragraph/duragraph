@@ -50,7 +50,9 @@ type EmbeddedConfig struct {
 	// StartTimeout caps how long Start() waits for the postgres process
 	// to become healthy. Zero means "use library default" (15s, which is
 	// enough for cached binaries but tight for a first-run download on
-	// slow links — operators can bump via env var if needed).
+	// slow links). Operators bump via DB_EMBEDDED_START_TIMEOUT
+	// (Go duration syntax, e.g. "90s") — wired in internal/config.Load
+	// and plumbed through serve.go.
 	StartTimeout time.Duration
 }
 
@@ -90,11 +92,17 @@ func resolvePostgresVersion(version string) embeddedpostgres.PostgresVersion {
 	}
 }
 
-// NewEmbedded constructs an EmbeddedPostgres ready to Start. The data
-// directory is created by the library on first start (initdb), so the
-// caller does NOT need to mkdir it ahead of time — but we DO ensure the
-// parent exists, since the library does not recursively create the
-// runtime path's parents.
+// NewEmbedded constructs an EmbeddedPostgres ready to Start. We create
+// cfg.DataDir up front (with restrictive 0o700 perms — postgres initdb
+// rejects looser permissions on a pre-existing data dir) so the
+// downstream library does not have to recurse parent paths itself.
+//
+// Library quirk: on first run the library calls os.RemoveAll(dataPath)
+// then runs initdb, which creates the dir fresh. On subsequent runs
+// (reused dir) the library does NOT touch perms, so an operator who
+// upgraded from a pre-fix build with a 0o755 data dir would still fail
+// initdb's permission check — the chmod step below is the only thing
+// that recovers them.
 func NewEmbedded(cfg EmbeddedConfig) (*EmbeddedPostgres, error) {
 	if cfg.Port == 0 {
 		return nil, fmt.Errorf("embedded postgres: port is required")
@@ -106,10 +114,23 @@ func NewEmbedded(cfg EmbeddedConfig) (*EmbeddedPostgres, error) {
 		return nil, fmt.Errorf("embedded postgres: username, password and database are required")
 	}
 
-	// Ensure the data directory's parent exists. The library mkdirs the
-	// data dir itself (initdb creates it) but won't create parents.
-	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("embedded postgres: create data dir parent: %w", err)
+	// Ensure DataDir exists with restrictive perms. Postgres initdb
+	// refuses to start on a data directory that is group- or
+	// world-readable; 0o700 matches what initdb itself would have
+	// created if we left the mkdir to it.
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("embedded postgres: create data dir %s: %w", cfg.DataDir, err)
+	}
+
+	// MkdirAll does not chmod a pre-existing dir, so explicitly tighten
+	// perms in case the dir was created by an earlier (looser) version
+	// of this code or by an operator's manual `mkdir`. Failure here is
+	// non-fatal — initdb's own permission check will surface a clearer
+	// error than we could synthesise.
+	if err := os.Chmod(cfg.DataDir, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"warning: embedded postgres: chmod 0700 %s failed: %v (continuing — initdb will recheck)\n",
+			cfg.DataDir, err)
 	}
 
 	builder := embeddedpostgres.DefaultConfig().

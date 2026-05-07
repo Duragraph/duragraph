@@ -109,14 +109,17 @@ func runServe(_ *cobra.Command, _ []string) error {
 	// the operator should never wonder whether they hit the external or
 	// the embedded path.
 	if cfg.Database.Mode == "embedded" {
+		// EmbeddedPort range was validated in config.Load (1..65535) so
+		// the uint32 cast cannot wrap here.
 		embedded, err := postgres.NewEmbedded(postgres.EmbeddedConfig{
-			Port:     uint32(cfg.Database.EmbeddedPort),
-			DataDir:  cfg.Database.EmbeddedDataDir,
-			Username: cfg.Database.User,
-			Password: cfg.Database.Password,
-			Database: cfg.Database.Database,
-			Version:  cfg.Database.EmbeddedVersion,
-			Logger:   os.Stderr,
+			Port:         uint32(cfg.Database.EmbeddedPort),
+			DataDir:      cfg.Database.EmbeddedDataDir,
+			Username:     cfg.Database.User,
+			Password:     cfg.Database.Password,
+			Database:     cfg.Database.Database,
+			Version:      cfg.Database.EmbeddedVersion,
+			StartTimeout: cfg.Database.EmbeddedStartTimeout,
+			Logger:       os.Stderr,
 		})
 		if err != nil {
 			return fmt.Errorf("embedded postgres construct: %w", err)
