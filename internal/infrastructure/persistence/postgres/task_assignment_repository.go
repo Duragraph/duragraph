@@ -65,7 +65,8 @@ func (r *TaskAssignmentRepository) Claim(ctx context.Context, workerID string, g
 		WHERE t.id = c.id
 		RETURNING t.id, t.run_id, t.worker_id, t.status, t.graph_id,
 		          t.thread_id, t.assistant_id, t.input, t.config,
-		          t.created_at, t.claimed_at, t.lease_expires_at, t.retry_count
+		          t.created_at, t.claimed_at, t.completed_at, t.lease_expires_at,
+		          t.retry_count, t.max_retries, t.error_message
 	`, graphIDs, maxTasks, workerID, leaseExpiry)
 
 	if err != nil {
