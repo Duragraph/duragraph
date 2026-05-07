@@ -91,6 +91,50 @@ func runServe(_ *cobra.Command, _ []string) error {
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	defer ctxCancel()
 
+	// Embedded Postgres (binary-modes.yml § embedded_components.postgres).
+	//
+	// When DB_MODE=embedded, spawn a real postgres process as a child of
+	// this engine BEFORE any pgxpool is opened. config.Load already
+	// forced cfg.Database.Host=127.0.0.1 + Port=EmbeddedPort, so the
+	// existing migrator/pool wiring downstream picks up the embedded
+	// coordinates without further plumbing.
+	//
+	// Shutdown ordering relies on defer LIFO: this defer is registered
+	// BEFORE postgres.NewPools' defer, so on shutdown the pgxpool drains
+	// first, then the embedded server exits. Order matters — Stop() on a
+	// live server with open client connections is graceful but noisier
+	// than the reverse.
+	//
+	// Loud startup print is mandated by spec § no_silent_mode_changes —
+	// the operator should never wonder whether they hit the external or
+	// the embedded path.
+	if cfg.Database.Mode == "embedded" {
+		embedded, err := postgres.NewEmbedded(postgres.EmbeddedConfig{
+			Port:     uint32(cfg.Database.EmbeddedPort),
+			DataDir:  cfg.Database.EmbeddedDataDir,
+			Username: cfg.Database.User,
+			Password: cfg.Database.Password,
+			Database: cfg.Database.Database,
+			Version:  cfg.Database.EmbeddedVersion,
+			Logger:   os.Stderr,
+		})
+		if err != nil {
+			return fmt.Errorf("embedded postgres construct: %w", err)
+		}
+		fmt.Printf("⏳ Starting embedded Postgres %s on 127.0.0.1:%d (data: %s) — first run downloads ~20MB binary\n",
+			cfg.Database.EmbeddedVersion, cfg.Database.EmbeddedPort, cfg.Database.EmbeddedDataDir)
+		if err := embedded.Start(ctx); err != nil {
+			return fmt.Errorf("embedded postgres start: %w", err)
+		}
+		defer func() {
+			if err := embedded.Stop(context.Background()); err != nil {
+				log.Printf("embedded postgres stop: %v", err)
+			}
+		}()
+		fmt.Printf("✅ Embedded Postgres started on 127.0.0.1:%d (data: %s)\n",
+			cfg.Database.EmbeddedPort, cfg.Database.EmbeddedDataDir)
+	}
+
 	// Initialize OpenTelemetry tracing (opt-in via OTEL_ENABLED)
 	if os.Getenv("OTEL_ENABLED") == "true" {
 		shutdownTracer, err := tracing.Init(ctx, "duragraph-server", version)
