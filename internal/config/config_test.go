@@ -2,12 +2,16 @@ package config
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad_Defaults(t *testing.T) {
 	os.Unsetenv("PORT")
 	os.Unsetenv("HOST")
+	os.Unsetenv("DB_MODE")
 	os.Unsetenv("DB_HOST")
 	os.Unsetenv("DB_PORT")
 	os.Unsetenv("DB_USER")
@@ -52,6 +56,249 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.ReadDatabase != nil {
 		t.Error("read database should be nil when DB_READ_HOST not set")
 	}
+	if cfg.Database.Mode != "external" {
+		t.Errorf("default mode: got %q, want external", cfg.Database.Mode)
+	}
+}
+
+// TestLoad_EmbeddedDefaults verifies that DB_MODE=embedded picks up the
+// spec-defined defaults: 127.0.0.1, port 5435, version 15, and the
+// duragraph/duragraph/duragraph credential triple.
+func TestLoad_EmbeddedDefaults(t *testing.T) {
+	t.Setenv("DB_MODE", "embedded")
+	// Explicitly unset everything else so we observe the embedded
+	// defaults rather than carry-over from the surrounding process env.
+	os.Unsetenv("DB_HOST")
+	os.Unsetenv("DB_PORT")
+	os.Unsetenv("DB_USER")
+	os.Unsetenv("DB_PASSWORD")
+	os.Unsetenv("DB_NAME")
+	os.Unsetenv("DB_SSLMODE")
+	os.Unsetenv("DB_EMBEDDED_PORT")
+	os.Unsetenv("DB_EMBEDDED_DATA_DIR")
+	os.Unsetenv("DB_EMBEDDED_VERSION")
+	os.Unsetenv("DB_EMBEDDED_START_TIMEOUT")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Database.Mode; got != "embedded" {
+		t.Errorf("Mode: got %q, want embedded", got)
+	}
+	if got := cfg.Database.Host; got != "127.0.0.1" {
+		t.Errorf("Host: got %q, want 127.0.0.1 (forced in embedded mode)", got)
+	}
+	if got := cfg.Database.Port; got != 5435 {
+		t.Errorf("Port: got %d, want 5435 (default embedded port)", got)
+	}
+	if got := cfg.Database.EmbeddedPort; got != 5435 {
+		t.Errorf("EmbeddedPort: got %d, want 5435", got)
+	}
+	if got := cfg.Database.User; got != "duragraph" {
+		t.Errorf("User: got %q, want duragraph", got)
+	}
+	if got := cfg.Database.Password; got != "duragraph" {
+		t.Errorf("Password: got %q, want duragraph", got)
+	}
+	if got := cfg.Database.Database; got != "duragraph" {
+		t.Errorf("Database: got %q, want duragraph", got)
+	}
+	if got := cfg.Database.EmbeddedVersion; got != "15" {
+		t.Errorf("EmbeddedVersion: got %q, want 15", got)
+	}
+	if cfg.Database.EmbeddedDataDir == "" {
+		t.Error("EmbeddedDataDir should default to <XDGDataHome>/duragraph/pg")
+	}
+	wantSuffix := filepath.Join("duragraph", "pg")
+	if !filepath.IsAbs(cfg.Database.EmbeddedDataDir) {
+		t.Errorf("EmbeddedDataDir should be absolute: got %q", cfg.Database.EmbeddedDataDir)
+	}
+	if filepath.Base(filepath.Dir(cfg.Database.EmbeddedDataDir))+
+		string(filepath.Separator)+filepath.Base(cfg.Database.EmbeddedDataDir) != wantSuffix {
+		t.Errorf("EmbeddedDataDir suffix: got %q, want suffix %q", cfg.Database.EmbeddedDataDir, wantSuffix)
+	}
+	// Embedded mode must force SSLMode=disable regardless of the
+	// process default, since the embedded postgres has no SSL
+	// configured.
+	if got := cfg.Database.SSLMode; got != "disable" {
+		t.Errorf("SSLMode: got %q, want disable (forced in embedded mode)", got)
+	}
+	if got := cfg.Database.EmbeddedStartTimeout; got != 60*time.Second {
+		t.Errorf("EmbeddedStartTimeout: got %v, want 60s", got)
+	}
+}
+
+// TestLoad_EmbeddedForcesHostAndPort enforces the silent-mode-change
+// guardrail in binary-modes.yml: when DB_MODE=embedded, an operator's
+// stale DB_HOST / DB_PORT must NOT leak through. The engine has to
+// reach its own embedded child process — anything else defeats the
+// whole mode.
+func TestLoad_EmbeddedForcesHostAndPort(t *testing.T) {
+	t.Setenv("DB_MODE", "embedded")
+	t.Setenv("DB_HOST", "should-be-ignored.example.com")
+	t.Setenv("DB_PORT", "9999")
+	t.Setenv("DB_EMBEDDED_PORT", "5436")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Database.Host; got != "127.0.0.1" {
+		t.Errorf("Host should be forced to 127.0.0.1 in embedded mode, got %q", got)
+	}
+	if got := cfg.Database.Port; got != 5436 {
+		t.Errorf("Port should be forced to EmbeddedPort (5436), got %d", got)
+	}
+	if got := cfg.Database.EmbeddedPort; got != 5436 {
+		t.Errorf("EmbeddedPort: got %d, want 5436", got)
+	}
+}
+
+// TestLoad_EmbeddedHonoursCredentialOverrides verifies that operators
+// can still override DB_USER / DB_PASSWORD / DB_NAME in embedded mode —
+// only Host/Port are forced. This keeps embedded mode usable when
+// shared dev tooling has its own user/database conventions.
+func TestLoad_EmbeddedHonoursCredentialOverrides(t *testing.T) {
+	t.Setenv("DB_MODE", "embedded")
+	t.Setenv("DB_USER", "custom_user")
+	t.Setenv("DB_PASSWORD", "custom_pass")
+	t.Setenv("DB_NAME", "custom_db")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Database.User; got != "custom_user" {
+		t.Errorf("User override should win: got %q", got)
+	}
+	if got := cfg.Database.Password; got != "custom_pass" {
+		t.Errorf("Password override should win: got %q", got)
+	}
+	if got := cfg.Database.Database; got != "custom_db" {
+		t.Errorf("Database override should win: got %q", got)
+	}
+}
+
+// TestLoad_EmbeddedForcesSSLModeDisable verifies that an operator's
+// stale DB_SSLMODE=require (left over from external setup) does NOT
+// leak through to the embedded-mode connection. The embedded postgres
+// has no SSL configured, so anything but "disable" causes a confusing
+// "server does not support SSL" error at first connect.
+func TestLoad_EmbeddedForcesSSLModeDisable(t *testing.T) {
+	t.Setenv("DB_MODE", "embedded")
+	t.Setenv("DB_SSLMODE", "require")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Database.SSLMode; got != "disable" {
+		t.Errorf("SSLMode should be forced to 'disable' in embedded mode, got %q", got)
+	}
+}
+
+// TestLoad_EmbeddedStartTimeoutOverride verifies that
+// DB_EMBEDDED_START_TIMEOUT (Go duration syntax) plumbs through to
+// EmbeddedStartTimeout.
+func TestLoad_EmbeddedStartTimeoutOverride(t *testing.T) {
+	t.Setenv("DB_MODE", "embedded")
+	t.Setenv("DB_EMBEDDED_START_TIMEOUT", "90s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Database.EmbeddedStartTimeout; got != 90*time.Second {
+		t.Errorf("EmbeddedStartTimeout: got %v, want 90s", got)
+	}
+}
+
+// TestLoad_RejectsBadMode covers Fix 5: DB_MODE typos must fail loud
+// at startup rather than silently behaving like "external".
+func TestLoad_RejectsBadMode(t *testing.T) {
+	t.Setenv("DB_MODE", "embedd")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatalf("expected error for DB_MODE=embedd, got cfg=%+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "DB_MODE") {
+		t.Errorf("error should mention DB_MODE, got: %v", err)
+	}
+}
+
+// TestLoad_RejectsBadEmbeddedPort covers Fix 4: out-of-range
+// EmbeddedPort values must be rejected before downstream code casts to
+// uint32 (which would silently wrap negatives and >65535 values).
+func TestLoad_RejectsBadEmbeddedPort(t *testing.T) {
+	cases := []struct {
+		name string
+		port string
+	}{
+		{"zero", "0"},
+		{"negative", "-1"},
+		{"too-large", "70000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DB_MODE", "embedded")
+			t.Setenv("DB_EMBEDDED_PORT", tc.port)
+
+			cfg, err := Load()
+			if err == nil {
+				t.Fatalf("expected error for DB_EMBEDDED_PORT=%s, got cfg=%+v", tc.port, cfg)
+			}
+			if !strings.Contains(err.Error(), "DB_EMBEDDED_PORT") {
+				t.Errorf("error should mention DB_EMBEDDED_PORT, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoad_EmbeddedDataDirOverride verifies DB_EMBEDDED_DATA_DIR wins
+// over the XDG-derived default.
+func TestLoad_EmbeddedDataDirOverride(t *testing.T) {
+	t.Setenv("DB_MODE", "embedded")
+	t.Setenv("DB_EMBEDDED_DATA_DIR", "/var/lib/duragraph-pg")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Database.EmbeddedDataDir; got != "/var/lib/duragraph-pg" {
+		t.Errorf("EmbeddedDataDir: got %q, want /var/lib/duragraph-pg", got)
+	}
+}
+
+// TestXDGDataHome covers the three branches: env var set, env var
+// unset (fall back to $HOME/.local/share), and HOME unset (last-resort
+// fallback). The third branch is only exercised on the rare CI runner
+// without HOME set.
+func TestXDGDataHome(t *testing.T) {
+	t.Run("XDG_DATA_HOME set", func(t *testing.T) {
+		t.Setenv("XDG_DATA_HOME", "/custom/xdg/data")
+		if got := XDGDataHome(); got != "/custom/xdg/data" {
+			t.Errorf("got %q, want /custom/xdg/data", got)
+		}
+	})
+
+	t.Run("XDG_DATA_HOME unset, HOME set", func(t *testing.T) {
+		os.Unsetenv("XDG_DATA_HOME")
+		// UserHomeDir reads HOME; setting HOME explicitly makes the test
+		// hermetic.
+		t.Setenv("HOME", "/home/testuser")
+		want := filepath.Join("/home/testuser", ".local", "share")
+		if got := XDGDataHome(); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
 }
 
 func TestLoad_CustomValues(t *testing.T) {
