@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/duragraph/duragraph/internal/domain/workflow"
-	"github.com/duragraph/duragraph/internal/infrastructure/monitoring"
 	"github.com/duragraph/duragraph/internal/pkg/errors"
 )
 
@@ -23,17 +22,24 @@ type CreateAssistant struct {
 	Metadata     map[string]interface{}
 }
 
-// CreateAssistantHandler handles the CreateAssistant command
+// CreateAssistantHandler handles the CreateAssistant command.
+//
+// metrics is an application-layer port (see ports.go); the
+// infrastructure *monitoring.Metrics satisfies it. The per-tenant
+// assistants gauge driven by IncAssistants/DecAssistants depends on a
+// startup bootstrap (cmd/server/metrics_bootstrap.go) to be
+// authoritative — multi-replica deployments would need a separate
+// reconciliation strategy (out of scope for v1).
 type CreateAssistantHandler struct {
 	assistantRepo workflow.AssistantRepository
-	metrics       *monitoring.Metrics
+	metrics       Metrics
 }
 
 // NewCreateAssistantHandler creates a new CreateAssistantHandler.
 //
 // metrics may be nil — handlers degrade silently rather than panicking
 // in test environments that don't wire up a Prometheus registry.
-func NewCreateAssistantHandler(assistantRepo workflow.AssistantRepository, metrics *monitoring.Metrics) *CreateAssistantHandler {
+func NewCreateAssistantHandler(assistantRepo workflow.AssistantRepository, metrics Metrics) *CreateAssistantHandler {
 	return &CreateAssistantHandler{
 		assistantRepo: assistantRepo,
 		metrics:       metrics,
