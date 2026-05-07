@@ -1,0 +1,47 @@
+name: release
+
+# Triggered by pushing a tag matching v*.
+# GoReleaser builds platform-specific archives, publishes a GitHub
+# Release on this repo, and pushes a Homebrew formula to
+# Duragraph/homebrew-tap.
+#
+# Required secret: HOMEBREW_TAP_TOKEN — fine-grained PAT (or GitHub App
+# token) with `contents:write` on Duragraph/homebrew-tap. Configure under
+# Settings → Secrets and variables → Actions → New repository secret.
+#
+# Free-tier GoReleaser only — no Pro features used. See
+# duragraph-spec/backend/binary-modes.yml for the distribution plan.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # GitHub Releases publish
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT scoped to Duragraph/homebrew-tap with contents:write.
+          # Without this, GoReleaser will fail at the brews step.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

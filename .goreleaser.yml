@@ -1,0 +1,147 @@
+version: 2
+
+# DuraGraph release pipeline.
+#
+# Triggered by `git tag v*` push (see .github/workflows/release.yml).
+# Uses GoReleaser FREE — no Pro features (no versioned formulas, no
+# alternative names, no DMG, no cross-SCM publishing).
+#
+# Spec: duragraph-spec/backend/binary-modes.yml — distribution section.
+
+project_name: duragraph
+
+before:
+  hooks:
+    - go mod tidy
+    # Embedded postgres bundle prep is a TODO once the
+    # feat/embedded-postgres branch lands the bundle layout. For now,
+    # the released binary is the cobra-tree control plane only; users
+    # configure external postgres + nats. Phase 2 of v0.7 will add the
+    # bundled-pg-per-platform step here.
+
+builds:
+  - id: duragraph
+    main: ./cmd/duragraph
+    binary: duragraph
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/duragraph/duragraph/cmd/duragraph/cmd.version={{.Version}}
+      - -X github.com/duragraph/duragraph/cmd/duragraph/cmd.commit={{.Commit}}
+      - -X github.com/duragraph/duragraph/cmd/duragraph/cmd.date={{.CommitDate}}
+      - -X github.com/duragraph/duragraph/cmd/duragraph/cmd.builtBy=goreleaser
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: duragraph
+    ids: [duragraph]
+    formats: [tar.gz]
+    name_template: >-
+      {{- .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^style:'
+      - 'Merge pull request'
+      - 'Merge branch'
+
+# Auto-publish a Homebrew formula to Duragraph/homebrew-tap on every
+# release. Users install via:
+#   brew tap Duragraph/tap
+#   brew install duragraph
+brews:
+  - name: duragraph
+    ids: [duragraph]
+    repository:
+      owner: Duragraph
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/Duragraph/duragraph"
+    description: "LangGraph-compatible AI workflow orchestration platform — durable, self-hostable, single binary."
+    license: "Apache-2.0"
+    commit_author:
+      name: duragraph-release-bot
+      email: release-bot@duragraph.io
+    commit_msg_template: "chore(brew): bump duragraph to {{ .Tag }}"
+    install: |
+      bin.install "duragraph"
+      generate_completions_from_executable(bin/"duragraph", "completion")
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/duragraph version")
+    service: |
+      run [opt_bin/"duragraph", "serve"]
+      keep_alive true
+      working_dir var
+      log_path var/"log/duragraph.log"
+      error_log_path var/"log/duragraph.error.log"
+    caveats: |
+      Quick start (zero config — embedded Postgres + NATS):
+        duragraph dev
+
+      Self-hosted serve mode (uses the config in
+      ~/.config/duragraph/config.toml or env vars):
+        duragraph serve
+
+      Run as a background service:
+        brew services start duragraph
+
+      Documentation: https://github.com/Duragraph/duragraph
+
+release:
+  github:
+    owner: Duragraph
+    name: duragraph
+  prerelease: auto
+  draft: false
+  name_template: "v{{ .Version }}"
+  header: |
+    ## DuraGraph {{ .Tag }}
+
+    Single-binary control plane for AI workflow orchestration.
+  footer: |
+    ---
+    **Install via Homebrew**:
+    ```
+    brew tap Duragraph/tap
+    brew install duragraph
+    ```
+
+    **Or download the binary directly** from the assets above.
