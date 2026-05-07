@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/execution"
+	"github.com/duragraph/duragraph/internal/domain/run"
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 )
@@ -34,6 +35,14 @@ func (b *StreamingBridge) Start() {
 	b.eventBus.Subscribe(execution.EventTypeNodeCompleted, b.handleNodeCompleted)
 	b.eventBus.Subscribe(execution.EventTypeNodeFailed, b.handleNodeFailed)
 	b.eventBus.Subscribe(execution.EventTypeNodeSkipped, b.handleNodeSkipped)
+
+	// Run-level events drive the SSE stream's run lifecycle messages
+	// (start, completion, HITL pause, failure). The worker handler
+	// publishes these in response to worker-reported events.
+	b.eventBus.Subscribe(run.EventTypeRunStarted, b.handleRunStarted)
+	b.eventBus.Subscribe(run.EventTypeRunCompleted, b.handleRunCompleted)
+	b.eventBus.Subscribe(run.EventTypeRunFailed, b.handleRunFailed)
+	b.eventBus.Subscribe(run.EventTypeRunRequiresAction, b.handleRunRequiresAction)
 
 	b.eventBus.Subscribe("streaming.metadata", b.handleMetadataEvent)
 	b.eventBus.Subscribe("streaming.values", b.handleValuesEvent)
@@ -109,6 +118,64 @@ func (b *StreamingBridge) handleNodeSkipped(ctx context.Context, event eventbus.
 		"node_type": nodeEvent.NodeType,
 		"reason":    nodeEvent.Reason,
 		"timestamp": nodeEvent.OccurredAt,
+	})
+}
+
+// handleRunStarted handles run started events
+func (b *StreamingBridge) handleRunStarted(ctx context.Context, event eventbus.Event) error {
+	runEvent, ok := event.(run.RunStarted)
+	if !ok {
+		return nil
+	}
+
+	return b.publishStreamEvent(ctx, runEvent.RunID, "run_started", map[string]interface{}{
+		"run_id":    runEvent.RunID,
+		"timestamp": runEvent.OccurredAt,
+	})
+}
+
+// handleRunCompleted handles run completed events
+func (b *StreamingBridge) handleRunCompleted(ctx context.Context, event eventbus.Event) error {
+	runEvent, ok := event.(run.RunCompleted)
+	if !ok {
+		return nil
+	}
+
+	return b.publishStreamEvent(ctx, runEvent.RunID, "run_completed", map[string]interface{}{
+		"run_id":    runEvent.RunID,
+		"output":    runEvent.Output,
+		"timestamp": runEvent.OccurredAt,
+	})
+}
+
+// handleRunFailed handles run failed events
+func (b *StreamingBridge) handleRunFailed(ctx context.Context, event eventbus.Event) error {
+	runEvent, ok := event.(run.RunFailed)
+	if !ok {
+		return nil
+	}
+
+	return b.publishStreamEvent(ctx, runEvent.RunID, "run_failed", map[string]interface{}{
+		"run_id":    runEvent.RunID,
+		"error":     runEvent.Error,
+		"timestamp": runEvent.OccurredAt,
+	})
+}
+
+// handleRunRequiresAction handles HITL pause events so Studio's
+// ApprovalDialog can open via the SSE stream.
+func (b *StreamingBridge) handleRunRequiresAction(ctx context.Context, event eventbus.Event) error {
+	runEvent, ok := event.(run.RunRequiresAction)
+	if !ok {
+		return nil
+	}
+
+	return b.publishStreamEvent(ctx, runEvent.RunID, "run_requires_action", map[string]interface{}{
+		"run_id":       runEvent.RunID,
+		"interrupt_id": runEvent.InterruptID,
+		"reason":       runEvent.Reason,
+		"tool_calls":   runEvent.ToolCalls,
+		"timestamp":    runEvent.OccurredAt,
 	})
 }
 
