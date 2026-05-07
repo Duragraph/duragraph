@@ -65,6 +65,13 @@ type EmbeddedConfig struct {
 	// (10 seconds, matching upstream's RunServerCallback in
 	// nats-server/test/test.go).
 	StartTimeout time.Duration
+
+	// Verbose flips the embedded server's logging from quiet (the
+	// default — clean stderr for `duragraph dev`) to upstream's full
+	// chatter. Plumbed onto the struct so a future caller (Phase 4
+	// `duragraph dev` flag wiring) can flip it; this PR exposes the
+	// field but does not yet read an env var for it.
+	Verbose bool
 }
 
 const defaultEmbeddedStartTimeout = 10 * time.Second
@@ -82,8 +89,13 @@ type EmbeddedNATS struct {
 // stores credentials and persisted streams there) so the upstream
 // library doesn't have to recurse parent paths itself.
 func NewEmbedded(cfg EmbeddedConfig) (*EmbeddedNATS, error) {
-	if cfg.Port == 0 {
-		return nil, fmt.Errorf("embedded nats: port is required")
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return nil, fmt.Errorf("embedded nats: port must be in 1..65535, got %d", cfg.Port)
+	}
+	// MonitorPort == 0 means "disabled" (spec default — opt-in only).
+	// When set, it must still be a valid TCP port.
+	if cfg.MonitorPort < 0 || cfg.MonitorPort > 65535 {
+		return nil, fmt.Errorf("embedded nats: monitor port must be in 1..65535 (or 0 to disable), got %d", cfg.MonitorPort)
 	}
 	if cfg.DataDir == "" {
 		return nil, fmt.Errorf("embedded nats: data directory is required")
@@ -132,11 +144,12 @@ func NewEmbedded(cfg EmbeddedConfig) (*EmbeddedNATS, error) {
 		NoSigs: true,
 
 		// Default-quiet logging. Operators wanting verbose NATS logs
-		// can set the engine's own log level — wiring NATS's logger
-		// interface to the engine logger is a follow-up (the upstream
-		// type is server.Logger interface, not io.Writer, so a clean
-		// adapter is its own small file).
-		NoLog: false,
+		// flip cfg.Verbose (Phase 4 `duragraph dev` flag wiring will
+		// surface this; Phase 3 just exposes the field). Wiring NATS's
+		// logger interface to the engine logger is a follow-up (the
+		// upstream type is server.Logger interface, not io.Writer, so
+		// a clean adapter is its own small file).
+		NoLog: !cfg.Verbose,
 		Debug: false,
 		Trace: false,
 	}

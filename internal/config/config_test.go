@@ -429,7 +429,8 @@ func TestLoad_EmbeddedNATSDefaults(t *testing.T) {
 	gotSuffix := filepath.Base(filepath.Dir(cfg.NATS.EmbeddedDataDir)) +
 		string(filepath.Separator) + filepath.Base(cfg.NATS.EmbeddedDataDir)
 	if gotSuffix != wantSuffix {
-		t.Errorf("EmbeddedDataDir suffix: got %q, want suffix %q", cfg.NATS.EmbeddedDataDir, wantSuffix)
+		t.Errorf("EmbeddedDataDir suffix: got suffix %q, want suffix %q (full path %q)",
+			gotSuffix, wantSuffix, cfg.NATS.EmbeddedDataDir)
 	}
 	if got := cfg.NATS.EmbeddedStartTimeout; got != 10*time.Second {
 		t.Errorf("EmbeddedStartTimeout: got %v, want 10s", got)
