@@ -5,9 +5,31 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"text/template"
 
 	initpkg "github.com/duragraph/duragraph/internal/dev/init"
 )
+
+// TestTemplateRendering_FailsOnMissingKey is a unit-level guard for the
+// `missingkey=error` option used inside Scaffold's text/template setup.
+// It exists so a future refactor that drops the option (e.g. via an
+// extracted helper) gets caught immediately. We test the option at the
+// text/template level rather than via Scaffold because the embedded
+// templates are intentionally typo-free; the package-internal contract
+// is "every template parsed by this package uses missingkey=error".
+func TestTemplateRendering_FailsOnMissingKey(t *testing.T) {
+	tmpl, err := template.New("typo.tmpl").
+		Option("missingkey=error").
+		Parse(`hello {{.NotAField}}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	data := struct{ ProjectName string }{ProjectName: "x"}
+	var sink strings.Builder
+	if err := tmpl.Execute(&sink, data); err == nil {
+		t.Fatalf("expected execute to fail on missing key, got output %q", sink.String())
+	}
+}
 
 func TestListTemplates_ReturnsWhitelist(t *testing.T) {
 	got := initpkg.ListTemplates()

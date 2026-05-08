@@ -129,7 +129,14 @@ func Scaffold(opts Options) error {
 
 		var out []byte
 		if strings.HasSuffix(srcPath, ".tmpl") {
-			tmpl, err := template.New(filepath.Base(srcPath)).Parse(string(raw))
+			// missingkey=error turns silent `<no value>` substitution into
+			// a hard failure. Without it, a typo like {{.Projct}} would
+			// emit a broken file with no warning to either the user or
+			// the maintainer of the template; with it, scaffolding fails
+			// loudly with the file path that needs fixing.
+			tmpl, err := template.New(filepath.Base(srcPath)).
+				Option("missingkey=error").
+				Parse(string(raw))
 			if err != nil {
 				return fmt.Errorf("parse template %q: %w", srcPath, err)
 			}

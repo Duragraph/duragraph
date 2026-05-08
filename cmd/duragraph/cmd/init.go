@@ -65,11 +65,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// cd hint: prefer a path relative to the user's cwd so the printed
+	// `cd <hint>` is copy-pasteable. If target is outside cwd (e.g. user
+	// passed an absolute --dir), or os.Getwd / filepath.Rel fail, fall
+	// back to the absolute target — that always works even if it's
+	// uglier.
+	cdHint := target
+	if cwd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(cwd, target); err == nil && !strings.HasPrefix(rel, "..") {
+			cdHint = rel
+		}
+	}
+
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Created %s/ from %q template.\n", target, tmpl)
+	fmt.Fprintf(out, "Created %s from %q template.\n", target, tmpl)
 	fmt.Fprintln(out, "")
 	fmt.Fprintln(out, "Next steps:")
-	fmt.Fprintf(out, "  cd %s\n", filepath.Base(target))
+	fmt.Fprintf(out, "  cd %s\n", cdHint)
 	fmt.Fprintln(out, "  uv sync")
 	fmt.Fprintln(out, "  duragraph dev --watch ./agents")
 	return nil
