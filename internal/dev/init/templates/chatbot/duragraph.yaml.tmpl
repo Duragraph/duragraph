@@ -1,0 +1,19 @@
+# {{.ProjectName}} — duragraph project config
+#
+# This file is currently NOT read by the duragraph binary. It's a
+# placeholder for future project-level configuration (graph paths,
+# worker command, etc.). Treat it as documentation for now.
+#
+# When duragraph adds project-config support, this schema will be
+# specified in duragraph-spec/backend/. Until then, the keys below
+# are advisory.
+
+project:
+  name: {{.ProjectName}}
+
+agents:
+  dir: ./agents
+  language: python
+
+worker:
+  command: ["uv", "run", "python", "agents/chatbot.py"]
