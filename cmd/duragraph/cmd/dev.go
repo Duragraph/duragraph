@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 
+	"github.com/duragraph/duragraph/internal/dev/watch"
 	"github.com/spf13/cobra"
 )
 
@@ -20,9 +23,10 @@ import (
 // (new wiring, new metric, new handler) automatically benefits dev.
 //
 // Phase scope (v0.7):
-//   - Phase 4 (this PR): wire dev to embedded mode, accept --watch and
-//     --studio as no-op flags with warnings.
-//   - Phase 5: implement --watch (file-watching worker supervision).
+//   - Phase 4: wire dev to embedded mode, accept --watch and --studio
+//     as no-op flags with warnings.
+//   - Phase 5 (this PR): implement --watch (file-watching worker
+//     supervision via internal/dev/watch).
 //   - Phase 8: implement --studio (serve bundled Studio under /studio/).
 //
 // TODO(post-v0.7): human-readable log format. serve currently emits
@@ -57,7 +61,7 @@ func init() {
 	devCmd.Flags().StringVar(&devDataDir, "data-dir", "./data",
 		"Data directory for embedded postgres + NATS storage. Created on first run.")
 	devCmd.Flags().StringVar(&devWatch, "watch", "./agents",
-		"Directory to watch for graph definitions (Phase 5 — currently a no-op)")
+		"Directory to watch (recursively) for Python graph files; pass empty string to disable")
 	devCmd.Flags().BoolVar(&devStudio, "studio", false,
 		"Serve bundled Studio at /studio/ (Phase 8 — currently a no-op)")
 
@@ -85,22 +89,60 @@ func runDev(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   data dir: %s\n", absDataDir)
 	fmt.Printf("   dashboard: http://localhost:%d/\n", devPort)
 
-	// Phase 5/8 stubs: accept the flag, warn, continue. The flag surface
-	// stays stable so subsequent phases don't break invocations baked
-	// into operator scripts. --watch has a non-empty default
-	// (./agents) so the warning fires unconditionally — the operator
-	// should know watch isn't wired regardless of whether they set the
-	// flag explicitly.
-	fmt.Printf("⚠️  watch mode not yet implemented (Phase 5); --watch=%s ignored\n", devWatch)
 	if devStudio {
 		fmt.Println("⚠️  studio bundling not yet implemented (Phase 8); --studio ignored")
+	}
+
+	// Phase 5: --watch supervises Python graph workers under devWatch.
+	// We have to start the watcher BEFORE serveCmd.RunE because runServe
+	// blocks until SIGINT/SIGTERM — there's no return-after-startup hook.
+	// The watcher's first action is to poll http://localhost:<port>/health,
+	// so it intentionally idles until the engine is up. When serve
+	// returns (cobra command finishes), we cancel the watcher's context
+	// and wait for it to drain.
+	//
+	// Don't refactor serve.go for this — the goroutine pattern has the
+	// virtue of leaving the engine startup path untouched and of letting
+	// us add Phase 5 entirely behind the --watch flag.
+	watcherCtx, cancelWatcher := context.WithCancel(cmd.Context())
+	defer cancelWatcher()
+
+	var watcherDone chan struct{}
+	if devWatch != "" {
+		w, werr := watch.New(watch.Options{
+			WatchDir:   devWatch,
+			EnginePort: devPort,
+			Stdout:     os.Stdout,
+			Stderr:     os.Stderr,
+			Logger:     log.Default(),
+		})
+		if werr != nil {
+			return fmt.Errorf("watch init: %w", werr)
+		}
+		watcherDone = make(chan struct{})
+		go func() {
+			defer close(watcherDone)
+			if err := w.Run(watcherCtx); err != nil {
+				log.Printf("watch: %v", err)
+			}
+		}()
 	}
 
 	// We pass dev's cmd + args straight through. Today serveCmd.RunE
 	// (runServe) ignores both — see its signature `_ *cobra.Command,
 	// _ []string`. If serve ever starts inspecting cmd.Flags(), this
 	// call site needs revisiting (dev's flag set != serve's).
-	return serveCmd.RunE(cmd, args)
+	serveErr := serveCmd.RunE(cmd, args)
+
+	// Engine has shut down — cancel the watcher and wait for it to
+	// drain (kills its supervised subprocesses cleanly). Without this
+	// step, the binary returns to the operator's shell while child
+	// uv/python processes still hold the terminal.
+	cancelWatcher()
+	if watcherDone != nil {
+		<-watcherDone
+	}
+	return serveErr
 }
 
 // devOptions captures the flag values that translate into env defaults.
