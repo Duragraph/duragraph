@@ -1,0 +1,29 @@
+# {{.ProjectName}}
+
+A duragraph project, scaffolded from the `chatbot` template.
+
+## Quick start
+
+```bash
+uv sync
+duragraph dev --watch ./agents
+```
+
+Set an OpenAI key for a real LLM reply (otherwise the bot echoes):
+
+```bash
+export OPENAI_API_KEY=sk-...
+duragraph dev --watch ./agents
+```
+
+## What's here
+
+- `agents/chatbot.py` — single-node `@Graph` that takes either Studio
+  `{"messages": [...]}` or curl-style `{"input": "..."}` and replies.
+- `duragraph.yaml` — project config (graph dir, worker command).
+- `pyproject.toml` — Python deps managed by `uv`.
+
+## Next steps
+
+- Add memory (per-thread history) — see `duragraph-examples/python/02-chatbot`.
+- Add tool use — see `duragraph-examples/python/06-tool-use`.

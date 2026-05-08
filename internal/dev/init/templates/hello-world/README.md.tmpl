@@ -1,0 +1,34 @@
+# {{.ProjectName}}
+
+A duragraph project, scaffolded from the `hello-world` template.
+
+## Quick start
+
+```bash
+# Install Python deps (uv-managed)
+uv sync
+
+# Run the engine + dashboard, watch ./agents, and supervise the worker.
+# This is the recommended dev loop — the worker hot-reloads on file changes.
+duragraph dev --watch ./agents
+```
+
+You can also run a single graph standalone (no engine), useful for unit
+work on the graph itself:
+
+```bash
+uv run python agents/hello.py
+```
+
+## What's here
+
+- `agents/hello.py` — the starter `@Graph`. Edit it, save, and `duragraph
+  dev` will reload.
+- `duragraph.yaml` — project config (graph dir, worker command).
+- `pyproject.toml` — Python dependencies, managed by `uv`.
+
+## Next steps
+
+- Add more nodes to the graph in `agents/hello.py`.
+- Add more graphs as new files in `agents/`.
+- Hit the engine's REST API at <http://localhost:8081> to invoke runs.

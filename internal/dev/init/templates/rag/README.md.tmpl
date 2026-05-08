@@ -1,0 +1,27 @@
+# {{.ProjectName}}
+
+A duragraph project, scaffolded from the `rag` template.
+
+## Quick start
+
+```bash
+uv sync
+duragraph dev --watch ./agents
+```
+
+The starter uses an in-memory vector store and a toy embedder so it
+works offline. Swap them out for real embeddings + Qdrant when you're
+ready.
+
+## What's here
+
+- `agents/rag.py` — `ingest >> retrieve` graph over a 3-sentence KB.
+- `duragraph.yaml` — project config.
+- `pyproject.toml` — Python deps managed by `uv`.
+
+## Next steps
+
+- Replace `SimpleEmbedding` with `OpenAIEmbeddingProvider`.
+- Replace `InMemoryVectorStore` with `QdrantVectorStore`.
+- Add an LLM `generate_response` node — see
+  `duragraph-examples/python/03-rag-agent`.

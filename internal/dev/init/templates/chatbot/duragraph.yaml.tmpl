@@ -1,0 +1,11 @@
+# {{.ProjectName}} — duragraph project config
+
+project:
+  name: {{.ProjectName}}
+
+agents:
+  dir: ./agents
+  language: python
+
+worker:
+  command: ["uv", "run", "python", "agents/chatbot.py"]

@@ -1,0 +1,14 @@
+# {{.ProjectName}} — duragraph project config
+#
+# Schema is intentionally minimal in v0.7. Future versions of duragraph-spec
+# may codify additional fields; until then, only the keys below are read.
+
+project:
+  name: {{.ProjectName}}
+
+agents:
+  dir: ./agents
+  language: python
+
+worker:
+  command: ["uv", "run", "python", "agents/hello.py"]

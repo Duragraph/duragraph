@@ -1,0 +1,23 @@
+# {{.ProjectName}}
+
+A duragraph project, scaffolded from the `tool-use` template.
+
+## Quick start
+
+```bash
+uv sync
+duragraph dev --watch ./agents
+```
+
+## What's here
+
+- `agents/tools_agent.py` — two `@tool` functions plus a `prepare >>
+  run_tools >> synthesize` pipeline that picks a tool by keyword.
+- `duragraph.yaml` — project config.
+- `pyproject.toml` — Python deps managed by `uv`.
+
+## Next steps
+
+- Add more `@tool` functions; the registry auto-discovers them.
+- Replace the keyword router with `@llm_node(tools=[...])` so the LLM
+  decides which tool to call. See `duragraph-examples/python/06-tool-use`.
