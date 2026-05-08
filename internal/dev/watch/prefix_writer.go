@@ -32,34 +32,44 @@ func newPrefixWriter(prefix string, w io.Writer) *prefixWriter {
 }
 
 // Write implements io.Writer. It emits one prefixed line per '\n' in
-// the input and buffers any tail. The returned n always equals len(p)
-// on success — to upstream consumers (cmd.Stdout) it looks like a
-// passthrough writer.
+// the input and buffers any tail.
+//
+// The io.Writer contract: 0 <= n <= len(p), and n < len(p) implies a
+// non-nil error. We track `consumed` = bytes from the original input
+// that have been settled (either flushed downstream as a complete line,
+// or stashed in p.buf). On any sub-write error we return (consumed, err)
+// so callers see a count consistent with what was actually accepted.
+// Synthetic prefix bytes don't map to input bytes and are not counted.
 func (p *prefixWriter) Write(b []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	n := len(b)
+	consumed := 0
 	for {
 		i := bytes.IndexByte(b, '\n')
 		if i < 0 {
-			// No newline left — stash and report full consumption.
+			// No newline left — stash the tail and report full
+			// consumption (buffering counts as accepting the bytes).
 			p.buf.Write(b)
-			return n, nil
+			consumed += len(b)
+			return consumed, nil
 		}
-		// Emit prefix + buffered tail + this line (incl. \n).
+		// Emit prefix + buffered tail + this line (incl. \n). On any
+		// downstream error, return what we've already consumed from
+		// the current input so the io.Writer contract holds.
 		if _, err := p.w.Write(p.prefix); err != nil {
-			return 0, err
+			return consumed, err
 		}
 		if p.buf.Len() > 0 {
 			if _, err := p.w.Write(p.buf.Bytes()); err != nil {
-				return 0, err
+				return consumed, err
 			}
 			p.buf.Reset()
 		}
 		if _, err := p.w.Write(b[:i+1]); err != nil {
-			return 0, err
+			return consumed, err
 		}
+		consumed += i + 1
 		b = b[i+1:]
 	}
 }
@@ -69,6 +79,10 @@ func (p *prefixWriter) Write(b []byte) (int, error) {
 // stream remains well-formed. Called when the supervised process exits
 // — without this, a worker that crashes mid-line would leave its last
 // fragment hidden.
+//
+// On error before all three sub-writes succeed, the buffered tail is
+// left intact so a subsequent Flush could retry. (We can't undo bytes
+// already written to p.w; this is best-effort retryability.)
 func (p *prefixWriter) Flush() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

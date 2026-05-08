@@ -88,7 +88,7 @@ type Watcher struct {
 
 	mu          sync.Mutex
 	supervisors map[string]*WorkerSupervisor // file → supervisor
-	debouncers  map[string]*time.Timer       // file → pending reload timer
+	debouncers  map[string]*debounceEntry    // file → pending reload state
 	// closed flips true at the start of shutdown(). Guards against the
 	// narrow race where a debounce timer fires between Stop()ing the
 	// timer and clearing the map: the AfterFunc callback runs, enters
@@ -97,6 +97,18 @@ type Watcher struct {
 	// outlive the watcher with nothing to Stop() it. Checking closed
 	// in spawn/dispatch turns those late callbacks into no-ops.
 	closed bool
+}
+
+// debounceEntry tracks the pending reload state for one file. `generation`
+// is incremented on every fsnotify event for the file; the AfterFunc
+// callback captures the generation it was scheduled at and no-ops when
+// it fires if a newer event has bumped the count. This is more robust
+// than a Stop+Reset pattern because it tolerates the timer-already-firing
+// race (Stop returns false but the callback proceeds): the generation
+// check still rejects the stale callback.
+type debounceEntry struct {
+	timer      *time.Timer
+	generation uint64
 }
 
 // New constructs a Watcher. Returns an error only on options that are
@@ -139,7 +151,7 @@ func New(opts Options) (*Watcher, error) {
 	return &Watcher{
 		opts:        opts,
 		supervisors: make(map[string]*WorkerSupervisor),
-		debouncers:  make(map[string]*time.Timer),
+		debouncers:  make(map[string]*debounceEntry),
 	}, nil
 }
 
@@ -188,6 +200,13 @@ func (w *Watcher) Run(ctx context.Context) error {
 	for _, f := range files {
 		w.spawnSupervisor(f)
 	}
+	// From here on, every return path must tear down the supervisors we
+	// just spawned — including the early-error returns from fsnotify
+	// setup below. Defer guarantees that. shutdown() is idempotent
+	// (closed=true is benign on repeat, the maps are reset on first
+	// call, Stop/Wait on supervisors are idempotent), so it's safe to
+	// run unconditionally.
+	defer w.shutdown()
 
 	// fsnotify setup. Has to recurse manually — Add() each subdir and
 	// add new ones as they appear via Create events on directories.
@@ -203,17 +222,14 @@ func (w *Watcher) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			w.shutdown()
 			return nil
 		case ev, ok := <-fw.Events:
 			if !ok {
-				w.shutdown()
 				return nil
 			}
 			w.handleEvent(fw, ev)
 		case ferr, ok := <-fw.Errors:
 			if !ok {
-				w.shutdown()
 				return nil
 			}
 			w.opts.Logger.Printf("watch: fsnotify error: %v", ferr)
@@ -289,15 +305,39 @@ func (w *Watcher) handleEvent(fw *fsnotify.Watcher, ev fsnotify.Event) {
 // quiet window elapses, dispatchReload re-checks the @Graph( sentinel
 // (so a file the user emptied isn't supervised) and either reloads,
 // spawns, or stops the supervisor accordingly.
+//
+// Per-file generation tokens guard against the time.AfterFunc-already-
+// firing race: each event bumps entry.generation; the callback captures
+// the generation it was scheduled at, and on fire it re-checks under
+// the mutex. If a newer event arrived (generation advanced), the
+// callback no-ops and the newer event's callback will dispatch.
 func (w *Watcher) scheduleReload(file string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if t, ok := w.debouncers[file]; ok {
-		t.Reset(w.opts.DebounceWindow)
-		return
+
+	entry, ok := w.debouncers[file]
+	if !ok {
+		entry = &debounceEntry{}
+		w.debouncers[file] = entry
 	}
-	w.debouncers[file] = time.AfterFunc(w.opts.DebounceWindow, func() {
+	entry.generation++
+	expected := entry.generation
+
+	if entry.timer != nil {
+		// Best-effort cancel; if the timer already fired the callback
+		// will see a mismatched generation and exit cleanly.
+		entry.timer.Stop()
+	}
+	entry.timer = time.AfterFunc(w.opts.DebounceWindow, func() {
 		w.mu.Lock()
+		e, ok := w.debouncers[file]
+		if !ok || e.generation != expected {
+			// Superseded by a newer event (or already cleared by
+			// shutdown). The newer event's callback will dispatch.
+			w.mu.Unlock()
+			return
+		}
+		// We won the race — claim this dispatch by removing the entry.
 		delete(w.debouncers, file)
 		w.mu.Unlock()
 		w.dispatchReload(file)
@@ -394,11 +434,15 @@ func (w *Watcher) shutdown() {
 	w.supervisors = make(map[string]*WorkerSupervisor)
 	// Cancel any pending debounce timers so AfterFunc callbacks don't
 	// fire after Run returns and try to spawn supervisors into a
-	// shutting-down watcher.
-	for _, t := range w.debouncers {
-		t.Stop()
+	// shutting-down watcher. Even if a timer has already fired and the
+	// callback is in flight, the dispatchReload path checks w.closed
+	// and the schedule-side generation check rejects on missing entry.
+	for _, e := range w.debouncers {
+		if e.timer != nil {
+			e.timer.Stop()
+		}
 	}
-	w.debouncers = make(map[string]*time.Timer)
+	w.debouncers = make(map[string]*debounceEntry)
 	w.mu.Unlock()
 
 	var wg sync.WaitGroup
