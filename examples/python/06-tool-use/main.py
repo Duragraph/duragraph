@@ -15,35 +15,52 @@ from typing import Any
 from duragraph import Graph, entrypoint, node, tool, tool_node, llm_node
 
 
+import httpx
+
+
 @tool(description="Get the current weather for a city")
 def get_weather(city: str, unit: str = "celsius") -> str:
-    """Return simulated weather data for demonstration."""
-    weather_data = {
-        "new york": {"temp": 22, "condition": "Partly cloudy"},
-        "london": {"temp": 15, "condition": "Rainy"},
-        "tokyo": {"temp": 28, "condition": "Sunny"},
-        "sydney": {"temp": 19, "condition": "Clear"},
-    }
-    data = weather_data.get(city.lower(), {"temp": 20, "condition": "Unknown"})
-    temp = data["temp"] if unit == "celsius" else int(data["temp"] * 9 / 5 + 32)
-    symbol = "°C" if unit == "celsius" else "°F"
-    return f"{city}: {data['condition']}, {temp}{symbol}"
+    """Fetch live weather from wttr.in (no API key required)."""
+    fmt = "3" if unit == "celsius" else "u"
+    try:
+        r = httpx.get(
+            f"https://wttr.in/{city}",
+            params={"format": fmt} if unit == "celsius" else {"format": "3", "u": ""},
+            headers={"User-Agent": "duragraph-tool-use-demo/1.0"},
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        # wttr.in `format=3` returns one line: "City: 🌫 +12°C"
+        return r.text.strip()
+    except Exception as exc:  # noqa: BLE001
+        return f"weather lookup failed for {city!r}: {exc}"
 
 
-@tool(description="Search for documents by keyword")
+@tool(description="Search Wikipedia and return a one-sentence summary")
 def search_documents(query: str, max_results: int = 3) -> str:
-    """Return simulated search results for demonstration."""
-    docs = [
-        {"title": "Event Sourcing Guide", "summary": "Patterns for event-driven architectures"},
-        {"title": "CQRS in Practice", "summary": "Command-query responsibility segregation"},
-        {"title": "AI Orchestration", "summary": "Building reliable AI workflow pipelines"},
-        {"title": "Graph Execution", "summary": "DAG-based execution models for agents"},
-    ]
-    matches = [d for d in docs if query.lower() in d["title"].lower() or query.lower() in d["summary"].lower()]
-    if not matches:
-        matches = docs[:max_results]
-    results = matches[:max_results]
-    return "\n".join(f"- {d['title']}: {d['summary']}" for d in results)
+    """Hit the Wikipedia REST API (no key) and summarize the top hit."""
+    try:
+        # Step 1 — search
+        sr = httpx.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "opensearch",
+                "search": query,
+                "limit": max_results,
+                "format": "json",
+            },
+            headers={"User-Agent": "duragraph-tool-use-demo/1.0"},
+            timeout=10.0,
+        )
+        sr.raise_for_status()
+        data = sr.json()
+        titles, descs, urls = data[1], data[2], data[3]
+        if not titles:
+            return f"no Wikipedia results for {query!r}"
+        lines = [f"- {t}: {d or '(no summary)'}\n  {u}" for t, d, u in zip(titles, descs, urls)]
+        return "\n".join(lines[:max_results])
+    except Exception as exc:  # noqa: BLE001
+        return f"wikipedia search failed for {query!r}: {exc}"
 
 
 @tool(description="Perform a mathematical calculation")
@@ -66,9 +83,27 @@ class ToolUseAgent:
     @entrypoint
     @node()
     async def prepare(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Prepare the request for tool-augmented LLM processing."""
-        user_input = state.get("input", "")
-        state["messages"] = [{"role": "user", "content": user_input}]
+        """Prepare the request for tool-augmented LLM processing.
+
+        Accepts both input shapes:
+          - LangChain / Studio:  {"messages": [{"role": "user", "content": "..."}]}
+          - Legacy / curl demo:  {"input": "..."}
+        """
+        # Studio sends `messages`; pull the latest user message text out
+        incoming = state.get("messages") or []
+        user_input = state.get("input", "") or ""
+        if not user_input and incoming:
+            for m in reversed(incoming):
+                if m.get("role") == "user":
+                    user_input = m.get("content", "")
+                    break
+
+        state["input"] = user_input
+        state["messages"] = (
+            list(incoming)
+            if incoming
+            else [{"role": "user", "content": user_input}]
+        )
         state["tools_used"] = []
         print(f"[prepare] Query: {user_input}")
         return state
@@ -110,8 +145,13 @@ class ToolUseAgent:
             state["tools_used"].append("calculate")
 
         else:
-            available = [t.name for t in registry.list_tools()]
-            state["tool_results"] = [f"Available tools: {', '.join(available)}"]
+            # registry.list_tools() returns list[str] (tool names)
+            available = list(registry.list_tools())
+            state["tool_results"] = [
+                "Hi! I'm a tool-using agent. Try asking me about the weather "
+                "in a city, searching Wikipedia for a topic, or doing some "
+                f"math. Available tools: {', '.join(available)}."
+            ]
 
         print(f"[run_tools] Used: {state['tools_used']}")
         return state

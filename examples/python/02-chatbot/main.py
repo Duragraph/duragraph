@@ -1,10 +1,10 @@
 """
-DuraGraph Chatbot with Memory Example
+DuraGraph Chatbot — backed by OpenAI when OPENAI_API_KEY is set,
+falls back to a rule-based responder otherwise.
 
-Demonstrates:
-- Conversation memory using thread_id
-- Multi-node processing pipeline with >> edges
-- Serving as a worker on the control plane
+Accepts both input shapes:
+  - LangChain / Studio:  {"messages": [{"role": "user", "content": "..."}, ...]}
+  - Legacy / curl demo:  {"thread_id": "alice", "input": "..."}
 """
 
 import os
@@ -14,112 +14,176 @@ from typing import Any
 from duragraph import Graph, node, entrypoint
 
 
-class ConversationStore:
-    """In-memory conversation store keyed by thread_id."""
+# --- LLM client (lazy, optional) ---------------------------------------
+# Prefer OpenRouter when its key is set (lets us use any provider through
+# the OpenAI-compatible SDK). Fall back to OpenAI direct, then rule-based.
+_llm_client: Any = None
+_llm_model: str = "rule-based"
+_llm_provider: str = "rule-based"
 
+try:
+    from openai import AsyncOpenAI
+
+    if os.environ.get("OPENROUTER_API_KEY"):
+        _llm_client = AsyncOpenAI(
+            api_key=os.environ["OPENROUTER_API_KEY"],
+            base_url="https://openrouter.ai/api/v1",
+            default_headers={
+                "HTTP-Referer": os.environ.get(
+                    "OPENROUTER_REFERER", "https://duragraph.io"
+                ),
+                "X-Title": os.environ.get("OPENROUTER_TITLE", "DuraGraph Chatbot Demo"),
+            },
+        )
+        _llm_model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+        _llm_provider = "openrouter"
+    elif os.environ.get("OPENAI_API_KEY"):
+        _llm_client = AsyncOpenAI()
+        _llm_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        _llm_provider = "openai"
+except ImportError:
+    pass
+
+
+# --- Server-side conversation memory ----------------------------------
+class ConversationStore:
     def __init__(self) -> None:
         self._store: dict[str, list[dict[str, str]]] = defaultdict(list)
 
-    def get_messages(self, thread_id: str) -> list[dict[str, str]]:
+    def get(self, thread_id: str) -> list[dict[str, str]]:
         return self._store[thread_id].copy()
 
-    def add_message(self, thread_id: str, role: str, content: str) -> None:
+    def append(self, thread_id: str, role: str, content: str) -> None:
         self._store[thread_id].append({"role": role, "content": content})
 
 
 conversation_store = ConversationStore()
 
 
-@Graph(id="chatbot_with_memory", description="A chatbot that remembers conversation history")
+@Graph(id="chatbot_with_memory", description="LLM-backed chatbot with thread memory")
 class ChatbotWithMemory:
-    """Chatbot that maintains per-thread conversation history."""
+    """Multi-turn chatbot. Uses OpenAI when configured, rules otherwise."""
 
     @entrypoint
     @node()
     async def load_history(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Load prior messages for this thread."""
+        """Resolve the message list from input + server-side store."""
         thread_id = state.get("thread_id", "default")
-        state["messages"] = conversation_store.get_messages(thread_id)
-        return state
 
-    @node()
-    async def add_user_message(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Append the user's new input to the message list."""
-        user_input = state.get("input", "")
-        if user_input:
-            state.setdefault("messages", []).append(
-                {"role": "user", "content": user_input}
-            )
+        # Studio / LangChain-style: messages already in input
+        incoming = state.get("messages") or []
+        if incoming:
+            state["messages"] = list(incoming)
+        else:
+            # Legacy curl shape: load from store, append new user input
+            user_input = state.get("input", "")
+            state["messages"] = conversation_store.get(thread_id)
+            if user_input:
+                state["messages"].append(
+                    {"role": "user", "content": user_input}
+                )
+
+        state["thread_id"] = thread_id
         return state
 
     @node()
     async def generate_response(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Generate a response (rule-based demo; replace with LLM in production)."""
+        """LLM call (OpenAI) or rule-based fallback."""
         messages: list[dict[str, str]] = state.get("messages", [])
         if not messages:
             state["response"] = "Hello! How can I help you?"
+            state["model"] = "none"
             return state
 
+        if _llm_client is not None:
+            payload = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful assistant integrated with DuraGraph, "
+                        "an AI workflow orchestration platform built on event "
+                        "sourcing, CQRS, and worker dispatch via NATS JetStream. "
+                        "Be concise."
+                    ),
+                }
+            ] + [
+                {"role": m.get("role", "user"), "content": m.get("content", "")}
+                for m in messages
+                if m.get("role") in ("user", "assistant", "system")
+            ]
+            try:
+                resp = await _llm_client.chat.completions.create(
+                    model=_llm_model,
+                    messages=payload,
+                    temperature=0.7,
+                )
+                state["response"] = resp.choices[0].message.content or ""
+                state["model"] = _llm_model
+                state["provider"] = _llm_provider
+                if resp.usage:
+                    state["usage"] = {
+                        "prompt_tokens": resp.usage.prompt_tokens,
+                        "completion_tokens": resp.usage.completion_tokens,
+                        "total_tokens": resp.usage.total_tokens,
+                    }
+            except Exception as exc:  # noqa: BLE001
+                state["response"] = f"[LLM error: {exc}]"
+                state["model"] = "error"
+            return state
+
+        # Rule-based fallback (no OPENAI_API_KEY set)
         last = messages[-1].get("content", "").lower()
         if any(w in last for w in ("hello", "hi", "hey")):
-            response = "Hello! How can I help you today?"
+            state["response"] = "Hello! How can I help you today?"
         elif "how are you" in last:
-            response = "I'm doing great, thanks for asking!"
+            state["response"] = "I'm doing great, thanks for asking!"
         elif any(w in last for w in ("bye", "goodbye")):
-            response = "Goodbye! Come back anytime."
+            state["response"] = "Goodbye! Come back anytime."
         else:
-            count = len(messages)
-            response = (
-                f"You said: '{messages[-1]['content']}'. "
-                f"This is message #{count} in our conversation."
+            state["response"] = (
+                f"You said: '{messages[-1].get('content')}'. "
+                "(Set OPENAI_API_KEY for a real LLM response.)"
             )
-
-        state["response"] = response
+        state["model"] = "rule-based"
         return state
 
     @node()
     async def save_response(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Persist both the user message and response to the store."""
+        """Persist last user/assistant exchange and append assistant message."""
         thread_id = state.get("thread_id", "default")
         response = state.get("response", "")
-        user_input = state.get("input", "")
+        messages: list[dict[str, str]] = state.get("messages", [])
 
-        if user_input:
-            conversation_store.add_message(thread_id, "user", user_input)
         if response:
-            conversation_store.add_message(thread_id, "assistant", response)
-            state.setdefault("messages", []).append(
-                {"role": "assistant", "content": response}
-            )
+            # Append assistant turn unless already there
+            if not messages or messages[-1].get("role") != "assistant":
+                messages.append({"role": "assistant", "content": response})
+                state["messages"] = messages
+
+            # Persist last user→assistant pair to server-side store
+            for m in messages[-2:]:
+                role = m.get("role")
+                if role in ("user", "assistant"):
+                    conversation_store.append(thread_id, role, m.get("content", ""))
         return state
 
-    load_history >> add_user_message >> generate_response >> save_response
+    load_history >> generate_response >> save_response
 
 
 def main() -> None:
     agent = ChatbotWithMemory()
 
-    # --- Local interactive mode ---
-    print("DuraGraph Chatbot (type 'quit' to exit, 'serve' to connect to control plane)")
-    print("=" * 60)
-
-    thread_id = "local-demo"
-    while True:
-        user_input = input("You: ").strip()
-        if not user_input:
-            continue
-        if user_input.lower() in ("quit", "exit"):
-            print("Goodbye!")
-            break
-        if user_input.lower() == "serve":
-            control_plane = os.getenv("DURAGRAPH_URL", "http://localhost:8081")
-            print(f"\nServing on {control_plane}...")
-            print("Press Ctrl+C to stop\n")
-            agent.serve(control_plane, worker_name="chatbot-worker")
-            return
-
-        result = agent.run({"input": user_input, "thread_id": thread_id})
-        print(f"Bot: {result.output.get('response', 'No response')}")
+    # Skip the interactive prompt — go straight to serving on the control plane.
+    # (The previous interactive shell was kept for hand-driving; for a worker
+    # process it just blocks on stdin which is fine to skip.)
+    control_plane = os.getenv("DURAGRAPH_URL", "http://localhost:8081")
+    backend = (
+        f"{_llm_provider} ({_llm_model})" if _llm_client else "rule-based fallback"
+    )
+    print(f"Backend: {backend}")
+    print(f"Serving on {control_plane}...")
+    print("Press Ctrl+C to stop\n")
+    agent.serve(control_plane, worker_name="chatbot-worker")
 
 
 if __name__ == "__main__":
