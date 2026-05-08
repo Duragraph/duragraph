@@ -21,11 +21,17 @@ Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/durag
    ```
 
 2. **Run your first example:**
+
+   > Python examples are run with `uv` — never `pip install`, never `python -m venv`. The SDK is installed as an editable dep from the sibling `duragraph-python` checkout.
+
    ```bash
    cd python/01-hello-world
-   pip install -r requirements.txt
-   python main.py
+   DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
+     uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+     python main.py
    ```
+
+   See [`python/01-hello-world/README.md`](python/01-hello-world/README.md) for the full demo cheat sheet (SSH port forwarding, end-to-end run, event-store inspection).
 
 ## Examples
 

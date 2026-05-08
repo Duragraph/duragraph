@@ -16,14 +16,14 @@ A conversational chatbot that maintains conversation history across multiple run
 
 ## Quick Start
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. **Run the worker:**
 
-2. **Run the worker:**
+   > Always use `uv`. Never `pip install`, never `python -m venv`, never `source .venv/bin/activate`.
+
    ```bash
-   python main.py
+   DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
+     uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+     python main.py
    ```
 
 3. **Start a conversation** (in another terminal):

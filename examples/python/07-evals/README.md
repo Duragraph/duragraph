@@ -16,14 +16,14 @@ Demonstrates how to build a test harness for evaluating DuraGraph graph outputs.
 
 ## Quick Start
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. **Run the evals:**
 
-2. **Run the evals:**
+   > Always use `uv`. Never `pip install`, never `python -m venv`, never `source .venv/bin/activate`.
+
    ```bash
-   python main.py
+   DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
+     uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+     python main.py
    ```
 
 ## Architecture

@@ -11,9 +11,12 @@ Demonstrates human approval workflows using `@human_node` for content review bef
 
 ## Running
 
+> Always use `uv`. Never `pip install`, never `python -m venv`, never `source .venv/bin/activate`.
+
 ```bash
-pip install duragraph
-python main.py
+DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
+  uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+  python main.py
 ```
 
 ## Flow
