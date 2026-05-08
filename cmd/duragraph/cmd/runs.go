@@ -262,12 +262,18 @@ func runRunsTail(cmd *cobra.Command, args []string) error {
 	}
 
 	// No thread_id: subscribe directly to NATS for run lifecycle
-	// events across all threads. Subject `duragraph.runs.run.>`
-	// matches outbox_relay.buildTopic for aggregateType="run".
+	// events across all threads. Delegate subject construction to
+	// cli.SubjectFor so this stays in sync with the `events tail`
+	// mapping (and with outbox_relay.buildTopic).
 	natsURL := resolveNATSURL(runsTailNATSURL)
-	const subject = "duragraph.runs.run.>"
+	subject, err := cli.SubjectFor("run")
+	if err != nil {
+		// Unreachable: "run" is a known aggregate. Defensive in case
+		// SubjectFor's allow-list ever changes underneath us.
+		return fmt.Errorf("resolve runs-tail subject: %w", err)
+	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "tailing all runs via NATS %s subject=%s\n", natsURL, subject)
-	err := cli.SubscribeEvents(ctx, natsURL, subject, "", func(env cli.EventEnvelope) error {
+	err = cli.SubscribeEvents(ctx, natsURL, subject, "", func(env cli.EventEnvelope) error {
 		return cli.PrintEvent(out, env.EventType, env)
 	})
 	if err != nil && ctx.Err() == nil {

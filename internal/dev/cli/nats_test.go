@@ -13,8 +13,8 @@ func TestSubjectFor(t *testing.T) {
 		ok   bool
 	}{
 		{"", "duragraph.>", true},
-		{"run", "duragraph.runs.>", true},
-		{"execution", "duragraph.executions.>", true},
+		{"run", "duragraph.runs.run.>", true},
+		{"execution", "duragraph.executions.execution.>", true},
 		{"thread", "duragraph.events.thread.>", true},
 		{"workflow", "duragraph.events.workflow.>", true},
 		{"tenant", "duragraph.events.tenant.>", true},

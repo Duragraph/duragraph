@@ -45,6 +45,7 @@ workflow | tenant | user). Filter further by aggregate id with --id.
 
 The NATS URL defaults to nats://localhost:4222 and is overridable via
 $DURAGRAPH_NATS_URL or --nats. Press Ctrl+C to stop.`,
+	Args: cobra.NoArgs,
 	RunE: runEventsTail,
 }
 

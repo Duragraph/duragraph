@@ -238,9 +238,13 @@ func (c *Client) StreamRuns(ctx context.Context, threadID string, fn func(SSEEve
 func parseSSE(r io.Reader, fn func(SSEEvent) error) error {
 	scanner := bufio.NewScanner(r)
 	// Default 64KiB buffer is too small for large workflow state
-	// payloads. Bump to 1MiB which matches the engine's HTTP body size
-	// cap on the producer side.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// payloads. The engine's SSE formatter emits the entire JSON
+	// payload on a single `data:` line (formatter.go:55), so a verbose
+	// run with rich tool outputs / intermediate state can blow past
+	// 1MiB. Bump the per-line cap to 16MiB to give comfortable
+	// headroom — typical run payloads stay well under 1MB but the
+	// limit only matters at the tail.
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 	var (
 		eventType string

@@ -22,18 +22,26 @@ const DefaultNATSURL = "nats://localhost:4222"
 // routed to a non-`events` category in outbox_relay.go must be added
 // here as well.
 //
-// Note: `--aggregate run` maps to `duragraph.runs.>`, NOT
-// `duragraph.events.run.>`. The outbox relay routes runs to the
-// `duragraph.runs.<aggregate>.<event>` subject family because the
-// stream is also used for the per-run SSE bridge in
-// internal/infrastructure/streaming/bridge.go.
+// outbox_relay.buildTopic produces:
 //
-// Unfiltered subscription uses `duragraph.>` so all three subject
-// families (events / runs / executions) are covered.
+//	aggregateType="run"        → duragraph.runs.run.<event>
+//	aggregateType="execution"  → duragraph.executions.execution.<event>
+//	aggregateType=<other>      → duragraph.events.<other>.<event>
+//
+// We deliberately match the FULL three-segment prefix (e.g.
+// `duragraph.runs.run.>`) rather than the looser `duragraph.runs.>` so
+// the CLI doesn't accidentally pick up unrelated traffic that other
+// engine subsystems publish under `duragraph.runs.*` — notably the
+// task-queue (internal/infrastructure/messaging/nats/task_queue.go,
+// `duragraph.runs.<runID>.<eventType>`) and the per-run SSE bridge
+// (internal/infrastructure/streaming/bridge.go, `duragraph.stream.*`).
+//
+// Unfiltered subscription uses `duragraph.>` so all subject families
+// (events / runs / executions / stream / tasks) are covered.
 const (
 	subjectAll        = "duragraph.>"
-	subjectRunsAll    = "duragraph.runs.>"
-	subjectExecAll    = "duragraph.executions.>"
+	subjectRunsAll    = "duragraph.runs.run.>"
+	subjectExecAll    = "duragraph.executions.execution.>"
 	subjectEventsRoot = "duragraph.events"
 )
 
