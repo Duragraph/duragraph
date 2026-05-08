@@ -1,0 +1,94 @@
+version: "3.9"
+
+# Local-dev stack for DuraGraph demos.
+#
+# Container names use the `duragraph-dev-` prefix. Services are NOT exposed
+# on their traditional ports — the demo is reached via SSH port forwarding
+# from a developer laptop, so:
+#   - DuraGraph API:    host 18081 → container 8081
+#   - DuraGraph metrics: host 19090 → container 9090
+#   - Postgres:         host 5435  → container 5432   (per operator request)
+#   - NATS:             internal only (no host port)
+#   - NATS HTTP UI:     internal only (no host port)
+#
+# To reach the API/metrics from a laptop:
+#   ssh -L 18081:localhost:18081 -L 19090:localhost:19090 vps-host
+#
+# Schema: migrations from the duragraph repo are mounted into the Postgres
+# init directory so the schema is applied on first volume creation.
+
+services:
+  duragraph:
+    image: duragraph-server:latest
+    container_name: duragraph-dev-app
+    ports:
+      - "18081:8081"   # API — non-traditional host port
+      - "19090:9090"   # Prometheus metrics — non-traditional host port
+    environment:
+      - PORT=8081
+      - HOST=0.0.0.0
+      - DB_HOST=duragraph-dev-postgres
+      - DB_PORT=5432
+      - DB_USER=duragraph
+      - DB_PASSWORD=duragraph
+      - DB_NAME=duragraph
+      - DB_SSLMODE=disable
+      - NATS_URL=nats://duragraph-dev-nats:4222
+      - AUTH_ENABLED=false
+    depends_on:
+      duragraph-dev-postgres:
+        condition: service_healthy
+      duragraph-dev-nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  duragraph-dev-postgres:
+    image: postgres:15-alpine
+    container_name: duragraph-dev-postgres
+    ports:
+      - "5435:5432"
+    environment:
+      - POSTGRES_USER=duragraph
+      - POSTGRES_PASSWORD=duragraph
+      - POSTGRES_DB=duragraph
+    volumes:
+      - duragraph_dev_postgres_data:/var/lib/postgresql/data
+      # Migrations are applied by the duragraph binary on startup
+      # via golang-migrate, not by Postgres init scripts.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U duragraph"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  duragraph-dev-nats:
+    image: nats:2.10-alpine
+    container_name: duragraph-dev-nats
+    # No host port mappings — control plane reaches NATS over the
+    # docker network. UI is intentionally not exposed.
+    expose:
+      - "4222"
+      - "8222"
+    command: ["--jetstream", "--http_port", "8222"]
+    volumes:
+      - duragraph_dev_nats_data:/data
+
+  duragraph-dev-redis:
+    image: redis:7-alpine
+    container_name: duragraph-dev-redis
+    expose:
+      - "6379"
+    volumes:
+      - duragraph_dev_redis_data:/data
+    profiles:
+      - with-redis
+
+volumes:
+  duragraph_dev_postgres_data:
+  duragraph_dev_nats_data:
+  duragraph_dev_redis_data:
