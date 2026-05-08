@@ -1,10 +1,16 @@
-name: Deploy Docs
+name: Docs Deploy
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs-deploy.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs-deploy.yml'
 
 permissions:
   contents: read
@@ -15,6 +21,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: cloudflare
+    defaults:
+      run:
+        working-directory: docs
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +48,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist --project-name=duragraph-docs
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          workingDirectory: docs
 
       - name: Comment PR with preview URL
         if: github.event_name == 'pull_request'

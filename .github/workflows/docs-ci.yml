@@ -1,12 +1,18 @@
-name: CI
+name: Docs CI
 
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs-ci.yml'
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
     steps:
       - uses: actions/checkout@v4
 
