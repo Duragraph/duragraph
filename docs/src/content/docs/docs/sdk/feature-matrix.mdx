@@ -1,0 +1,136 @@
+---
+title: SDK Feature Matrix
+description: Feature comparison between Python and Go SDKs
+---
+
+import { Badge } from '@astrojs/starlight/components';
+
+This page shows the feature parity between DuraGraph's Python and Go SDKs.
+
+**Legend:**
+
+- ✅ Complete - Feature is fully implemented and tested
+- 🚧 Partial - Feature is partially implemented
+- 📋 Planned - Feature is planned but not started
+- ➖ Not Planned - Feature is not planned for this SDK
+
+---
+
+## Core Features
+
+Essential graph definition and execution features.
+
+| Feature             | Python | Go  | Notes                                                                      |
+| ------------------- | ------ | --- | -------------------------------------------------------------------------- |
+| Graph Definition    | ✅     | ✅  | Python: `@Graph` decorator, Go: `Graph[S]` generics                        |
+| Node Types          | ✅     | 🚧  | Python: `@llm_node`, `@tool_node`, `@dspy_node`, etc. Go: `Node` interface |
+| Edge Definition     | ✅     | ✅  | Python: `>>` operator, Go: `AddEdge()`                                     |
+| Conditional Routing | ✅     | ✅  | Python: `@router_node`, Go: `Router` interface                             |
+| Entrypoint          | ✅     | ✅  | Python: `@entrypoint`, Go: `SetEntrypoint()`                               |
+
+---
+
+## Execution
+
+Running and executing graphs.
+
+| Feature           | Python | Go  | Notes                              |
+| ----------------- | ------ | --- | ---------------------------------- |
+| Local Execution   | ✅     | ✅  | Run graphs without control plane   |
+| Worker Runtime    | ✅     | 🚧  | Connect to control plane as worker |
+| Streaming         | 🚧     | 📋  | Stream tokens and events           |
+| Human-in-the-Loop | ✅     | 📋  | Pause for human approval           |
+
+---
+
+## LLM Providers
+
+Large Language Model integrations.
+
+| Provider      | Python | Go  | Notes                       |
+| ------------- | ------ | --- | --------------------------- |
+| LLM Interface | 🚧     | ✅  | Go has `Provider` interface |
+| OpenAI        | 📋     | 📋  | GPT-4, GPT-4o, etc.         |
+| Anthropic     | 📋     | 📋  | Claude models               |
+| Ollama        | 📋     | 📋  | Local models                |
+| Google Gemini | 📋     | 📋  | Gemini models               |
+| Cohere        | 📋     | 📋  | Command models              |
+| AWS Bedrock   | 📋     | 📋  | Bedrock models              |
+
+---
+
+## Vector Stores
+
+Vector database integrations for RAG applications.
+
+| Vector Store  | Python | Go  | Notes                    |
+| ------------- | ------ | --- | ------------------------ |
+| Interface     | ✅     | 📋  | `VectorStore` base class |
+| Chroma        | ✅     | 📋  | Local/self-hosted        |
+| Pinecone      | ✅     | 📋  | Managed cloud            |
+| Qdrant        | ✅     | 📋  | Open-source              |
+| Weaviate      | ✅     | 📋  | Open-source              |
+| pgvector      | ✅     | 📋  | PostgreSQL extension     |
+| Milvus        | 📋     | 📋  | Open-source              |
+| Elasticsearch | 📋     | 📋  | Vector search            |
+
+---
+
+## Embeddings
+
+Text embedding providers for vector stores.
+
+| Provider  | Python | Go  | Notes                          |
+| --------- | ------ | --- | ------------------------------ |
+| Interface | ✅     | 📋  | `EmbeddingProvider` base class |
+| OpenAI    | ✅     | 📋  | text-embedding-3-\*            |
+| Cohere    | ✅     | 📋  | embed-\* models                |
+| Ollama    | ✅     | 📋  | Local embeddings               |
+
+---
+
+## Developer Experience
+
+CLI and development tools.
+
+| Feature           | Python | Go  | Notes                                                   |
+| ----------------- | ------ | --- | ------------------------------------------------------- |
+| CLI Tool          | 🚧     | ➖  | `duragraph` command                                     |
+| DSPy Integration  | ✅     | ➖  | `@dspy_node` decorator (Predict, ChainOfThought, ReAct) |
+| Prompt Management | ✅     | 📋  | `@prompt` decorator                                     |
+| Subgraphs         | 📋     | 📋  | Compose from smaller graphs                             |
+| Visualization     | 📋     | 📋  | Visualize graph structure                               |
+
+---
+
+## Observability
+
+Tracing, metrics, and debugging.
+
+| Feature             | Python | Go  | Notes         |
+| ------------------- | ------ | --- | ------------- |
+| Distributed Tracing | 🚧     | 📋  | OpenTelemetry |
+| Metrics             | 📋     | 📋  | Prometheus    |
+| Testing Utilities   | 🚧     | 📋  | Test helpers  |
+
+---
+
+## Summary
+
+| SDK        | Complete | Partial | Planned | Not Planned |
+| ---------- | -------- | ------- | ------- | ----------- |
+| **Python** | 17       | 5       | 12      | 0           |
+| **Go**     | 6        | 2       | 24      | 2           |
+
+---
+
+## Resources
+
+- [Python SDK Repository](https://github.com/Duragraph/duragraph-python)
+- [Go SDK Repository](https://github.com/Duragraph/duragraph-go)
+- [Python SDK Quick Start](/docs/sdk/python)
+- [Go SDK Quick Start](/docs/sdk/go)
+
+---
+
+_Last updated: April 2026_

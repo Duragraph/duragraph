@@ -1,0 +1,655 @@
+---
+title: Go SDK Reference
+description: Complete reference for the DuraGraph Go SDK
+---
+
+The DuraGraph Go SDK provides a type-safe, high-performance interface for building AI agents and workflows. Built with Go generics, interface-based design, and idiomatic patterns.
+
+:::note[Current Version]
+**v0.5.0** - In Active Development  
+**Installation**: `go get github.com/duragraph/duragraph-go`  
+**Repository**: [duragraph-go](https://github.com/Duragraph/duragraph-go)
+:::
+
+## Installation
+
+```bash
+go get github.com/duragraph/duragraph-go
+```
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+
+    "github.com/duragraph/duragraph-go/graph"
+    "github.com/duragraph/duragraph-go/worker"
+)
+
+// Define your state
+type ChatState struct {
+    Messages []string `json:"messages"`
+    Result   string   `json:"result,omitempty"`
+}
+
+// Define a node
+type ThinkNode struct{}
+
+func (n *ThinkNode) Execute(ctx context.Context, state *ChatState) (*ChatState, error) {
+    state.Result = "Hello from Go!"
+    return state, nil
+}
+
+func main() {
+    // Create graph
+    g := graph.New[ChatState]("my_agent")
+    g.AddNode("think", &ThinkNode{})
+    g.SetEntrypoint("think")
+
+    // Run locally
+    result, err := g.Run(context.Background(), &ChatState{
+        Messages: []string{"Hello"},
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    log.Println(result.Result)
+
+    // Or connect to control plane
+    w := worker.New(g,
+        worker.WithControlPlane("http://localhost:8081"),
+    )
+    w.Start(context.Background())
+}
+```
+
+## Core Concepts
+
+### Graph Definition
+
+Graphs are defined using Go generics for compile-time type safety.
+
+```go
+import "github.com/duragraph/duragraph-go/graph"
+
+type MyState struct {
+    Input  string `json:"input"`
+    Output string `json:"output"`
+}
+
+// Create typed graph
+g := graph.New[MyState]("my_graph")
+```
+
+### Node Interface
+
+All nodes implement the `Node` interface:
+
+```go
+type Node[S any] interface {
+    Execute(ctx context.Context, state *S) (*S, error)
+}
+```
+
+**Example node:**
+
+```go
+type ProcessNode struct {
+    config string
+}
+
+func (n *ProcessNode) Execute(ctx context.Context, state *MyState) (*MyState, error) {
+    // Process state
+    state.Output = "Processed: " + state.Input
+    return state, nil
+}
+
+// Add to graph
+g.AddNode("process", &ProcessNode{config: "value"})
+```
+
+### Router Interface
+
+Conditional routing nodes implement the `Router` interface:
+
+```go
+type Router[S any] interface {
+    Route(ctx context.Context, state *S) (string, error)
+}
+```
+
+**Example router:**
+
+```go
+type IntentRouter struct{}
+
+func (r *IntentRouter) Route(ctx context.Context, state *ChatState) (string, error) {
+    if containsKeyword(state.Messages, "billing") {
+        return "billing_handler", nil
+    }
+    return "general_handler", nil
+}
+
+// Add as router
+g.AddRouter("route_intent", &IntentRouter{})
+```
+
+### Edges
+
+Define transitions between nodes.
+
+```go
+// Sequential edge
+g.AddEdge("node_a", "node_b")
+
+// Conditional edges
+g.AddConditionalEdges("router", map[string]string{
+    "billing_handler":  "billing_node",
+    "general_handler":  "general_node",
+})
+
+// Set entrypoint
+g.SetEntrypoint("start_node")
+```
+
+## LLM Providers
+
+### OpenAI
+
+```go
+import (
+    "github.com/duragraph/duragraph-go/llm/openai"
+)
+
+type LLMNode struct {
+    client *openai.Client
+}
+
+func NewLLMNode() *LLMNode {
+    return &LLMNode{
+        client: openai.NewClient(
+            openai.WithAPIKey("sk-..."),
+            openai.WithModel("gpt-4o"),
+            openai.WithTemperature(0.7),
+        ),
+    }
+}
+
+func (n *LLMNode) Execute(ctx context.Context, state *ChatState) (*ChatState, error) {
+    resp, err := n.client.ChatCompletion(ctx, &openai.ChatRequest{
+        Messages: []openai.Message{
+            {Role: "user", Content: "Hello"},
+        },
+    })
+    if err != nil {
+        return nil, err
+    }
+
+    state.Result = resp.Choices[0].Message.Content
+    return state, nil
+}
+```
+
+**Supported Models:**
+
+- `gpt-4o`
+- `gpt-4o-mini`
+- `gpt-4-turbo`
+- `gpt-4`
+- `gpt-3.5-turbo`
+
+### Anthropic
+
+```go
+import "github.com/duragraph/duragraph-go/llm/anthropic"
+
+client := anthropic.NewClient(
+    anthropic.WithAPIKey("sk-ant-..."),
+    anthropic.WithModel("claude-3-5-sonnet-20241022"),
+)
+
+resp, err := client.Messages(ctx, &anthropic.MessageRequest{
+    Messages: []anthropic.Message{
+        {Role: "user", Content: "Hello"},
+    },
+    MaxTokens: 1024,
+})
+```
+
+**Supported Models:**
+
+- `claude-3-5-sonnet-20241022`
+- `claude-3-opus-20240229`
+- `claude-3-sonnet-20240229`
+- `claude-3-haiku-20240307`
+
+### Gemini
+
+```go
+import "github.com/duragraph/duragraph-go/llm/gemini"
+
+client := gemini.NewClient(
+    gemini.WithAPIKey("your-key"),
+    gemini.WithModel("gemini-1.5-pro"),
+)
+```
+
+### Ollama (Local)
+
+```go
+import "github.com/duragraph/duragraph-go/llm/ollama"
+
+client := ollama.NewClient(
+    ollama.WithBaseURL("http://localhost:11434"),
+    ollama.WithModel("llama3.1"),
+)
+```
+
+## Vector Stores
+
+### Chroma
+
+```go
+import "github.com/duragraph/duragraph-go/vectorstore/chroma"
+
+vs, err := chroma.New(
+    chroma.WithURL("http://localhost:8000"),
+    chroma.WithCollection("my_docs"),
+)
+
+// Add documents
+err = vs.AddDocuments(ctx, []chroma.Document{
+    {ID: "1", Text: "Document 1", Metadata: map[string]any{"source": "file1.txt"}},
+    {ID: "2", Text: "Document 2", Metadata: map[string]any{"source": "file2.txt"}},
+})
+
+// Search
+results, err := vs.SimilaritySearch(ctx, "query", chroma.WithK(5))
+```
+
+### Pinecone
+
+```go
+import "github.com/duragraph/duragraph-go/vectorstore/pinecone"
+
+vs, err := pinecone.New(
+    pinecone.WithAPIKey("your-key"),
+    pinecone.WithEnvironment("us-east-1-aws"),
+    pinecone.WithIndex("my-index"),
+)
+```
+
+### Qdrant
+
+```go
+import "github.com/duragraph/duragraph-go/vectorstore/qdrant"
+
+vs, err := qdrant.New(
+    qdrant.WithURL("http://localhost:6333"),
+    qdrant.WithCollection("my_collection"),
+)
+```
+
+### Weaviate
+
+```go
+import "github.com/duragraph/duragraph-go/vectorstore/weaviate"
+
+vs, err := weaviate.New(
+    weaviate.WithURL("http://localhost:8080"),
+    weaviate.WithClass("Document"),
+)
+```
+
+### Milvus
+
+```go
+import "github.com/duragraph/duragraph-go/vectorstore/milvus"
+
+vs, err := milvus.New(
+    milvus.WithAddress("localhost:19530"),
+    milvus.WithCollection("my_collection"),
+)
+```
+
+### pgvector
+
+```go
+import "github.com/duragraph/duragraph-go/vectorstore/pgvector"
+
+vs, err := pgvector.New(
+    pgvector.WithDSN("postgres://user:pass@localhost/db"),
+    pgvector.WithTable("embeddings"),
+)
+```
+
+## Knowledge Graphs
+
+### Neo4j
+
+```go
+import "github.com/duragraph/duragraph-go/knowledgegraph/neo4j"
+
+kg, err := neo4j.New(
+    neo4j.WithURI("bolt://localhost:7687"),
+    neo4j.WithAuth("neo4j", "password"),
+)
+
+// Add entity
+err = kg.AddEntity(ctx, &neo4j.Entity{
+    Type:       "Person",
+    Properties: map[string]any{"name": "Alice", "age": 30},
+})
+
+// Add relationship
+err = kg.AddRelationship(ctx, &neo4j.Relationship{
+    From:       "entity-1",
+    To:         "entity-2",
+    Type:       "KNOWS",
+    Properties: map[string]any{"since": 2020},
+})
+
+// Query
+results, err := kg.Query(ctx, "MATCH (p:Person) RETURN p")
+```
+
+### Memgraph
+
+```go
+import "github.com/duragraph/duragraph-go/knowledgegraph/memgraph"
+
+kg, err := memgraph.New(
+    memgraph.WithAddress("localhost:7687"),
+    memgraph.WithAuth("", ""),
+)
+```
+
+### ArangoDB
+
+```go
+import "github.com/duragraph/duragraph-go/knowledgegraph/arangodb"
+
+kg, err := arangodb.New(
+    arangodb.WithEndpoint("http://localhost:8529"),
+    arangodb.WithDatabase("_system"),
+    arangodb.WithAuth("root", ""),
+)
+```
+
+## Worker Runtime
+
+Deploy graphs as workers that connect to the control plane.
+
+```go
+import "github.com/duragraph/duragraph-go/worker"
+
+// Create worker
+w := worker.New(
+    myGraph,
+    worker.WithControlPlane("http://localhost:8081"),
+    worker.WithHeartbeatInterval(30 * time.Second),
+    worker.WithMaxConcurrentTasks(10),
+    worker.WithGracefulShutdown(true),
+)
+
+// Start worker (blocking)
+if err := w.Start(context.Background()); err != nil {
+    log.Fatal(err)
+}
+```
+
+**Graceful Shutdown:**
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+// Handle signals
+sigChan := make(chan os.Signal, 1)
+signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+go func() {
+    <-sigChan
+    log.Println("Shutting down...")
+    cancel()
+}()
+
+// Start with context
+w.Start(ctx)
+```
+
+## Observability
+
+### OpenTelemetry
+
+```go
+import (
+    "github.com/duragraph/duragraph-go/observability"
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+)
+
+// Setup tracing
+exporter, err := otlptracehttp.New(ctx,
+    otlptracehttp.WithEndpoint("localhost:4318"),
+    otlptracehttp.WithInsecure(),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+tp := observability.NewTracerProvider(
+    observability.WithExporter(exporter),
+    observability.WithServiceName("my-agent"),
+)
+otel.SetTracerProvider(tp)
+
+// Traces automatically captured for graph execution
+```
+
+### Prometheus Metrics
+
+```go
+import (
+    "github.com/duragraph/duragraph-go/observability/metrics"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+// Setup metrics
+metricsRegistry := metrics.NewRegistry()
+
+// Expose /metrics endpoint
+http.Handle("/metrics", promhttp.Handler())
+go http.ListenAndServe(":9090", nil)
+
+// Metrics automatically collected:
+// - graph_executions_total
+// - graph_execution_duration_seconds
+// - node_executions_total
+// - node_execution_duration_seconds
+```
+
+## Document Storage
+
+### S3
+
+```go
+import "github.com/duragraph/duragraph-go/storage/s3"
+
+storage, err := s3.New(
+    s3.WithRegion("us-east-1"),
+    s3.WithBucket("my-bucket"),
+    s3.WithCredentials("access-key", "secret-key"),
+)
+
+// Upload
+err = storage.Upload(ctx, "path/to/file.txt", bytes.NewReader(data))
+
+// Download
+reader, err := storage.Download(ctx, "path/to/file.txt")
+```
+
+### GCS
+
+```go
+import "github.com/duragraph/duragraph-go/storage/gcs"
+
+storage, err := gcs.New(
+    gcs.WithBucket("my-bucket"),
+    gcs.WithCredentialsFile("service-account.json"),
+)
+```
+
+### Azure Blob
+
+```go
+import "github.com/duragraph/duragraph-go/storage/azureblob"
+
+storage, err := azureblob.New(
+    azureblob.WithAccountName("myaccount"),
+    azureblob.WithAccountKey("key"),
+    azureblob.WithContainer("mycontainer"),
+)
+```
+
+## Error Handling
+
+```go
+import "github.com/duragraph/duragraph-go/errors"
+
+func (n *MyNode) Execute(ctx context.Context, state *State) (*State, error) {
+    if state.Input == "" {
+        return nil, errors.NewValidationError("input is required")
+    }
+
+    result, err := someOperation()
+    if err != nil {
+        return nil, errors.Wrap(err, "operation failed")
+    }
+
+    state.Output = result
+    return state, nil
+}
+
+// Check error types
+if errors.IsValidationError(err) {
+    // Handle validation error
+}
+if errors.IsRetryableError(err) {
+    // Retry logic
+}
+```
+
+## Examples
+
+### RAG Agent
+
+```go
+package main
+
+import (
+    "context"
+    "github.com/duragraph/duragraph-go/graph"
+    "github.com/duragraph/duragraph-go/llm/openai"
+    "github.com/duragraph/duragraph-go/vectorstore/chroma"
+)
+
+type RAGState struct {
+    Query     string   `json:"query"`
+    Documents []string `json:"documents"`
+    Answer    string   `json:"answer"`
+}
+
+type RetrieveNode struct {
+    vs *chroma.VectorStore
+}
+
+func (n *RetrieveNode) Execute(ctx context.Context, state *RAGState) (*RAGState, error) {
+    results, err := n.vs.SimilaritySearch(ctx, state.Query, chroma.WithK(5))
+    if err != nil {
+        return nil, err
+    }
+
+    for _, doc := range results {
+        state.Documents = append(state.Documents, doc.Text)
+    }
+    return state, nil
+}
+
+type GenerateNode struct {
+    llm *openai.Client
+}
+
+func (n *GenerateNode) Execute(ctx context.Context, state *RAGState) (*RAGState, error) {
+    context := strings.Join(state.Documents, "\n")
+
+    resp, err := n.llm.ChatCompletion(ctx, &openai.ChatRequest{
+        Messages: []openai.Message{
+            {Role: "system", Content: "Context:\n" + context},
+            {Role: "user", Content: state.Query},
+        },
+    })
+    if err != nil {
+        return nil, err
+    }
+
+    state.Answer = resp.Choices[0].Message.Content
+    return state, nil
+}
+
+func main() {
+    vs, _ := chroma.New(chroma.WithURL("http://localhost:8000"))
+    llm := openai.NewClient(openai.WithModel("gpt-4o"))
+
+    g := graph.New[RAGState]("rag_agent")
+    g.AddNode("retrieve", &RetrieveNode{vs: vs})
+    g.AddNode("generate", &GenerateNode{llm: llm})
+    g.AddEdge("retrieve", "generate")
+    g.SetEntrypoint("retrieve")
+
+    result, _ := g.Run(context.Background(), &RAGState{
+        Query: "What is DuraGraph?",
+    })
+
+    log.Println(result.Answer)
+}
+```
+
+## Testing
+
+```go
+import (
+    "testing"
+    "github.com/duragraph/duragraph-go/graph"
+    "github.com/stretchr/testify/assert"
+)
+
+func TestMyGraph(t *testing.T) {
+    g := graph.New[MyState]("test_graph")
+    g.AddNode("process", &ProcessNode{})
+    g.SetEntrypoint("process")
+
+    result, err := g.Run(context.Background(), &MyState{
+        Input: "test",
+    })
+
+    assert.NoError(t, err)
+    assert.Equal(t, "Processed: test", result.Output)
+}
+```
+
+## API Reference
+
+For complete API documentation:
+
+- [Go SDK Documentation](https://pkg.go.dev/github.com/duragraph/duragraph-go)
+- [GitHub Repository](https://github.com/Duragraph/duragraph-go)
+- [Examples](https://github.com/Duragraph/duragraph-go/tree/main/examples)
+
+## Contributing
+
+See [Contributing Guide](https://github.com/Duragraph/.github/blob/main/CONTRIBUTING.md)

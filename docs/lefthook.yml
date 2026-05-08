@@ -1,0 +1,35 @@
+# Lefthook configuration
+# Install: https://github.com/evilmartians/lefthook
+# Run: lefthook install
+
+pre-commit:
+  parallel: true
+  commands:
+    prettier:
+      glob: "*.{js,jsx,ts,tsx,css,json,md,mdx,astro}"
+      run: pnpm exec prettier --write {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm exec commitlint --edit {1}
+
+pre-push:
+  parallel: true
+  commands:
+    validate-branch:
+      run: |
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        case "$branch" in
+          main|feat/*|fix/*|docs/*|style/*|chore/*|refactor/*) ;;
+          *)
+            echo "❌ Invalid branch name: $branch"
+            echo "Branch must start with: feat/, fix/, docs/, style/, chore/, or refactor/"
+            exit 1
+            ;;
+        esac
+    build:
+      run: pnpm build
+    validate-links:
+      run: pnpm validate-links || true
