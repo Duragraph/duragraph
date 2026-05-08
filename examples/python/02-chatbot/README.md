@@ -36,7 +36,7 @@ A conversational chatbot that maintains conversation history across multiple run
        "thread_id": "alice",
        "input": {"input": "Hello!", "thread_id": "alice"}
      }'
-   
+
    # Continue the conversation
    curl -X POST http://localhost:8081/api/v1/runs \
      -H "Content-Type: application/json" \
@@ -45,7 +45,7 @@ A conversational chatbot that maintains conversation history across multiple run
        "thread_id": "alice",
        "input": {"input": "What is your name?", "thread_id": "alice"}
      }'
-   
+
    # Third message - shows conversation context
    curl -X POST http://localhost:8081/api/v1/runs \
      -H "Content-Type: application/json" \
@@ -103,10 +103,10 @@ Worker registered. Waiting for runs...
 ```python
 class ConversationStore:
     """Stores conversation history by thread_id."""
-    
+
     def __init__(self):
         self._store: dict[str, list[dict[str, str]]] = defaultdict(list)
-    
+
     def get_messages(self, thread_id: str) -> list[dict[str, str]]:
         """Retrieve conversation history for a thread."""
         return self._store[thread_id].copy()
@@ -127,7 +127,7 @@ class ChatbotWithMemory:
         thread_id = state.get("thread_id", "default")
         state["messages"] = conversation_store.get_messages(thread_id)
         return state
-    
+
     @node
     async def add_user_message(self, state: dict) -> dict:
         """Add user's new message to conversation."""
@@ -136,7 +136,7 @@ class ChatbotWithMemory:
             "content": state.get("input", "")
         })
         return state
-    
+
     @node
     async def generate_response(self, state: dict) -> dict:
         """Generate response using conversation context."""
@@ -145,13 +145,13 @@ class ChatbotWithMemory:
         # Generate response based on history
         state["response"] = generate_ai_response(messages)
         return state
-    
+
     @node
     async def save_response(self, state: dict) -> dict:
         """Persist response to conversation store."""
         conversation_store.add_message(
-            state["thread_id"], 
-            "assistant", 
+            state["thread_id"],
+            "assistant",
             state["response"]
         )
         return state
@@ -202,11 +202,11 @@ import json
 class RedisConversationStore:
     def __init__(self):
         self.redis = redis.Redis(host='localhost', port=6379, db=0)
-    
+
     def get_messages(self, thread_id: str) -> list[dict[str, str]]:
         data = self.redis.get(f"thread:{thread_id}")
         return json.loads(data) if data else []
-    
+
     def add_message(self, thread_id: str, role: str, content: str):
         messages = self.get_messages(thread_id)
         messages.append({"role": role, "content": content})
@@ -226,12 +226,12 @@ class ChatbotWithMemory:
     async def load_history(self, state: dict) -> dict:
         # Same as before
         pass
-    
+
     @node
     async def add_user_message(self, state: dict) -> dict:
         # Same as before
         pass
-    
+
     @llm_node(
         model="gpt-4o-mini",
         temperature=0.7,
@@ -240,7 +240,7 @@ class ChatbotWithMemory:
     def generate_response(self, state: dict) -> dict:
         # llm_node automatically uses state["messages"]
         return state
-    
+
     @node
     async def save_response(self, state: dict) -> dict:
         # Same as before

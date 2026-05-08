@@ -39,14 +39,14 @@ Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/durag
 
 **Milestone v0.5 (SDK & Studio MVP):**
 - ✅ Python Hello World
-- ✅ Chatbot with Memory  
+- ✅ Chatbot with Memory
 - ✅ RAG Agent
 - ✅ Go Hello World
 
 **Milestone v0.8 (Production Ready):**
 - 🚧 Multi-agent collaboration
 - 🚧 Human-in-the-loop workflows
-- 🚧 Tool use patterns  
+- 🚧 Tool use patterns
 - 🚧 Evaluation framework
 
 ### Python

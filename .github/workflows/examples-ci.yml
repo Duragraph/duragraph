@@ -59,7 +59,10 @@ jobs:
               (
                 cd "$example"
                 if [ -f go.mod ]; then
-                  go mod download
+                  # `go mod tidy` resolves + writes go.sum (examples don't
+                  # commit go.sum). `go build` otherwise fails on missing
+                  # go.sum entries even though deps are downloadable.
+                  go mod tidy
                 fi
                 go build ./...
                 if find . -name "*_test.go" | grep -q .; then
