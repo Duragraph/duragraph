@@ -94,4 +94,5 @@ The 5 source repos are now archived (don't delete — history preserved server-s
 - Canonical Apache 2.0 license
 - Panic on short model names in LLM provider routing
 
+[0.7.0]: https://github.com/Duragraph/duragraph/releases/tag/v0.7.0
 [0.2.0]: https://github.com/Duragraph/duragraph/releases/tag/v0.2.0
