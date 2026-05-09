@@ -1,6 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { useChatStore } from '@/stores/chat'
-import { useCreateRun } from '@/api/runs'
 import { useCreateThread } from '@/api/threads'
 import { streamRun } from '@/lib/sse'
 import { ChatMessage } from '@/components/chat/ChatMessage'
@@ -24,7 +23,6 @@ export function ChatView() {
     setSSEStatus,
   } = useChatStore()
 
-  const createRun = useCreateRun()
   const createThread = useCreateThread()
   const scrollRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -70,6 +68,10 @@ export function ChatView() {
 
       const allMessages = [...messages, userMessage]
 
+      // streamRun does BOTH: creates the run on the control plane AND streams
+      // its lifecycle events back. Do not also call createRun — that would
+      // create a second run on the same thread, which the control plane's
+      // default multitask_strategy: "reject" will 409.
       cleanupRef.current?.()
       cleanupRef.current = streamRun(
         threadId,
@@ -99,12 +101,6 @@ export function ChatView() {
           },
         },
       )
-
-      createRun.mutate({
-        thread_id: threadId,
-        assistant_id: selectedAssistantId,
-        input: { messages: allMessages },
-      })
     },
     [
       selectedAssistantId,
@@ -115,7 +111,6 @@ export function ChatView() {
       setThread,
       handleEvent,
       setSSEStatus,
-      createRun,
       createThread,
     ],
   )

@@ -5,7 +5,12 @@ import type { Thread } from '@/types/entities'
 export function useThreads() {
   return useQuery({
     queryKey: ['threads'],
-    queryFn: () => apiFetch<Thread[]>('/threads'),
+    queryFn: async () => {
+      const res = await apiFetch<{ threads: Thread[]; total: number } | Thread[]>(
+        '/threads',
+      )
+      return Array.isArray(res) ? res : res.threads
+    },
   })
 }
 

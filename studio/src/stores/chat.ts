@@ -35,7 +35,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   nodeExecutions: [],
 
   setThread: (id) => set({ selectedThreadId: id, messages: [], nodeExecutions: [] }),
-  setAssistant: (id) => set({ selectedAssistantId: id }),
+  // Switching assistants always starts a fresh conversation. The control
+  // plane's default multitask_strategy is "reject", so reusing a thread
+  // across assistants 409s if a prior run is still active or paused.
+  setAssistant: (id) =>
+    set({
+      selectedAssistantId: id,
+      selectedThreadId: null,
+      messages: [],
+      streamingContent: '',
+      isStreaming: false,
+      nodeExecutions: [],
+    }),
   addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
   setMessages: (msgs) => set({ messages: msgs }),
   setStreaming: (streaming) => set({ isStreaming: streaming }),

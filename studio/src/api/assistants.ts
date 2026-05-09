@@ -5,7 +5,12 @@ import type { Assistant } from '@/types/entities'
 export function useAssistants() {
   return useQuery({
     queryKey: ['assistants'],
-    queryFn: () => apiFetch<Assistant[]>('/assistants'),
+    queryFn: async () => {
+      const res = await apiFetch<{ assistants: Assistant[]; total: number } | Assistant[]>(
+        '/assistants',
+      )
+      return Array.isArray(res) ? res : res.assistants
+    },
   })
 }
 
