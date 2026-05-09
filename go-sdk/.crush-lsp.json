@@ -1,0 +1,49 @@
+{
+  "lsp_servers": ["gopls"],
+  "gopls": {
+    "buildFlags": ["-tags=integration"],
+    "analyses": {
+      "unusedparams": true,
+      "shadow": true,
+      "fieldalignment": true
+    },
+    "staticcheck": true,
+    "gofumpt": true,
+    "completeUnimported": true,
+    "usePlaceholders": true,
+    "deepCompletion": true,
+    "matcher": "Fuzzy"
+  },
+  "project_root": "/home/qwe/platform/duragraph-org/duragraph-go",
+  "go_mod_path": "./go.mod",
+  "file_patterns": ["*.go"],
+  "features": {
+    "autocomplete": {
+      "enabled": true,
+      "trigger_characters": [".", ":", "("],
+      "resolve_support": true
+    },
+    "diagnostics": {
+      "enabled": true,
+      "on_type": true,
+      "on_save": true
+    },
+    "hover": {
+      "enabled": true,
+      "documentation": true
+    },
+    "definition": {
+      "enabled": true,
+      "peek_definition": true
+    },
+    "references": {
+      "enabled": true,
+      "include_declaration": true
+    },
+    "code_actions": {
+      "enabled": true,
+      "quick_fix": true,
+      "organize_imports": true
+    }
+  }
+}
