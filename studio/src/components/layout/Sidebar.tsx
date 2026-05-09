@@ -1,21 +1,49 @@
+import { useMemo } from 'react'
 import { useChatStore } from '@/stores/chat'
 import { useAssistants } from '@/api/assistants'
 import { useThreads, useCreateThread } from '@/api/threads'
+import { hydrateThreadMessages } from '@/lib/hydrate'
 
 export function Sidebar() {
   const { selectedThreadId, selectedAssistantId, setThread, setAssistant, setMessages } =
     useChatStore()
   const { data: assistants } = useAssistants()
-  const { data: threads } = useThreads()
+  const { data: allThreads } = useThreads()
   const createThread = useCreateThread()
 
+  // Threads are assistant-agnostic on the backend, but for chat UX we
+  // stamp `metadata.assistant_id` at creation time so each assistant has
+  // its own thread list. Filter the sidebar accordingly.
+  const threads = useMemo(() => {
+    if (!allThreads) return []
+    if (!selectedAssistantId) return []
+    return allThreads.filter(
+      (t) => (t.metadata as Record<string, unknown> | undefined)?.assistant_id === selectedAssistantId,
+    )
+  }, [allThreads, selectedAssistantId])
+
   async function handleNewThread() {
+    if (!selectedAssistantId) return
     try {
-      const thread = await createThread.mutateAsync({})
+      const thread = await createThread.mutateAsync({
+        metadata: { assistant_id: selectedAssistantId },
+      })
       setThread(thread.thread_id)
       setMessages([])
     } catch {
       // silently fail
+    }
+  }
+
+  async function handlePickThread(threadId: string) {
+    setThread(threadId)
+    // Rebuild the conversation from the thread's runs so a refresh or
+    // thread-switch shows historical messages instead of an empty pane.
+    try {
+      const messages = await hydrateThreadMessages(threadId)
+      setMessages(messages)
+    } catch {
+      setMessages([])
     }
   }
 
@@ -55,8 +83,13 @@ export function Sidebar() {
           <select
             value={selectedThreadId ?? ''}
             onChange={(e) => {
-              setThread(e.target.value || null)
-              setMessages([])
+              const v = e.target.value || null
+              if (v) {
+                handlePickThread(v)
+              } else {
+                setThread(null)
+                setMessages([])
+              }
             }}
             className="w-full border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
@@ -88,10 +121,7 @@ export function Sidebar() {
               {threads.slice(0, 10).map((t) => (
                 <button
                   key={t.thread_id}
-                  onClick={() => {
-                    setThread(t.thread_id)
-                    setMessages([])
-                  }}
+                  onClick={() => handlePickThread(t.thread_id)}
                   className={`w-full px-2 py-1.5 text-left text-xs hover:bg-accent transition-colors ${
                     selectedThreadId === t.thread_id ? 'bg-accent font-medium' : ''
                   }`}
