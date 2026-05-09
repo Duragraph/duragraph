@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/duragraph/duragraph-go/vectorstore"
-	"github.com/duragraph/duragraph-go/vectorstore/memory"
+	"github.com/duragraph/duragraph/go-sdk/vectorstore"
+	"github.com/duragraph/duragraph/go-sdk/vectorstore/memory"
 )
 
 func TestAddAndSearch(t *testing.T) {

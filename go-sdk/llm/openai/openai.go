@@ -17,7 +17,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/duragraph/duragraph-go/llm"
+	"github.com/duragraph/duragraph/go-sdk/llm"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"

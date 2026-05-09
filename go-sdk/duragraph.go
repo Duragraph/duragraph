@@ -5,7 +5,7 @@
 //
 // # Quick Start
 //
-//	import "github.com/duragraph/duragraph-go/graph"
+//	import "github.com/duragraph/duragraph/go-sdk/graph"
 //
 //	g := graph.New[MyState]("my_agent")
 //	g.AddNode("think", &ThinkNode{})

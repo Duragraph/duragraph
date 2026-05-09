@@ -51,10 +51,11 @@ jobs:
 
       - name: Build Go examples
         # Each example's go.mod has a `replace github.com/duragraph/
-        # duragraph-go => ../../../go-sdk` directive so it builds against
-        # the local SDK source (HEAD), not the published v0.1.0 (which is
-        # missing APIs the example uses). `go mod tidy` resolves the
-        # replace + writes go.sum since examples don't commit go.sum.
+        # duragraph/go-sdk => ../../../go-sdk` directive so it builds
+        # against the local SDK source (HEAD) rather than fetching from
+        # the proxy (which would only resolve once a `go-sdk/v*` tag is
+        # cut). `go mod tidy` resolves the replace + writes go.sum since
+        # examples don't commit go.sum.
         run: |
           set -euo pipefail
           shopt -s nullglob

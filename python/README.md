@@ -132,7 +132,7 @@ class MainAgent:
 | Repository | Description |
 |------------|-------------|
 | [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
-| [duragraph-go](https://github.com/Duragraph/duragraph-go) | Go SDK |
+| [Go SDK (`go-sdk/`)](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK |
 | [duragraph-examples](https://github.com/Duragraph/duragraph-examples) | Example projects |
 | [duragraph-docs](https://github.com/Duragraph/duragraph-docs) | Documentation |
 

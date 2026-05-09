@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/duragraph/duragraph-go/llm"
-	"github.com/duragraph/duragraph-go/llm/openai"
+	"github.com/duragraph/duragraph/go-sdk/llm"
+	"github.com/duragraph/duragraph/go-sdk/llm/openai"
 )
 
 func TestComplete(t *testing.T) {

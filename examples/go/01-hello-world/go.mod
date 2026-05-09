@@ -4,7 +4,7 @@ go 1.22
 
 toolchain go1.23.4
 
-require github.com/duragraph/duragraph-go v0.1.0
+require github.com/duragraph/duragraph/go-sdk v0.0.0-00010101000000-000000000000
 
 require (
 	github.com/klauspost/compress v1.17.11 // indirect
@@ -15,4 +15,4 @@ require (
 	golang.org/x/sys v0.28.0 // indirect
 )
 
-replace github.com/duragraph/duragraph-go => ../../../go-sdk
+replace github.com/duragraph/duragraph/go-sdk => ../../../go-sdk

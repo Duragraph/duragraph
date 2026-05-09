@@ -49,7 +49,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/duragraph/duragraph-go/graph"
+	"github.com/duragraph/duragraph/go-sdk/graph"
 )
 
 // Status represents the worker's current state.

@@ -1,8 +1,8 @@
 # DuraGraph Go SDK
 
 [![CI](https://github.com/Duragraph/duragraph/actions/workflows/go-sdk-ci.yml/badge.svg)](https://github.com/Duragraph/duragraph/actions/workflows/go-sdk-ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/duragraph/duragraph-go.svg)](https://pkg.go.dev/github.com/duragraph/duragraph-go)
-[![Go Report Card](https://img.shields.io/badge/go%20report-A%2B-brightgreen)](https://goreportcard.com/report/github.com/duragraph/duragraph-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/duragraph/duragraph/go-sdk.svg)](https://pkg.go.dev/github.com/duragraph/duragraph/go-sdk)
+[![Go Report Card](https://img.shields.io/badge/go%20report-A%2B-brightgreen)](https://goreportcard.com/report/github.com/duragraph/duragraph/go-sdk)
 [![License](https://img.shields.io/github/license/Duragraph/duragraph)](https://github.com/Duragraph/duragraph/blob/main/LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph?style=social)](https://github.com/Duragraph/duragraph/stargazers)
 
@@ -13,7 +13,7 @@ Build AI agents with structs and interfaces, deploy to a control plane, and get 
 ## Installation
 
 ```bash
-go get github.com/duragraph/duragraph-go
+go get github.com/duragraph/duragraph/go-sdk
 ```
 
 ## Quick Start
@@ -25,8 +25,8 @@ import (
     "context"
     "log"
 
-    "github.com/duragraph/duragraph-go/graph"
-    "github.com/duragraph/duragraph-go/worker"
+    "github.com/duragraph/duragraph/go-sdk/graph"
+    "github.com/duragraph/duragraph/go-sdk/worker"
 )
 
 // Define your state

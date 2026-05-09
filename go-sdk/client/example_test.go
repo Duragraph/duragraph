@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/duragraph/duragraph-go/client"
+	"github.com/duragraph/duragraph/go-sdk/client"
 )
 
 func ExampleNew() {

@@ -16,7 +16,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/duragraph/duragraph-go/vectorstore"
+	"github.com/duragraph/duragraph/go-sdk/vectorstore"
 )
 
 // Store is an in-memory vector store.

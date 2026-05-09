@@ -31,7 +31,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/duragraph/duragraph-go/llm"
+	"github.com/duragraph/duragraph/go-sdk/llm"
 )
 
 // LLMConfig configures an LLM node.

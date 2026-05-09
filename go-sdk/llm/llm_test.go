@@ -3,7 +3,7 @@ package llm_test
 import (
 	"testing"
 
-	"github.com/duragraph/duragraph-go/llm"
+	"github.com/duragraph/duragraph/go-sdk/llm"
 )
 
 func TestRequestConfig(t *testing.T) {

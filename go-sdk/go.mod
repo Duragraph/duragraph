@@ -1,4 +1,4 @@
-module github.com/duragraph/duragraph-go
+module github.com/duragraph/duragraph/go-sdk
 
 go 1.22
 

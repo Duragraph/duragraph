@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/duragraph/duragraph-go/llm"
+	"github.com/duragraph/duragraph/go-sdk/llm"
 )
 
 type testState struct {

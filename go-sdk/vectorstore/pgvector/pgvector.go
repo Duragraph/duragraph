@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/duragraph/duragraph-go/vectorstore"
+	"github.com/duragraph/duragraph/go-sdk/vectorstore"
 )
 
 const defaultTable = "vector_documents"

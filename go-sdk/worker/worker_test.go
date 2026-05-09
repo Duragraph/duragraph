@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/duragraph/duragraph-go/graph"
+	"github.com/duragraph/duragraph/go-sdk/graph"
 )
 
 // echoNode is a test node that copies input to output.

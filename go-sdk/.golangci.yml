@@ -21,7 +21,7 @@ linters-settings:
   gofmt:
     simplify: true
   goimports:
-    local-prefixes: github.com/duragraph/duragraph-go
+    local-prefixes: github.com/duragraph/duragraph/go-sdk
   misspell:
     locale: US
   gosec:

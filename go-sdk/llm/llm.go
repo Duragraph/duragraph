@@ -3,14 +3,14 @@
 // This package defines the common interfaces and types for working with
 // large language models. Specific providers are implemented in subpackages:
 //
-//   - [github.com/duragraph/duragraph-go/llm/openai] - OpenAI (GPT-4, etc.)
-//   - [github.com/duragraph/duragraph-go/llm/anthropic] - Anthropic (Claude)
-//   - [github.com/duragraph/duragraph-go/llm/gemini] - Google Gemini
-//   - [github.com/duragraph/duragraph-go/llm/ollama] - Ollama (local models)
+//   - [github.com/duragraph/duragraph/go-sdk/llm/openai] - OpenAI (GPT-4, etc.)
+//   - [github.com/duragraph/duragraph/go-sdk/llm/anthropic] - Anthropic (Claude)
+//   - [github.com/duragraph/duragraph/go-sdk/llm/gemini] - Google Gemini
+//   - [github.com/duragraph/duragraph/go-sdk/llm/ollama] - Ollama (local models)
 //
 // # Basic Usage
 //
-//	import "github.com/duragraph/duragraph-go/llm/openai"
+//	import "github.com/duragraph/duragraph/go-sdk/llm/openai"
 //
 //	client := openai.New()
 //
@@ -112,7 +112,7 @@ type Usage struct {
 //
 // Example:
 //
-//	import "github.com/duragraph/duragraph-go/llm/openai"
+//	import "github.com/duragraph/duragraph/go-sdk/llm/openai"
 //
 //	client := openai.New()
 //	resp, err := client.Complete(ctx, messages)
