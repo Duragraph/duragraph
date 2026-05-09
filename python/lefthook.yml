@@ -1,0 +1,52 @@
+# Lefthook configuration
+# Install: https://github.com/evilmartians/lefthook
+# Run: lefthook install
+
+pre-commit:
+  parallel: true
+  commands:
+    ruff-check:
+      glob: "*.py"
+      run: ruff check {staged_files} --fix
+      stage_fixed: true
+    ruff-format:
+      glob: "*.py"
+      run: ruff format {staged_files}
+      stage_fixed: true
+    check-yaml:
+      glob: "*.{yml,yaml}"
+      run: python -c "import yaml; [yaml.safe_load(open(f)) for f in '{staged_files}'.split()]"
+    check-toml:
+      glob: "*.toml"
+      run: python -c "import tomllib; [tomllib.load(open(f, 'rb')) for f in '{staged_files}'.split()]"
+
+commit-msg:
+  commands:
+    validate-commit:
+      run: |
+        python -c "
+        import re, sys
+        msg = open(sys.argv[1]).read().strip()
+        pattern = r'^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}'
+        if not re.match(pattern, msg.split('\n')[0]):
+            print('❌ Invalid commit message format!')
+            print('')
+            print('Expected: <type>(<scope>): <description>')
+            print('')
+            print('Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert')
+            print('')
+            print('Examples:')
+            print('  feat(graph): add subgraph support')
+            print('  fix(worker): handle connection timeout')
+            print('  docs: update installation guide')
+            sys.exit(1)
+        print('✅ Commit message is valid')
+        " {1}
+
+pre-push:
+  parallel: true
+  commands:
+    test:
+      run: pytest tests/ -x -q
+    type-check:
+      run: mypy src/duragraph --ignore-missing-imports || true

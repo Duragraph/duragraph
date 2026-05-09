@@ -1,0 +1,67 @@
+# PR Labeler configuration
+# https://github.com/actions/labeler
+
+# Core functionality
+core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - src/duragraph/graph.py
+          - src/duragraph/nodes.py
+          - src/duragraph/edges.py
+          - src/duragraph/types.py
+          - src/duragraph/__init__.py
+
+# Worker module
+worker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - src/duragraph/worker/**/*
+
+# Prompts module
+prompts:
+  - changed-files:
+      - any-glob-to-any-file:
+          - src/duragraph/prompts/**/*
+
+# CLI
+cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - src/duragraph/cli/**/*
+
+# Tests
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - tests/**/*
+
+# Documentation
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - docs/**/*
+
+# CI/CD
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**/*
+
+# Dependencies
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - pyproject.toml
+          - "*.lock"
+          - requirements*.txt
+
+# Configuration
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - lefthook.yml
+          - .ruff.toml
+          - mypy.ini
+          - "*.toml"
+          - "*.cfg"
