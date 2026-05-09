@@ -30,7 +30,10 @@ type ServerConfig struct {
 // per binary-modes.yml § embedded_components.postgres).
 //
 // When Mode == "embedded", Host/Port are forced to 127.0.0.1 and the
-// embedded port (default 5435) regardless of DB_HOST / DB_PORT env vars.
+// embedded port (default 15435) regardless of DB_HOST / DB_PORT env vars.
+// Default chosen high (>10000) so `duragraph dev` zero-config never
+// collides with system Postgres (5432), prod-postgres (5432), or the
+// docker-compose local-dev stack (5435).
 // This is intentional — silent host/port overrides would defeat the
 // "engine reaches its own embedded child process" guarantee. See
 // binary-modes.yml § no_silent_mode_changes for the contract.
@@ -99,17 +102,24 @@ type NATSConfig struct {
 // embedded server only listens on 127.0.0.1 and never holds production
 // data — the password is functionally a placeholder, not a secret.
 const (
-	defaultEmbeddedPort         = 5435
+	// 15435 is intentionally far from the canonical Postgres port (5432)
+	// AND from the docker-compose local-dev stack's 5435 — `duragraph dev`
+	// is the "first 5 minutes" zero-config command and must never collide
+	// with anything common. Operators wanting the legacy 5435 set
+	// DB_EMBEDDED_PORT=5435 explicitly.
+	defaultEmbeddedPort         = 15435
 	defaultEmbeddedVersion      = "15" // matches prod-postgres major
 	defaultEmbeddedDBName       = "duragraph"
 	defaultEmbeddedStartTimeout = 60 * time.Second
 
-	// NATS-specific embedded defaults. 4222 is the canonical NATS
-	// client port. Monitor port intentionally defaults to 0 (disabled)
-	// per binary-modes.yml § nats_jetstream.port — the HTTP /varz
-	// endpoint is a security surface and the embedded mode is opt-in
-	// for ops who explicitly want it.
-	defaultNATSEmbeddedPort         = 4222
+	// 14222 is intentionally far from canonical NATS (4222), which collides
+	// with anyone running NATS locally. Same reasoning as defaultEmbeddedPort
+	// above — zero-collision for zero-config dev. Override with
+	// NATS_EMBEDDED_PORT=4222 if you need the canonical port. Monitor port
+	// intentionally defaults to 0 (disabled) per binary-modes.yml
+	// § nats_jetstream.port — the HTTP /varz endpoint is a security
+	// surface and the embedded mode is opt-in for ops who want it.
+	defaultNATSEmbeddedPort         = 14222
 	defaultNATSEmbeddedStartTimeout = 10 * time.Second
 )
 

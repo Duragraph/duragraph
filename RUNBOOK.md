@@ -91,8 +91,8 @@ go run ./cmd/duragraph dev
 
 That single command brings up:
 
-- **Embedded PostgreSQL** on `:5435` (data dir `./data/pg`)
-- **Embedded NATS JetStream** on `:4222` (data dir `./data/nats`)
+- **Embedded PostgreSQL** on `:15435` (data dir `./data/pg`)
+- **Embedded NATS JetStream** on `:14222` (data dir `./data/nats`)
 - **Engine + dashboard** on `:8081`
 - Schema migrations applied automatically on first start
 
@@ -232,8 +232,8 @@ go run ./cmd/duragraph dev
 
 What you get:
 
-- Embedded PostgreSQL on `:5435` (data: `${data-dir}/pg`)
-- Embedded NATS JetStream on `:4222` (data: `${data-dir}/nats`)
+- Embedded PostgreSQL on `:15435` (data: `${data-dir}/pg`)
+- Embedded NATS JetStream on `:14222` (data: `${data-dir}/nats`)
 - Engine + embedded dashboard on `http://localhost:8081/`
 - Optional embedded Studio at `http://localhost:8081/studio/` (with `--studio`)
 - Migrations applied automatically; no Docker, no `task up`, no manual `db:migrate`

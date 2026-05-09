@@ -25,7 +25,7 @@ import (
 //   - DURAGRAPH_URL       — engine base URL (default http://localhost:8081),
 //                           overridable per-invocation via --engine.
 //   - DURAGRAPH_NATS_URL  — NATS URL for `runs tail` no-arg fallback
-//                           (default nats://localhost:4222), overridable via --nats.
+//                           (default nats://localhost:14222), overridable via --nats.
 //
 // Default behaviour rationale: NATS-subscribing for "all threads" tail
 // rather than polling /api/v1/runs. The engine already publishes run

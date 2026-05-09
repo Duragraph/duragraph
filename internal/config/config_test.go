@@ -67,7 +67,7 @@ func TestLoad_Defaults(t *testing.T) {
 }
 
 // TestLoad_EmbeddedDefaults verifies that DB_MODE=embedded picks up the
-// spec-defined defaults: 127.0.0.1, port 5435, version 15, and the
+// spec-defined defaults: 127.0.0.1, port 15435, version 15, and the
 // duragraph/duragraph/duragraph credential triple.
 func TestLoad_EmbeddedDefaults(t *testing.T) {
 	t.Setenv("DB_MODE", "embedded")
@@ -95,11 +95,11 @@ func TestLoad_EmbeddedDefaults(t *testing.T) {
 	if got := cfg.Database.Host; got != "127.0.0.1" {
 		t.Errorf("Host: got %q, want 127.0.0.1 (forced in embedded mode)", got)
 	}
-	if got := cfg.Database.Port; got != 5435 {
-		t.Errorf("Port: got %d, want 5435 (default embedded port)", got)
+	if got := cfg.Database.Port; got != 15435 {
+		t.Errorf("Port: got %d, want 15435 (default embedded port)", got)
 	}
-	if got := cfg.Database.EmbeddedPort; got != 5435 {
-		t.Errorf("EmbeddedPort: got %d, want 5435", got)
+	if got := cfg.Database.EmbeddedPort; got != 15435 {
+		t.Errorf("EmbeddedPort: got %d, want 15435", got)
 	}
 	if got := cfg.Database.User; got != "duragraph" {
 		t.Errorf("User: got %q, want duragraph", got)
@@ -389,7 +389,7 @@ func TestLoad_InvalidPort(t *testing.T) {
 }
 
 // TestLoad_EmbeddedNATSDefaults verifies that NATS_MODE=embedded picks
-// up the spec-defined defaults: 127.0.0.1, port 4222, monitoring off,
+// up the spec-defined defaults: 127.0.0.1, port 14222, monitoring off,
 // and the XDG-derived data directory.
 func TestLoad_EmbeddedNATSDefaults(t *testing.T) {
 	t.Setenv("NATS_MODE", "embedded")
@@ -410,11 +410,11 @@ func TestLoad_EmbeddedNATSDefaults(t *testing.T) {
 	if got := cfg.NATS.Mode; got != "embedded" {
 		t.Errorf("Mode: got %q, want embedded", got)
 	}
-	if got := cfg.NATS.EmbeddedPort; got != 4222 {
-		t.Errorf("EmbeddedPort: got %d, want 4222", got)
+	if got := cfg.NATS.EmbeddedPort; got != 14222 {
+		t.Errorf("EmbeddedPort: got %d, want 14222", got)
 	}
-	if got := cfg.NATS.URL; got != "nats://127.0.0.1:4222" {
-		t.Errorf("URL: got %q, want nats://127.0.0.1:4222 (forced in embedded mode)", got)
+	if got := cfg.NATS.URL; got != "nats://127.0.0.1:14222" {
+		t.Errorf("URL: got %q, want nats://127.0.0.1:14222 (forced in embedded mode)", got)
 	}
 	if got := cfg.NATS.EmbeddedMonitorPort; got != 0 {
 		t.Errorf("EmbeddedMonitorPort: got %d, want 0 (disabled by default)", got)

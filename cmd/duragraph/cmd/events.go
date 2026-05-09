@@ -43,7 +43,7 @@ event envelope (event_type + payload) as it is published.
 Filter by aggregate type with --aggregate (run | execution | thread |
 workflow | tenant | user). Filter further by aggregate id with --id.
 
-The NATS URL defaults to nats://localhost:4222 and is overridable via
+The NATS URL defaults to nats://localhost:14222 and is overridable via
 $DURAGRAPH_NATS_URL or --nats. Press Ctrl+C to stop.`,
 	Args: cobra.NoArgs,
 	RunE: runEventsTail,
