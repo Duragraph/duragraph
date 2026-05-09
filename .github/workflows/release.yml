@@ -41,6 +41,23 @@ jobs:
         with:
           version: 9
 
+      - name: Mask placeholder dists from git
+        # `pnpm build` overwrites the committed placeholder
+        # dashboard/dist/index.html and studio/dist/index.html. That
+        # leaves the working tree dirty, and GoReleaser refuses to
+        # release from a dirty tree. We can't simply commit the change
+        # either — that would advance HEAD past the release tag, and
+        # GoReleaser also rejects "tag not made against HEAD".
+        #
+        # `git update-index --skip-worktree` tells git to ignore
+        # subsequent local changes to these tracked files. Vite still
+        # rewrites them on disk (so go:embed picks up the real UI), but
+        # `git status` stays clean. New files Vite produces under dist/
+        # are already covered by `dist/*` in each .gitignore, so they
+        # don't show as untracked either.
+        run: |
+          git update-index --skip-worktree dashboard/dist/index.html studio/dist/index.html
+
       - name: Build dashboard
         # GoReleaser builds the engine binary which embeds dashboard/dist
         # via go:embed. The placeholder index.html ships in git for local
@@ -56,18 +73,6 @@ jobs:
         run: |
           pnpm -C studio install --frozen-lockfile
           pnpm -C studio build
-
-      - name: Absorb built dists
-        # `pnpm build` overwrites the committed placeholder dist/index.html
-        # files, leaving the working tree dirty. GoReleaser refuses to
-        # release from a dirty tree (https://goreleaser.com/errors/dirty).
-        # Make a local-only commit so the tree is clean. This commit
-        # exists only on the runner and is never pushed.
-        run: |
-          git config user.email actions@github.com
-          git config user.name github-actions
-          git add dashboard/dist studio/dist
-          git diff --cached --quiet || git commit -m "build: dashboard+studio dists [ci]"
 
       - name: Set up Go
         uses: actions/setup-go@v5
