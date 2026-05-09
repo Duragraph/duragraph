@@ -12,12 +12,13 @@ Complete guide for running and managing the DuraGraph application.
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
-2. [Quick Start](#quick-start)
-3. [Service Management](#service-management)
-4. [Accessing Services](#accessing-services)
-5. [Development Workflow](#development-workflow)
-6. [Troubleshooting](#troubleshooting)
-7. [Database Management](#database-management)
+2. [Repository Layout](#repository-layout)
+3. [Quick Start](#quick-start)
+4. [Service Management](#service-management)
+5. [Accessing Services](#accessing-services)
+6. [Development Workflow](#development-workflow)
+7. [Troubleshooting](#troubleshooting)
+8. [Database Management](#database-management)
 
 ---
 
@@ -39,45 +40,97 @@ Before running DuraGraph, ensure you have the following installed:
 - **Go 1.22+** - [Download](https://golang.org/dl/)
 - **Node.js 22+** - [Download](https://nodejs.org/)
 - **pnpm** - `npm install -g pnpm`
+- **uv** (for Python SDK + `--watch` worker supervision) - [Installation](https://docs.astral.sh/uv/)
+
+---
+
+## Repository Layout
+
+The repository is a monorepo. Top-level subdirectories:
+
+| Path | What |
+|---|---|
+| `cmd/duragraph/` | Cobra CLI entry point (`duragraph dev / serve / init / runs / events / migrate`) |
+| `internal/` | Engine source (DDD: `domain/`, `application/`, `infrastructure/`) |
+| `dashboard/` | Operator/admin React UI (embedded into the binary, served at `/`) |
+| `studio/` | Developer/end-user React UI (embedded, opt-in via `duragraph dev --studio`, served at `/studio/`) |
+| `examples/` | Python + Go runnable examples (`examples/python/01-hello-world/`, `examples/go/01-hello-world/`) |
+| `docs/` | Astro/Starlight docs site (https://duragraph.ai/docs) |
+| `python/` | Python SDK (PyPI: `duragraph`) |
+| `go-sdk/` | Go SDK (`github.com/duragraph/duragraph/go-sdk`) |
+| `deploy/` | Dockerfiles + compose for production |
+
+Each subdirectory has its own dev story; the most common entry points:
+
+```bash
+pnpm -C dashboard dev          # dashboard hot-reload (Vite, :3303)
+pnpm -C dashboard build        # rebuild static assets so the next go build embeds them
+pnpm -C studio dev             # studio hot-reload (Vite, :3300)
+pnpm -C studio build           # rebuild studio assets
+pnpm -C docs dev               # Astro docs site (:4321)
+
+(cd python && uv sync && uv run pytest)
+(cd go-sdk && go test ./...)
+```
+
+Per-subproject conventions are in each subdirectory's `CLAUDE.md` / `README.md`. See also the per-project guides under [Memory Files in `CLAUDE.md`](./CLAUDE.md).
 
 ---
 
 ## Quick Start
 
-### 1. Start All Services
+Two paths get you a running stack. Pick **Option A** if you have Go locally and want the simplest "first 5 minutes" experience. Pick **Option B** if you want everything in containers (no Go toolchain on your host).
+
+### Option A: zero-config (`duragraph dev`) — recommended
+
+```bash
+go run ./cmd/duragraph dev
+# or, after `go build -o duragraph ./cmd/duragraph`:
+./duragraph dev
+```
+
+That single command brings up:
+
+- **Embedded PostgreSQL** on `:5435` (data dir `./data/pg`)
+- **Embedded NATS JetStream** on `:4222` (data dir `./data/nats`)
+- **Engine + dashboard** on `:8081`
+- Schema migrations applied automatically on first start
+
+Visit:
+
+- http://localhost:8081/ — embedded dashboard
+- http://localhost:8081/api/v1/ — REST API
+- http://localhost:8081/health — health check
+
+Add `--studio` to mount the developer Studio UI at `/studio/`:
+
+```bash
+go run ./cmd/duragraph dev --studio
+```
+
+Add `--watch ./agents` (default) to supervise Python `@Graph` workers under that directory; pass `--watch ""` to disable.
+
+Stop with `Ctrl+C`. The embedded data dir (`./data`) persists between runs; delete it for a clean slate.
+
+### Option B: Docker Compose (`task up`)
 
 ```bash
 task up
 ```
 
-This command will:
-- Build Docker images for the server and dashboard
-- Start PostgreSQL database
-- Start NATS JetStream message broker
-- Start the API server
-- Start the dashboard
-- Run database migrations automatically
+This builds and starts the engine, PostgreSQL, NATS, and dashboard containers via `docker-compose.yml`. Use this when you don't have a Go toolchain locally, or when you want to mirror the production container layout. Endpoints:
 
-**Expected output:**
 ```
-API - http://localhost:8081
-Dashboard - http://localhost:5173
-NATS - nats://localhost:4222
-NATS Monitoring - http://localhost:8222
+API + Dashboard - http://localhost:8081
+NATS Monitoring - http://localhost:8223
+PostgreSQL      - localhost:5433  (host port; container exposes 5432)
 ```
 
-### 2. Verify Services are Running
+Then:
 
 ```bash
-task health
-```
-
-This checks the health of all services.
-
-### 3. View Running Containers
-
-```bash
-task ps
+task health   # health check
+task ps       # show running containers
 ```
 
 ---
@@ -162,49 +215,92 @@ curl http://localhost:8081/health
 
 ## Development Workflow
 
-### Local Development (without Docker)
+There are three modes, ordered by complexity. Pick the one that matches what you're iterating on.
 
-#### 1. Start Infrastructure Services
+### Mode 1 — zero-config dev (`duragraph dev`)
 
-```bash
-# Start only database and NATS
-task db:start
-task nats:start
-```
-
-#### 2. Install Dependencies
+The v0.7 default. One command brings up the full stack:
 
 ```bash
-# Install all dependencies
-task install
-
-# Or install individually
-task install:go
-task install:dashboard
-task install:website
+go run ./cmd/duragraph dev
+# optional flags:
+#   --port 8081           HTTP port for engine + dashboard (default 8081)
+#   --data-dir ./data     where embedded postgres + NATS persist (default ./data)
+#   --watch ./agents      directory watched for Python @Graph files (default ./agents; "" disables)
+#   --studio              also mount the Studio UI at /studio/
 ```
 
-#### 3. Run Development Servers
+What you get:
+
+- Embedded PostgreSQL on `:5435` (data: `${data-dir}/pg`)
+- Embedded NATS JetStream on `:4222` (data: `${data-dir}/nats`)
+- Engine + embedded dashboard on `http://localhost:8081/`
+- Optional embedded Studio at `http://localhost:8081/studio/` (with `--studio`)
+- Migrations applied automatically; no Docker, no `task up`, no manual `db:migrate`
+- File-watcher that spawns a Python worker via `uv run` for each `@Graph`-decorated file under `--watch`
+
+**Use this for:** backend iteration on Go code (when you don't need hot reload), demos, the "first 5 minutes" experience, anything Python-worker-focused.
+
+**Don't expect UI hot reload here.** The dashboard and Studio served at `:8081` are the embedded build artifacts (`dashboard/dist`, `studio/dist`). If you change a `.tsx` file you'll need to `pnpm -C dashboard build` (or `pnpm -C studio build`) and restart the binary, or switch to Mode 2.
+
+### Mode 2 — UI hot reload (two- or three-process)
+
+Use when iterating on **dashboard or Studio source**. The engine still runs in one terminal; Vite dev servers run alongside and proxy `/api/*` calls back to the engine.
+
+```
+Browser visits http://localhost:3303 (dashboard) or http://localhost:3300 (studio)
+       |
+       |   +------------------------------------+
+       +-->| Vite dev server (HMR)              |  Terminal 2 / 3
+           |  - serves /, /assets/*, /@vite/*   |  pnpm -C dashboard dev
+           |  - proxies /api/* to engine        |  pnpm -C studio dev
+           +----------------+-------------------+
+                            |  proxy /api/*
+                            v
+           +------------------------------------+
+           | duragraph dev :8081                |  Terminal 1
+           |  (engine + embedded postgres+NATS) |  go run ./cmd/duragraph dev
+           +------------------------------------+
+```
 
 ```bash
-# Terminal 1: API Server
-task dev
+# Terminal 1: engine + embedded data plane
+go run ./cmd/duragraph dev
 
-# Terminal 2: Dashboard
-task dashboard:dev
+# Terminal 2: dashboard hot-reload (visit http://localhost:3303)
+pnpm -C dashboard dev
 
-# Terminal 3: Website (optional)
-task website:dev
+# Terminal 3 (only if iterating on Studio): studio hot-reload (visit http://localhost:3300)
+pnpm -C studio dev
 ```
 
-### Quick Development Start
+**Visit Vite's port (3303 or 3300), NOT 8081.** The UI at `:8081` is the embedded build and won't hot-reload.
+
+**Dashboard proxy gotcha.** The dashboard's Vite config (`dashboard/vite.config.ts`) defaults to proxying `/api/*` to `http://localhost:18081`, not `:8081`. This is to keep dashboard development from clashing with a default `duragraph dev`. Two ways to reconcile:
 
 ```bash
-# Start server with dependencies
-task server
+# Option (a): point the engine at :18081 to match the dashboard's default
+go run ./cmd/duragraph dev --port 18081
+
+# Option (b): leave the engine on :8081 and override the proxy target
+VITE_API_PROXY_TARGET=http://localhost:8081 pnpm -C dashboard dev
 ```
 
-This automatically starts PostgreSQL and NATS, then runs the server.
+The Studio's Vite config already proxies to `:8081`, so no override is needed for `pnpm -C studio dev`.
+
+**Use this for:** any change in `dashboard/src/**` or `studio/src/**`.
+
+### Mode 3 — engine code hot reload (optional)
+
+If you're iterating on Go code in `internal/` or `cmd/duragraph/` and want auto-restart on save, point any file-watcher at the project. Nothing is preconfigured — the repository does not ship an `.air.toml`. Install [`air`](https://github.com/air-verse/air), [`reflex`](https://github.com/cespare/reflex), or [`entr`](https://github.com/eradman/entr) and watch `./cmd/duragraph` plus `./internal`. For example, with `reflex`:
+
+```bash
+reflex -r '\.go$' -s -- go run ./cmd/duragraph dev --studio
+```
+
+Combine with Mode 2 (Vite terminals) for Go + React hot iteration.
+
+**Use this for:** simultaneously iterating on engine and UI code.
 
 ---
 
