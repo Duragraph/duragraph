@@ -1,0 +1,28 @@
+# CODEOWNERS - Define who reviews what
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything
+* @duragraph/maintainers
+
+# Core graph functionality
+/src/duragraph/graph.py @duragraph/core
+/src/duragraph/nodes.py @duragraph/core
+/src/duragraph/edges.py @duragraph/core
+/src/duragraph/types.py @duragraph/core
+
+# Worker and control plane integration
+/src/duragraph/worker/ @duragraph/core
+
+# Prompts module
+/src/duragraph/prompts/ @duragraph/core
+
+# CLI
+/src/duragraph/cli/ @duragraph/maintainers
+
+# CI/CD and infrastructure
+/.github/ @duragraph/maintainers
+/pyproject.toml @duragraph/maintainers
+
+# Documentation - more permissive
+/*.md @duragraph/maintainers
+/docs/ @duragraph/maintainers
