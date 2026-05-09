@@ -102,14 +102,14 @@ duragraph-examples/
 |------------|-------------|
 | [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
 | [duragraph-python](https://github.com/Duragraph/duragraph-python) | Python SDK |
-| [duragraph-go](https://github.com/Duragraph/duragraph-go) | Go SDK |
+| [Go SDK (`go-sdk/`)](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK |
 | [duragraph-docs](https://github.com/Duragraph/duragraph-docs) | Documentation |
 
 ## Documentation
 
 - [Full Documentation](https://duragraph.ai/docs)
 - [Python SDK](https://github.com/Duragraph/duragraph-python)
-- [Go SDK](https://github.com/Duragraph/duragraph-go)
+- [Go SDK](https://github.com/Duragraph/duragraph/tree/main/go-sdk)
 
 ## Contributing
 

@@ -14,8 +14,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/duragraph/duragraph-go/graph"
-	"github.com/duragraph/duragraph-go/worker"
+	"github.com/duragraph/duragraph/go-sdk/graph"
+	"github.com/duragraph/duragraph/go-sdk/worker"
 )
 
 type State struct {
