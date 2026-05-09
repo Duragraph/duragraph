@@ -30,7 +30,10 @@ jobs:
           version: 9
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        # No `--frozen-lockfile`: studio doesn't commit pnpm-lock.yaml in
+        # its source repo. Future cleanup PR can add a lockfile + flip
+        # back to frozen for reproducibility.
+        run: pnpm install
 
       - name: Typecheck
         run: pnpm typecheck

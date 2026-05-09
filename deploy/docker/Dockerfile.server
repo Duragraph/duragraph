@@ -2,7 +2,7 @@
 #
 # Multi-stage build for the duragraph server. The React dashboard is built
 # first and its dist/ output is embedded into the Go binary via go:embed
-# (see dashboard_embed.go at the module root).
+# (see embeds.go at the module root, which also embeds studio/dist).
 
 # --- Stage 1: build the React dashboard ---
 FROM node:20-alpine AS dashboard-builder
