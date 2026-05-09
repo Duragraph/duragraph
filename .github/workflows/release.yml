@@ -57,6 +57,18 @@ jobs:
           pnpm -C studio install --frozen-lockfile
           pnpm -C studio build
 
+      - name: Absorb built dists
+        # `pnpm build` overwrites the committed placeholder dist/index.html
+        # files, leaving the working tree dirty. GoReleaser refuses to
+        # release from a dirty tree (https://goreleaser.com/errors/dirty).
+        # Make a local-only commit so the tree is clean. This commit
+        # exists only on the runner and is never pushed.
+        run: |
+          git config user.email actions@github.com
+          git config user.name github-actions
+          git add dashboard/dist studio/dist
+          git diff --cached --quiet || git commit -m "build: dashboard+studio dists [ci]"
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

@@ -6,7 +6,8 @@
 # module root).
 
 # --- Stage 1a: build the React dashboard ---
-FROM node:20-alpine AS dashboard-builder
+# node:22-alpine: corepack pulls pnpm 11.x, which uses node:sqlite (a Node 22+ builtin).
+FROM node:22-alpine AS dashboard-builder
 
 RUN corepack enable
 
@@ -19,7 +20,7 @@ COPY dashboard/ ./
 RUN pnpm build
 
 # --- Stage 1b: build the React Studio UI ---
-FROM node:20-alpine AS studio-builder
+FROM node:22-alpine AS studio-builder
 
 RUN corepack enable
 
