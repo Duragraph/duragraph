@@ -44,7 +44,7 @@ export function ThreadList({ showFilters = true }: ThreadListProps) {
     if (!search) return threads
     const searchLower = search.toLowerCase()
     return threads.filter((thread) =>
-      thread.id.toLowerCase().includes(searchLower)
+      thread.thread_id.toLowerCase().includes(searchLower)
     )
   }, [threads, search])
 
@@ -117,7 +117,7 @@ export function ThreadList({ showFilters = true }: ThreadListProps) {
             </TableHeader>
             <TableBody>
               {filteredThreads.map((thread) => (
-                <ThreadRow key={thread.id} thread={thread} />
+                <ThreadRow key={thread.thread_id} thread={thread} />
               ))}
             </TableBody>
           </Table>
@@ -136,7 +136,7 @@ function ThreadRow({ thread }: ThreadRowProps) {
   const queryClient = useQueryClient()
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.delete(`/threads/${thread.id}`),
+    mutationFn: () => api.delete(`/threads/${thread.thread_id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["threads"] })
       toast.success("Thread deleted successfully")
@@ -153,20 +153,20 @@ function ThreadRow({ thread }: ThreadRowProps) {
         <TableCell>
           <Link
             to="/threads/$threadId"
-            params={{ threadId: thread.id }}
+            params={{ threadId: thread.thread_id }}
             className="font-mono text-sm hover:underline"
           >
-            {thread.id}
+            {thread.thread_id}
           </Link>
         </TableCell>
         <TableCell className="text-sm text-muted-foreground">
           {thread.metadata ? Object.keys(thread.metadata).length + " keys" : "—"}
         </TableCell>
         <TableCell className="text-muted-foreground">
-          {new Date(thread.created_at * 1000).toLocaleString()}
+          {new Date(thread.created_at).toLocaleString()}
         </TableCell>
         <TableCell className="text-muted-foreground">
-          {new Date(thread.updated_at * 1000).toLocaleString()}
+          {new Date(thread.updated_at).toLocaleString()}
         </TableCell>
         <TableCell>
           <DropdownMenu>
@@ -177,7 +177,7 @@ function ThreadRow({ thread }: ThreadRowProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
-                <Link to="/threads/$threadId" params={{ threadId: thread.id }}>
+                <Link to="/threads/$threadId" params={{ threadId: thread.thread_id }}>
                   <Eye className="h-4 w-4 mr-2" />
                   View
                 </Link>

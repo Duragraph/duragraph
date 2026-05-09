@@ -63,11 +63,16 @@ export interface AssistantsResponse {
 }
 
 export interface Thread {
-  id: string // API returns 'id', not 'thread_id'
-  messages: Message[]
+  thread_id: string
   metadata?: Record<string, unknown>
-  created_at: number // Unix timestamp
-  updated_at: number // Unix timestamp
+  status?: string
+  values?: Record<string, unknown>
+  created_at: string // ISO 8601
+  updated_at: string // ISO 8601
+  // The list endpoint does not include messages. The detail page populates
+  // this client-side by fetching the thread's runs and reading
+  // run.output.messages from the latest one.
+  messages?: Message[]
 }
 
 export interface ThreadsResponse {
