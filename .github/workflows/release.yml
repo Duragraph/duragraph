@@ -31,6 +31,32 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Build dashboard
+        # GoReleaser builds the engine binary which embeds dashboard/dist
+        # via go:embed. The placeholder index.html ships in git for local
+        # `go build` convenience; the real release embeds the Vite output.
+        run: |
+          pnpm -C dashboard install --frozen-lockfile
+          pnpm -C dashboard build
+
+      - name: Build Studio
+        # Same story for studio/dist (mounted at /studio/* when --studio
+        # is passed). Without this step the released binary ships the
+        # placeholder Studio.
+        run: |
+          pnpm -C studio install --frozen-lockfile
+          pnpm -C studio build
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

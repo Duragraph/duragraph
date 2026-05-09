@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1.6
 #
-# Multi-stage build for the duragraph server. The React dashboard is built
-# first and its dist/ output is embedded into the Go binary via go:embed
-# (see embeds.go at the module root, which also embeds studio/dist).
+# Multi-stage build for the duragraph server. The React dashboard AND
+# the React Studio UI are built first and their dist/ outputs are
+# embedded into the Go binary via go:embed (see embeds.go at the
+# module root).
 
-# --- Stage 1: build the React dashboard ---
+# --- Stage 1a: build the React dashboard ---
 FROM node:20-alpine AS dashboard-builder
 
 RUN corepack enable
@@ -17,7 +18,20 @@ RUN pnpm install --frozen-lockfile
 COPY dashboard/ ./
 RUN pnpm build
 
-# --- Stage 2: build the Go binary with the dashboard embedded ---
+# --- Stage 1b: build the React Studio UI ---
+FROM node:20-alpine AS studio-builder
+
+RUN corepack enable
+
+WORKDIR /app/studio
+
+COPY studio/package.json studio/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY studio/ ./
+RUN pnpm build
+
+# --- Stage 2: build the Go binary with both dists embedded ---
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
@@ -29,10 +43,15 @@ RUN go mod download
 
 COPY . .
 
-# Replace the placeholder dist with the freshly built one before compiling.
+# Replace the committed placeholder dists with the freshly built ones
+# before compiling. The placeholders ship as `dist/index.html` only;
+# the real Vite output replaces them here.
 COPY --from=dashboard-builder /app/dashboard/dist ./dashboard/dist
+COPY --from=studio-builder /app/studio/dist ./studio/dist
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/bin/server ./cmd/server
+# Build the canonical cobra entrypoint (./cmd/duragraph). cmd/server/
+# remains as a shim that calls into cmd/duragraph/cmd.Execute().
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/bin/duragraph ./cmd/duragraph
 
 # --- Stage 3: runtime ---
 FROM alpine:latest
@@ -41,8 +60,8 @@ RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /root/
 
-COPY --from=builder /app/bin/server .
+COPY --from=builder /app/bin/duragraph .
 
 EXPOSE 8080
 
-CMD ["./server"]
+CMD ["./duragraph"]
