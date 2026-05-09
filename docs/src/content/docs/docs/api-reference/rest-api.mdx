@@ -1,0 +1,228 @@
+---
+title: REST API Reference
+description: Complete REST API endpoint documentation
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+For complete endpoint documentation with schemas and try-it-out functionality, see the interactive API reference.
+
+<LinkCard
+  title="Interactive API Reference"
+  description="Explore all endpoints, view schemas, and test API calls directly in your browser"
+  href="/api/reference"
+/>
+
+## Code Examples
+
+### Complete Workflow (bash)
+
+```bash
+# 1. Create assistant
+ASSISTANT=$(curl -s -X POST http://localhost:8081/api/v1/assistants \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Assistant", "config": {}}' | jq -r .assistant_id)
+
+# 2. Create thread
+THREAD=$(curl -s -X POST http://localhost:8081/api/v1/threads \
+  -H "Content-Type: application/json" \
+  -d '{"metadata": {}}' | jq -r .thread_id)
+
+# 3. Create run
+RUN=$(curl -s -X POST http://localhost:8081/api/v1/runs \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"thread_id\": \"$THREAD\",
+    \"assistant_id\": \"$ASSISTANT\",
+    \"input\": {\"message\": \"Hello\"}
+  }" | jq -r .run_id)
+
+# 4. Stream events
+curl -N "http://localhost:8081/api/v1/stream?run_id=$RUN"
+
+# 5. Get final result
+curl -s "http://localhost:8081/api/v1/runs/$RUN" | jq
+```
+
+### Python
+
+```python
+import requests
+
+base_url = "http://localhost:8081/api/v1"
+
+# Create assistant
+assistant = requests.post(f"{base_url}/assistants", json={
+    "name": "My Assistant",
+    "config": {}
+}).json()
+
+# Create thread
+thread = requests.post(f"{base_url}/threads", json={
+    "metadata": {}
+}).json()
+
+# Create run
+run = requests.post(f"{base_url}/runs", json={
+    "thread_id": thread["thread_id"],
+    "assistant_id": assistant["assistant_id"],
+    "input": {"message": "Hello"}
+}).json()
+
+# Get result
+result = requests.get(f"{base_url}/runs/{run['run_id']}").json()
+print(result)
+```
+
+### Go
+
+```go
+package main
+
+import (
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "net/http"
+)
+
+const baseURL = "http://localhost:8081/api/v1"
+
+type Assistant struct {
+    AssistantID string                 `json:"assistant_id"`
+    Name        string                 `json:"name"`
+    Config      map[string]interface{} `json:"config"`
+}
+
+type Thread struct {
+    ThreadID string                 `json:"thread_id"`
+    Metadata map[string]interface{} `json:"metadata"`
+}
+
+type Run struct {
+    RunID       string                 `json:"run_id"`
+    ThreadID    string                 `json:"thread_id"`
+    AssistantID string                 `json:"assistant_id"`
+    Status      string                 `json:"status"`
+    Input       map[string]interface{} `json:"input"`
+    Output      map[string]interface{} `json:"output"`
+}
+
+func main() {
+    // Create assistant
+    assistant := createAssistant()
+    fmt.Printf("Created assistant: %s\n", assistant.AssistantID)
+
+    // Create thread
+    thread := createThread()
+    fmt.Printf("Created thread: %s\n", thread.ThreadID)
+
+    // Create run
+    run := createRun(thread.ThreadID, assistant.AssistantID)
+    fmt.Printf("Created run: %s (status: %s)\n", run.RunID, run.Status)
+}
+
+func createAssistant() *Assistant {
+    body := map[string]interface{}{
+        "name":   "My Assistant",
+        "config": map[string]interface{}{},
+    }
+    data, _ := json.Marshal(body)
+    resp, _ := http.Post(baseURL+"/assistants", "application/json", bytes.NewBuffer(data))
+    defer resp.Body.Close()
+
+    var assistant Assistant
+    json.NewDecoder(resp.Body).Decode(&assistant)
+    return &assistant
+}
+
+func createThread() *Thread {
+    body := map[string]interface{}{"metadata": map[string]interface{}{}}
+    data, _ := json.Marshal(body)
+    resp, _ := http.Post(baseURL+"/threads", "application/json", bytes.NewBuffer(data))
+    defer resp.Body.Close()
+
+    var thread Thread
+    json.NewDecoder(resp.Body).Decode(&thread)
+    return &thread
+}
+
+func createRun(threadID, assistantID string) *Run {
+    body := map[string]interface{}{
+        "thread_id":    threadID,
+        "assistant_id": assistantID,
+        "input":        map[string]interface{}{"message": "Hello"},
+    }
+    data, _ := json.Marshal(body)
+    resp, _ := http.Post(baseURL+"/runs", "application/json", bytes.NewBuffer(data))
+    defer resp.Body.Close()
+
+    var run Run
+    json.NewDecoder(resp.Body).Decode(&run)
+    return &run
+}
+```
+
+## Error Handling
+
+All errors follow a consistent format:
+
+```json
+{
+  "error": "error_code",
+  "message": "Human-readable description",
+  "details": {
+    "field": "Additional context"
+  }
+}
+```
+
+**Common Error Codes:**
+
+| Status | Error Code            | Description             |
+| ------ | --------------------- | ----------------------- |
+| 400    | `invalid_request`     | Malformed request body  |
+| 400    | `validation_error`    | Field validation failed |
+| 401    | `unauthorized`        | Missing or invalid auth |
+| 404    | `resource_not_found`  | Resource doesn't exist  |
+| 409    | `resource_conflict`   | Resource already exists |
+| 429    | `rate_limit_exceeded` | Too many requests       |
+| 500    | `internal_error`      | Server error            |
+
+## Rate Limiting
+
+Rate limit headers are included on responses from the rate-limited routes
+(everything except `/health`, `/metrics`, and `/ok`):
+
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+```
+
+When the rate limit is exceeded the engine responds with `429 Too Many
+Requests` and the following headers:
+
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+Retry-After: 30
+```
+
+with a JSON body:
+
+```json
+{
+  "error": "rate_limit_exceeded",
+  "message": "Too many requests. Please slow down.",
+  "retry_after": 30
+}
+```
+
+The `Retry-After` value is the number of seconds to wait before retrying.
+
+## Next Steps
+
+- [Interactive API Reference](/api/reference) - Try endpoints directly
+- [SSE Streaming](/docs/api-reference/sse-streaming) - Real-time events
+- [Python SDK](/docs/sdk/python) - Python client
+- [Go SDK](/docs/sdk/go) - Go client

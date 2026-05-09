@@ -1,0 +1,100 @@
+---
+title: API Reference
+description: API Reference
+---
+
+This page documents the REST and SSE API endpoints exposed by the system.
+
+The OpenAPI specification lives at [`schemas/openapi/duragraph.yaml`](https://github.com/Duragraph/duragraph/blob/main/schemas/openapi/duragraph.yaml)
+in the engine repository. The site renders an interactive explorer powered by
+[Scalar](https://scalar.com/) at [`/api/reference`](/api/reference) — head there
+to browse all endpoints, view schemas, and try requests directly from the
+browser.
+
+---
+
+## Common Examples
+
+All examples assume the engine is running locally on its default port
+(`http://localhost:8081`) and reachable via the `/api/v1/` base path.
+
+### 1. Create Assistant
+
+```bash
+curl -X POST http://localhost:8081/api/v1/assistants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Assistant",
+    "config": {}
+  }'
+```
+
+---
+
+### 2. Create Thread
+
+```bash
+curl -X POST http://localhost:8081/api/v1/threads \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metadata": {}
+  }'
+```
+
+---
+
+### 3. Add Message to Thread
+
+```bash
+curl -X POST http://localhost:8081/api/v1/threads/$THREAD_ID/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "user",
+    "content": "Hello world!"
+  }'
+```
+
+---
+
+### 4. Create Run & Consume Stream
+
+```bash
+curl -N -X POST http://localhost:8081/api/v1/threads/$THREAD_ID/runs/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "assistant_id": "'$ASSISTANT_ID'",
+    "input": {"message": "Hello"}
+  }' \
+  --output - | while read line; do
+    echo "$line"
+  done
+```
+
+This uses `-N` to disable buffering and consumes SSE events as they stream from
+the run.
+
+---
+
+### 5. Get a Run
+
+```bash
+curl "http://localhost:8081/api/v1/threads/$THREAD_ID/runs/$RUN_ID"
+```
+
+---
+
+### 6. List Runs in a Thread
+
+```bash
+curl "http://localhost:8081/api/v1/threads/$THREAD_ID/runs"
+```
+
+---
+
+## Notes
+
+- All endpoints follow REST conventions and are mounted under `/api/v1/`.
+- Streaming responses use **Server-Sent Events (SSE)**.
+- For detailed schemas, error models, and idempotency guarantees, see the
+  [interactive API reference](/api/reference) or the
+  [REST API reference page](/docs/api-reference/rest-api).

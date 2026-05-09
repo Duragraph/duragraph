@@ -1,0 +1,341 @@
+---
+title: Knowledge Graphs
+description: Integrate knowledge graphs for structured information storage and retrieval
+---
+
+Knowledge graphs provide structured, semantic storage for entities and relationships, enabling more sophisticated reasoning and context management in AI agents.
+
+## Overview
+
+Knowledge graphs complement vector stores by providing:
+
+- **Structured relationships** between entities
+- **Semantic reasoning** capabilities
+- **Graph traversal** for context discovery
+- **Entity resolution** and disambiguation
+
+## Supported Providers
+
+### Neo4j
+
+Industry-standard graph database with powerful Cypher query language.
+
+**Python SDK:**
+
+```python
+from duragraph.knowledgegraph import Neo4jKnowledgeGraph
+
+kg = Neo4jKnowledgeGraph(
+    uri="bolt://localhost:7687",
+    username="neo4j",
+    password="password",
+)
+
+# Add entities
+kg.add_entity({
+    "type": "Person",
+    "properties": {"name": "Alice", "role": "Engineer"}
+})
+
+# Add relationships
+kg.add_relationship({
+    "from": "alice",
+    "to": "project_x",
+    "type": "WORKS_ON",
+    "properties": {"since": "2024"}
+})
+
+# Query
+results = kg.query("MATCH (p:Person)-[:WORKS_ON]->(proj) RETURN p, proj")
+```
+
+**Go SDK:**
+
+```go
+import "github.com/duragraph/duragraph-go/knowledgegraph/neo4j"
+
+kg, err := neo4j.New(
+    neo4j.WithURI("bolt://localhost:7687"),
+    neo4j.WithAuth("neo4j", "password"),
+)
+
+// Add entity
+err = kg.AddEntity(ctx, &neo4j.Entity{
+    Type: "Person",
+    Properties: map[string]any{"name": "Alice"},
+})
+```
+
+### Memgraph
+
+High-performance, in-memory graph database.
+
+**Python SDK:**
+
+```python
+from duragraph.knowledgegraph import MemgraphKnowledgeGraph
+
+kg = MemgraphKnowledgeGraph(
+    host="localhost",
+    port=7687,
+)
+```
+
+### ArangoDB
+
+Multi-model database with graph capabilities.
+
+**Python SDK:**
+
+```python
+from duragraph.knowledgegraph import ArangoKnowledgeGraph
+
+kg = ArangoKnowledgeGraph(
+    hosts="http://localhost:8529",
+    database="_system",
+    username="root",
+    password="",
+)
+```
+
+## Use Cases
+
+### Entity Relationship Tracking
+
+```python
+from duragraph import Graph, llm_node
+from duragraph.knowledgegraph import Neo4jKnowledgeGraph
+
+@Graph(id="relationship_tracker")
+class RelationshipTracker:
+    def __init__(self):
+        self.kg = Neo4jKnowledgeGraph(uri="bolt://localhost:7687")
+
+    @llm_node(model="gpt-4o")
+    def extract_entities(self, state):
+        """Extract entities from text."""
+        # LLM extracts entities
+        return {"entities": [...]}
+
+    def store_knowledge(self, state):
+        """Store in knowledge graph."""
+        for entity in state["entities"]:
+            self.kg.add_entity(entity)
+        return state
+```
+
+### Contextual Retrieval
+
+```python
+def retrieve_context(kg, entity_id, depth=2):
+    """Retrieve context from knowledge graph."""
+    query = f"""
+    MATCH path = (start {{id: '{entity_id}'}})-[*1..{depth}]-(related)
+    RETURN path
+    """
+    results = kg.query(query)
+    return results
+```
+
+### Multi-Hop Reasoning
+
+```python
+@Graph(id="reasoning_agent")
+class ReasoningAgent:
+    def __init__(self):
+        self.kg = Neo4jKnowledgeGraph()
+
+    def traverse_knowledge(self, state):
+        """Multi-hop traversal for reasoning."""
+        query = """
+        MATCH (start:Entity {id: $start_id})
+        MATCH (end:Entity {id: $end_id})
+        MATCH path = shortestPath((start)-[*]-(end))
+        RETURN path
+        """
+        path = self.kg.query(query, start_id=state["from"], end_id=state["to"])
+        return {"reasoning_path": path}
+```
+
+## Integration Patterns
+
+### Hybrid Search (Vector + Graph)
+
+```python
+from duragraph.vectorstores import ChromaVectorStore
+from duragraph.knowledgegraph import Neo4jKnowledgeGraph
+
+class HybridSearch:
+    def __init__(self):
+        self.vector_store = ChromaVectorStore()
+        self.knowledge_graph = Neo4jKnowledgeGraph()
+
+    def search(self, query, k=5):
+        # 1. Vector similarity search
+        similar_docs = self.vector_store.similarity_search(query, k=k)
+
+        # 2. Graph-based expansion
+        expanded_context = []
+        for doc in similar_docs:
+            entity_id = doc.metadata.get("entity_id")
+            if entity_id:
+                related = self.knowledge_graph.get_neighbors(entity_id)
+                expanded_context.extend(related)
+
+        return similar_docs, expanded_context
+```
+
+### Knowledge Graph RAG
+
+```python
+@Graph(id="kg_rag")
+class KnowledgeGraphRAG:
+    def __init__(self):
+        self.kg = Neo4jKnowledgeGraph()
+
+    def extract_entities(self, state):
+        """Extract entities from query."""
+        # Use NER or LLM to extract entities
+        return {"entities": ["entity1", "entity2"]}
+
+    def retrieve_subgraph(self, state):
+        """Retrieve relevant subgraph."""
+        entities = state["entities"]
+        query = f"""
+        MATCH path = (e1)-[*1..3]-(e2)
+        WHERE e1.id IN {entities} OR e2.id IN {entities}
+        RETURN path
+        """
+        subgraph = self.kg.query(query)
+        return {"context": subgraph}
+
+    @llm_node(model="gpt-4o")
+    def generate_answer(self, state):
+        """Generate answer from subgraph context."""
+        context = format_subgraph(state["context"])
+        return {
+            "messages": [
+                {"role": "system", "content": f"Knowledge graph context:\n{context}"},
+                {"role": "user", "content": state["query"]}
+            ]
+        }
+```
+
+## Schema Design
+
+### Best Practices
+
+```python
+# Define clear entity types
+entity_types = {
+    "Person": {
+        "properties": ["name", "email", "role"],
+        "relationships": ["WORKS_WITH", "MANAGES", "REPORTS_TO"]
+    },
+    "Project": {
+        "properties": ["name", "status", "deadline"],
+        "relationships": ["HAS_MEMBER", "DEPENDS_ON"]
+    }
+}
+
+# Use consistent naming
+# - Entities: PascalCase (Person, Project)
+# - Properties: snake_case (created_at, user_id)
+# - Relationships: UPPER_SNAKE_CASE (WORKS_WITH, CREATED_BY)
+```
+
+## Performance Optimization
+
+### Indexing
+
+```python
+# Create indexes for frequently queried properties
+kg.create_index("Person", "name")
+kg.create_index("Person", "email")
+kg.create_index("Project", "status")
+```
+
+### Query Optimization
+
+```python
+# Use parameters to avoid query compilation overhead
+query = "MATCH (p:Person {email: $email}) RETURN p"
+result = kg.query(query, email="alice@example.com")
+
+# Limit result sets
+query = "MATCH (p:Person) RETURN p LIMIT 100"
+
+# Use indexes explicitly
+query = "MATCH (p:Person) USING INDEX p:Person(email) WHERE p.email = $email RETURN p"
+```
+
+## Migration & Sync
+
+### Syncing with Vector Stores
+
+```python
+def sync_to_knowledge_graph(vector_store, knowledge_graph):
+    """Sync documents from vector store to knowledge graph."""
+    documents = vector_store.get_all_documents()
+
+    for doc in documents:
+        # Create document entity
+        knowledge_graph.add_entity({
+            "type": "Document",
+            "id": doc.id,
+            "properties": doc.metadata
+        })
+
+        # Create relationships from extracted entities
+        entities = extract_entities(doc.text)
+        for entity in entities:
+            knowledge_graph.add_relationship({
+                "from": doc.id,
+                "to": entity.id,
+                "type": "MENTIONS"
+            })
+```
+
+## Examples
+
+### Customer Relationship Mapping
+
+```python
+@Graph(id="crm_agent")
+class CRMAgent:
+    def __init__(self):
+        self.kg = Neo4jKnowledgeGraph()
+
+    def add_interaction(self, state):
+        """Add customer interaction to graph."""
+        self.kg.add_entity({
+            "type": "Interaction",
+            "properties": {
+                "timestamp": state["timestamp"],
+                "type": state["interaction_type"]
+            }
+        })
+
+        self.kg.add_relationship({
+            "from": state["customer_id"],
+            "to": state["interaction_id"],
+            "type": "HAD_INTERACTION"
+        })
+
+        return state
+
+    def get_customer_history(self, state):
+        """Retrieve full customer interaction history."""
+        query = """
+        MATCH (c:Customer {id: $customer_id})-[:HAD_INTERACTION]->(i:Interaction)
+        RETURN i ORDER BY i.timestamp DESC
+        """
+        history = self.kg.query(query, customer_id=state["customer_id"])
+        return {"history": history}
+```
+
+## Next Steps
+
+- [Memory Overview](/docs/user-guide/memory/overview) - Memory systems
+- [Vector Stores](/docs/sdk/python#vector-stores) - Python SDK vector stores
+- [Neo4j Documentation](https://neo4j.com/docs/)

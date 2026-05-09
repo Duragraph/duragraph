@@ -1,0 +1,9 @@
+{
+  "lsp_servers": ["typescript-language-server"],
+  "typescript": {
+    "preferences": {
+      "includeCompletionsForModuleExports": true,
+      "includeCompletionsWithInsertText": true
+    }
+  }
+}

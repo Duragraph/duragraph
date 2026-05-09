@@ -1,0 +1,649 @@
+---
+title: CI/CD Integration for Evals
+description: Integrate evaluations into continuous integration and deployment pipelines
+---
+
+Integrate DuraGraph evaluations into your CI/CD pipeline to catch regressions, validate improvements, and maintain quality standards before deployment.
+
+## Overview
+
+CI/CD integration enables:
+
+- **Automated testing** on every commit/PR
+- **Regression detection** before deployment
+- **Performance benchmarking** across versions
+- **Quality gates** for production releases
+
+## GitHub Actions
+
+### Basic Workflow
+
+```yaml
+# .github/workflows/eval.yml
+name: Run Evals
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install duragraph[evals]
+          pip install -r requirements.txt
+
+      - name: Run evaluations
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DURAGRAPH_URL: ${{ secrets.DURAGRAPH_URL }}
+        run: |
+          python evals/run_evals.py
+
+      - name: Upload results
+        uses: actions/upload-artifact@v3
+        with:
+          name: eval-results
+          path: evals/results/
+
+      - name: Check quality gates
+        run: |
+          python evals/check_gates.py
+```
+
+### With Quality Gates
+
+```yaml
+- name: Run evals with gates
+  run: |
+    duragraph eval run \
+      --dataset evals/test_cases.json \
+      --min-score 0.8 \
+      --fail-on-regression \
+      --output results.json
+
+- name: Comment on PR
+  if: github.event_name == 'pull_request'
+  uses: actions/github-script@v6
+  with:
+    script: |
+      const fs = require('fs');
+      const results = JSON.parse(fs.readFileSync('results.json'));
+
+      const comment = `
+      ## Eval Results
+      - **Average Score**: ${results.avg_score}
+      - **Pass Rate**: ${results.pass_rate}%
+      - **Regressions**: ${results.regressions}
+
+      ${results.summary}
+      `;
+
+      github.rest.issues.createComment({
+        issue_number: context.issue.number,
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        body: comment
+      });
+```
+
+## Evaluation Scripts
+
+### Python Eval Runner
+
+```python
+# evals/run_evals.py
+import sys
+from duragraph.evals import EvalRunner, LLMJudge, HeuristicScorer
+from duragraph.evals.datasets import load_dataset
+
+def main():
+    # Load test dataset
+    dataset = load_dataset("evals/test_cases.json")
+
+    # Create runner
+    runner = EvalRunner(
+        eval_name="ci_eval",
+        dataset=dataset,
+        scorers=[
+            LLMJudge(model="gpt-4o", criteria="accuracy"),
+            HeuristicScorer(metric="response_time"),
+        ],
+    )
+
+    # Run evaluations
+    results = runner.run()
+
+    # Save results
+    results.save("evals/results/latest.json")
+
+    # Print summary
+    print(f"Average Score: {results.avg_score}")
+    print(f"Pass Rate: {results.pass_rate}%")
+
+    # Exit with error if below threshold
+    if results.avg_score < 0.8:
+        print("❌ Eval failed: Score below threshold")
+        sys.exit(1)
+
+    print("✅ Eval passed")
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Quality Gate Checker
+
+```python
+# evals/check_gates.py
+import json
+import sys
+
+def check_quality_gates():
+    with open("evals/results/latest.json") as f:
+        results = json.load(f)
+
+    with open("evals/results/baseline.json") as f:
+        baseline = json.load(f)
+
+    # Define quality gates
+    gates = {
+        "min_score": 0.8,
+        "max_regression": 0.05,  # 5% regression allowed
+        "min_pass_rate": 0.95,
+    }
+
+    failures = []
+
+    # Check minimum score
+    if results["avg_score"] < gates["min_score"]:
+        failures.append(f"Score {results['avg_score']} below minimum {gates['min_score']}")
+
+    # Check for regressions
+    regression = baseline["avg_score"] - results["avg_score"]
+    if regression > gates["max_regression"]:
+        failures.append(f"Regression of {regression:.2%} detected")
+
+    # Check pass rate
+    if results["pass_rate"] < gates["min_pass_rate"]:
+        failures.append(f"Pass rate {results['pass_rate']} below minimum {gates['min_pass_rate']}")
+
+    if failures:
+        print("❌ Quality gates failed:")
+        for failure in failures:
+            print(f"  - {failure}")
+        sys.exit(1)
+
+    print("✅ All quality gates passed")
+    sys.exit(0)
+
+if __name__ == "__main__":
+    check_quality_gates()
+```
+
+## GitLab CI
+
+```yaml
+# .gitlab-ci.yml
+stages:
+  - test
+  - eval
+  - deploy
+
+run_evals:
+  stage: eval
+  image: python:3.10
+  script:
+    - pip install duragraph[evals]
+    - python evals/run_evals.py
+  artifacts:
+    reports:
+      junit: evals/results/junit.xml
+    paths:
+      - evals/results/
+  only:
+    - merge_requests
+    - main
+
+check_regression:
+  stage: eval
+  script:
+    - python evals/check_gates.py
+  dependencies:
+    - run_evals
+  allow_failure: false
+```
+
+## CircleCI
+
+```yaml
+# .circleci/config.yml
+version: 2.1
+
+jobs:
+  eval:
+    docker:
+      - image: cimg/python:3.10
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            pip install duragraph[evals]
+            pip install -r requirements.txt
+      - run:
+          name: Run evaluations
+          command: python evals/run_evals.py
+      - store_artifacts:
+          path: evals/results/
+      - store_test_results:
+          path: evals/results/
+
+workflows:
+  test_and_eval:
+    jobs:
+      - eval
+```
+
+## Jenkins
+
+```groovy
+// Jenkinsfile
+pipeline {
+    agent any
+
+    environment {
+        OPENAI_API_KEY = credentials('openai-api-key')
+        DURAGRAPH_URL = 'http://duragraph:8081'
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                sh 'pip install duragraph[evals]'
+                sh 'pip install -r requirements.txt'
+            }
+        }
+
+        stage('Run Evals') {
+            steps {
+                sh 'python evals/run_evals.py'
+            }
+        }
+
+        stage('Quality Gates') {
+            steps {
+                sh 'python evals/check_gates.py'
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'evals/results/**/*'
+            publishHTML([
+                reportName: 'Eval Results',
+                reportDir: 'evals/results',
+                reportFiles: 'report.html'
+            ])
+        }
+    }
+}
+```
+
+## Pre-commit Hooks
+
+### Local Evaluation
+
+```bash
+# .git/hooks/pre-commit
+#!/bin/bash
+
+echo "Running evaluations..."
+
+# Run quick evals on changed files
+python evals/run_quick_evals.py
+
+if [ $? -ne 0 ]; then
+    echo "❌ Evals failed. Commit aborted."
+    exit 1
+fi
+
+echo "✅ Evals passed"
+exit 0
+```
+
+### Quick Eval Script
+
+```python
+# evals/run_quick_evals.py
+import sys
+from duragraph.evals import QuickEval
+
+def main():
+    # Run lightweight evals
+    eval = QuickEval(
+        sample_size=10,  # Small sample for speed
+        timeout=30,      # 30 second timeout
+    )
+
+    result = eval.run()
+
+    if result.avg_score < 0.7:
+        print(f"❌ Quick eval failed: {result.avg_score}")
+        sys.exit(1)
+
+    print(f"✅ Quick eval passed: {result.avg_score}")
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+```
+
+## Docker-based Evaluation
+
+```dockerfile
+# evals/Dockerfile
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+RUN pip install duragraph[evals]
+
+COPY evals/ ./evals/
+COPY . .
+
+CMD ["python", "evals/run_evals.py"]
+```
+
+```bash
+# Run evals in Docker
+docker build -t my-agent-evals -f evals/Dockerfile .
+docker run \
+  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  -e DURAGRAPH_URL=$DURAGRAPH_URL \
+  -v $(pwd)/evals/results:/app/evals/results \
+  my-agent-evals
+```
+
+## Regression Testing
+
+### Version Comparison
+
+```python
+# evals/compare_versions.py
+from duragraph.evals import VersionComparator
+
+comparator = VersionComparator()
+
+# Compare current version against baseline
+results = comparator.compare(
+    current_version="main",
+    baseline_version="v1.0.0",
+    dataset="evals/test_cases.json",
+)
+
+# Report regressions
+if results.has_regressions():
+    print("⚠️  Regressions detected:")
+    for regression in results.regressions:
+        print(f"  - {regression.test_case}: {regression.score_diff}")
+    sys.exit(1)
+
+print("✅ No regressions detected")
+```
+
+### A/B Testing
+
+```python
+# evals/ab_test.py
+from duragraph.evals import ABTest
+
+test = ABTest(
+    name="prompt_optimization",
+    variant_a=load_agent("variant_a"),
+    variant_b=load_agent("variant_b"),
+    dataset="evals/test_cases.json",
+)
+
+results = test.run(sample_size=100)
+
+print(f"Variant A: {results.variant_a.avg_score}")
+print(f"Variant B: {results.variant_b.avg_score}")
+print(f"Winner: {results.winner}")
+print(f"Confidence: {results.confidence}%")
+
+if results.confidence > 95:
+    print(f"✅ Statistically significant: {results.winner} wins")
+else:
+    print("⚠️  No statistically significant difference")
+```
+
+## Performance Benchmarking
+
+```python
+# evals/benchmark.py
+from duragraph.evals import PerformanceBenchmark
+
+benchmark = PerformanceBenchmark()
+
+results = benchmark.run(
+    agent=my_agent,
+    dataset="evals/test_cases.json",
+    metrics=[
+        "avg_latency",
+        "p95_latency",
+        "throughput",
+        "error_rate",
+    ],
+)
+
+# Save baseline
+results.save_baseline("evals/results/baseline_perf.json")
+
+# Compare against baseline
+if results.avg_latency > baseline.avg_latency * 1.2:
+    print("❌ Performance regression: 20% slower")
+    sys.exit(1)
+
+print("✅ Performance acceptable")
+```
+
+## Continuous Monitoring
+
+### Scheduled Evaluations
+
+```yaml
+# .github/workflows/scheduled-eval.yml
+name: Scheduled Evals
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Daily at midnight
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run production evals
+        run: |
+          python evals/production_eval.py
+      - name: Alert on failures
+        if: failure()
+        uses: actions/slack@v1
+        with:
+          slack-webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          message: '❌ Production eval failed'
+```
+
+### Production Monitoring
+
+```python
+# evals/production_eval.py
+from duragraph.evals import ProductionEvaluator
+
+evaluator = ProductionEvaluator(
+    control_plane_url="https://prod.duragraph.io",
+    api_key=os.environ["DURAGRAPH_API_KEY"],
+)
+
+# Sample recent production runs
+results = evaluator.sample_and_evaluate(
+    time_window="24h",
+    sample_size=100,
+    scorers=[
+        LLMJudge(model="gpt-4o"),
+        FeedbackScorer(),
+    ],
+)
+
+# Alert if quality drops
+if results.avg_score < 0.85:
+    send_alert("Production quality drop detected")
+
+# Track metrics
+track_metric("production.eval.avg_score", results.avg_score)
+track_metric("production.eval.pass_rate", results.pass_rate)
+```
+
+## Reporting
+
+### HTML Report Generation
+
+```python
+from duragraph.evals import ReportGenerator
+
+generator = ReportGenerator()
+
+report = generator.generate(
+    results="evals/results/latest.json",
+    format="html",
+    include_charts=True,
+    include_examples=True,
+)
+
+report.save("evals/results/report.html")
+```
+
+### Slack Integration
+
+```python
+from duragraph.evals import SlackReporter
+
+reporter = SlackReporter(webhook_url=os.environ["SLACK_WEBHOOK"])
+
+reporter.send_results(
+    results=results,
+    channel="#agent-evals",
+    mention_on_failure=["@eng-team"],
+)
+```
+
+## Best Practices
+
+### 1. Tiered Evaluation Strategy
+
+```python
+# Fast evals for every commit
+quick_eval = EvalRunner(
+    dataset=load_dataset("evals/smoke_tests.json"),
+    timeout=60,
+)
+
+# Comprehensive evals for main branch
+full_eval = EvalRunner(
+    dataset=load_dataset("evals/full_suite.json"),
+    timeout=600,
+)
+
+# Nightly regression suite
+regression_eval = EvalRunner(
+    dataset=load_dataset("evals/regression_suite.json"),
+    compare_to_baseline=True,
+)
+```
+
+### 2. Fail Fast with Early Exit
+
+```python
+runner = EvalRunner(
+    dataset=dataset,
+    fail_fast=True,  # Stop on first failure
+    early_exit_threshold=0.5,  # Exit if score drops below 50%
+)
+```
+
+### 3. Cache Results
+
+```python
+runner = EvalRunner(
+    dataset=dataset,
+    cache_results=True,
+    cache_dir="evals/.cache",
+)
+```
+
+### 4. Parallel Execution
+
+```python
+runner = EvalRunner(
+    dataset=dataset,
+    parallel=True,
+    max_workers=10,
+)
+```
+
+## Troubleshooting
+
+### Flaky Tests
+
+```python
+from duragraph.evals import FlakyTestDetector
+
+detector = FlakyTestDetector()
+
+# Identify flaky tests
+flaky_tests = detector.find_flaky(
+    results_history="evals/results/history/",
+    min_runs=10,
+    variance_threshold=0.3,
+)
+
+# Quarantine flaky tests
+for test in flaky_tests:
+    print(f"⚠️  Flaky test: {test.name}")
+    mark_as_quarantined(test)
+```
+
+### Debug Mode
+
+```bash
+# Run evals in debug mode
+duragraph eval run \
+  --debug \
+  --verbose \
+  --save-traces \
+  --dataset evals/test_cases.json
+```
+
+## Next Steps
+
+- [Evals Overview](/docs/user-guide/evals/overview) - Evaluation framework
+- [Scorers](/docs/user-guide/evals/scorers) - Scoring methods
+- [LLM Judge](/docs/user-guide/evals/llm-judge) - Automated evaluation
+- [Feedback](/docs/user-guide/evals/feedback) - Human feedback

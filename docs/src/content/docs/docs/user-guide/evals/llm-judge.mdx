@@ -1,0 +1,408 @@
+---
+title: LLM-as-Judge Evaluation
+description: Use LLMs to evaluate agent outputs and behaviors
+---
+
+LLM-as-judge evaluation uses language models to assess the quality, accuracy, and appropriateness of agent outputs. This approach scales better than human evaluation while providing nuanced, context-aware scoring.
+
+## Overview
+
+LLM-as-judge provides:
+
+- **Scalable evaluation** without manual review
+- **Nuanced scoring** beyond simple metrics
+- **Multi-dimensional assessment** (accuracy, helpfulness, safety)
+- **Natural language explanations** for scores
+
+## Basic Usage
+
+### Python SDK
+
+```python
+from duragraph.evals import LLMJudge, JudgeCriteria
+
+# Create judge
+judge = LLMJudge(
+    model="gpt-4o",
+    criteria=JudgeCriteria.HELPFULNESS,
+)
+
+# Evaluate output
+result = judge.evaluate(
+    input="What is the capital of France?",
+    output="The capital of France is Paris.",
+    expected="Paris",
+)
+
+print(result.score)  # 0.95
+print(result.explanation)  # "Accurate and concise answer"
+```
+
+### Control Plane API
+
+```bash
+curl -X POST http://localhost:8081/api/v1/evals/judge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "criteria": "helpfulness",
+    "input": "What is the capital of France?",
+    "output": "The capital of France is Paris.",
+    "expected": "Paris"
+  }'
+```
+
+## Evaluation Criteria
+
+### Built-in Criteria
+
+```python
+from duragraph.evals import JudgeCriteria
+
+# Predefined criteria
+JudgeCriteria.ACCURACY      # Factual correctness
+JudgeCriteria.HELPFULNESS   # Usefulness to user
+JudgeCriteria.COHERENCE     # Logical consistency
+JudgeCriteria.RELEVANCE     # Topic relevance
+JudgeCriteria.SAFETY        # Harmful content detection
+JudgeCriteria.CONCISENESS   # Brevity without losing information
+```
+
+### Custom Criteria
+
+```python
+from duragraph.evals import CustomCriteria
+
+criteria = CustomCriteria(
+    name="technical_accuracy",
+    description="Evaluate technical accuracy of code explanations",
+    rubric="""
+    Score 1: Incorrect or misleading
+    Score 2: Partially correct with errors
+    Score 3: Mostly correct
+    Score 4: Correct with minor omissions
+    Score 5: Completely accurate
+    """,
+    scale=(1, 5),
+)
+
+judge = LLMJudge(model="gpt-4o", criteria=criteria)
+```
+
+## Multi-Dimensional Evaluation
+
+Evaluate multiple aspects simultaneously:
+
+```python
+from duragraph.evals import MultiDimensionalJudge
+
+judge = MultiDimensionalJudge(
+    model="gpt-4o",
+    dimensions={
+        "accuracy": JudgeCriteria.ACCURACY,
+        "helpfulness": JudgeCriteria.HELPFULNESS,
+        "safety": JudgeCriteria.SAFETY,
+    }
+)
+
+result = judge.evaluate(
+    input="How do I make dynamite?",
+    output="I cannot provide instructions for making explosives.",
+)
+
+print(result.scores)
+# {
+#   "accuracy": 1.0,
+#   "helpfulness": 0.8,
+#   "safety": 1.0
+# }
+```
+
+## Pairwise Comparison
+
+Compare two outputs to determine which is better:
+
+```python
+from duragraph.evals import PairwiseJudge
+
+judge = PairwiseJudge(model="gpt-4o")
+
+result = judge.compare(
+    input="Explain quantum computing",
+    output_a="Quantum computing uses quantum bits...",
+    output_b="Quantum computers are really fast computers...",
+)
+
+print(result.winner)  # "output_a"
+print(result.confidence)  # 0.85
+print(result.explanation)  # "Output A provides more accurate technical detail"
+```
+
+## Reference-Based Evaluation
+
+Evaluate against a gold standard reference:
+
+```python
+from duragraph.evals import ReferenceBasedJudge
+
+judge = ReferenceBasedJudge(
+    model="gpt-4o",
+    criteria=JudgeCriteria.ACCURACY,
+)
+
+result = judge.evaluate(
+    input="What is photosynthesis?",
+    output="Plants convert light into energy",
+    reference="Photosynthesis is the process where plants use sunlight to convert CO2 and water into glucose and oxygen",
+)
+
+print(result.score)  # 0.7 - Correct but less detailed than reference
+```
+
+## Batch Evaluation
+
+Evaluate multiple examples efficiently:
+
+```python
+from duragraph.evals import BatchJudge
+
+judge = BatchJudge(
+    model="gpt-4o",
+    criteria=JudgeCriteria.HELPFULNESS,
+    batch_size=10,
+)
+
+examples = [
+    {"input": "...", "output": "..."},
+    {"input": "...", "output": "..."},
+    # ... more examples
+]
+
+results = judge.evaluate_batch(examples)
+
+# Aggregate statistics
+avg_score = sum(r.score for r in results) / len(results)
+print(f"Average helpfulness: {avg_score}")
+```
+
+## Chain-of-Thought Evaluation
+
+Use CoT prompting for more reliable judgments:
+
+```python
+from duragraph.evals import CoTJudge
+
+judge = CoTJudge(
+    model="gpt-4o",
+    criteria=JudgeCriteria.ACCURACY,
+    use_chain_of_thought=True,
+)
+
+result = judge.evaluate(
+    input="What causes climate change?",
+    output="Climate change is primarily caused by greenhouse gas emissions from human activities.",
+)
+
+print(result.reasoning)
+# "First, I'll verify the factual claims... The statement about greenhouse gases is accurate according to scientific consensus..."
+
+print(result.score)  # 0.95
+```
+
+## Calibration
+
+Calibrate judge against human ratings:
+
+```python
+from duragraph.evals import CalibratedJudge
+
+# Train calibration model
+human_ratings = load_human_ratings()  # List of (input, output, human_score)
+
+judge = CalibratedJudge(
+    model="gpt-4o",
+    criteria=JudgeCriteria.HELPFULNESS,
+)
+
+judge.calibrate(human_ratings)
+
+# Now evaluations are calibrated to match human judgment distribution
+result = judge.evaluate(input="...", output="...")
+```
+
+## Integration with Eval Runs
+
+### Automatic Evaluation
+
+```python
+from duragraph.evals import EvalRunner, LLMJudge
+
+runner = EvalRunner(
+    eval_name="helpfulness_test",
+    dataset=load_dataset("test_cases.json"),
+    scorer=LLMJudge(
+        model="gpt-4o",
+        criteria=JudgeCriteria.HELPFULNESS,
+    ),
+)
+
+results = runner.run()
+print(results.summary())
+```
+
+### Custom Eval Pipeline
+
+```python
+from duragraph import Graph
+from duragraph.evals import LLMJudge
+
+@Graph(id="eval_pipeline")
+class EvalPipeline:
+    def __init__(self):
+        self.judge = LLMJudge(model="gpt-4o")
+
+    def run_agent(self, state):
+        """Run agent being evaluated."""
+        output = run_agent(state["input"])
+        return {"output": output}
+
+    def judge_output(self, state):
+        """Evaluate with LLM judge."""
+        result = self.judge.evaluate(
+            input=state["input"],
+            output=state["output"],
+        )
+        return {"score": result.score, "explanation": result.explanation}
+
+    def save_results(self, state):
+        """Save eval results."""
+        save_to_db(state)
+        return state
+```
+
+## Best Practices
+
+### 1. Use Strong Judge Models
+
+```python
+# Prefer more capable models for judging
+judge = LLMJudge(
+    model="gpt-4o",  # Better than gpt-3.5-turbo for evaluation
+    criteria=JudgeCriteria.ACCURACY,
+)
+```
+
+### 2. Provide Clear Context
+
+```python
+judge = LLMJudge(
+    model="gpt-4o",
+    criteria=custom_criteria,
+    context="This is customer support context. Responses should be empathetic and solution-focused.",
+)
+```
+
+### 3. Validate with Human Ratings
+
+```python
+# Regularly validate judge against human ratings
+def validate_judge(judge, validation_set):
+    results = []
+    for example in validation_set:
+        llm_score = judge.evaluate(**example).score
+        human_score = example["human_score"]
+        results.append({
+            "llm": llm_score,
+            "human": human_score,
+            "diff": abs(llm_score - human_score)
+        })
+
+    avg_diff = sum(r["diff"] for r in results) / len(results)
+    print(f"Average difference from human: {avg_diff}")
+```
+
+### 4. Use Multiple Judges
+
+```python
+from duragraph.evals import EnsembleJudge
+
+# Combine multiple models for more reliable scores
+judge = EnsembleJudge(
+    models=["gpt-4o", "claude-3-5-sonnet-20241022"],
+    criteria=JudgeCriteria.HELPFULNESS,
+    aggregation="mean",  # or "median", "max", "min"
+)
+```
+
+## Cost Optimization
+
+### Sampling Strategy
+
+```python
+# Evaluate a sample instead of full dataset
+from duragraph.evals import SampledJudge
+
+judge = SampledJudge(
+    base_judge=LLMJudge(model="gpt-4o"),
+    sample_rate=0.1,  # Evaluate 10% of examples
+    sample_strategy="stratified",  # Ensure representative sample
+)
+```
+
+### Judge Model Selection
+
+```python
+# Use cheaper model for simple criteria
+simple_judge = LLMJudge(
+    model="gpt-4o-mini",  # Cheaper
+    criteria=JudgeCriteria.CONCISENESS,  # Simple criterion
+)
+
+complex_judge = LLMJudge(
+    model="gpt-4o",  # More expensive but better
+    criteria=JudgeCriteria.ACCURACY,  # Complex criterion
+)
+```
+
+## Limitations
+
+1. **Judge Bias**: LLMs may have inherent biases that affect scoring
+2. **Inconsistency**: Same input may receive different scores across runs
+3. **Context Window**: Long outputs may exceed judge's context limit
+4. **Cost**: Can be expensive at scale
+5. **No Ground Truth**: Judge is only as good as the judging model
+
+## Mitigation Strategies
+
+```python
+# 1. Use temperature=0 for consistency
+judge = LLMJudge(model="gpt-4o", temperature=0.0)
+
+# 2. Multi-run voting for important evaluations
+from duragraph.evals import MultiRunJudge
+
+judge = MultiRunJudge(
+    base_judge=LLMJudge(model="gpt-4o"),
+    num_runs=3,
+    aggregation="median",
+)
+
+# 3. Hybrid approach: LLM judge + heuristics
+from duragraph.evals import HybridJudge
+
+judge = HybridJudge(
+    llm_judge=LLMJudge(model="gpt-4o"),
+    heuristic_scorers=[
+        LengthScorer(),
+        ReadabilityScorer(),
+    ],
+    weights={"llm": 0.7, "heuristics": 0.3},
+)
+```
+
+## Next Steps
+
+- [Evals Overview](/docs/user-guide/evals/overview) - Evaluation framework
+- [Scorers](/docs/user-guide/evals/scorers) - Heuristic scorers
+- [Feedback](/docs/user-guide/evals/feedback) - Human feedback collection
+- [CI/CD Integration](/docs/user-guide/evals/ci-cd) - Automated testing
