@@ -1,0 +1,42 @@
+name: Studio CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'studio/**'
+      - '.github/workflows/studio-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'studio/**'
+      - '.github/workflows/studio-ci.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
