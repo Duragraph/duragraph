@@ -2,7 +2,10 @@ import { useEffect, useCallback, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import type { RunStatus } from "@/types/entities"
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:18081/api/v1"
+// Default to a relative path so the dashboard works when embedded into the
+// engine binary in production (same-origin). Dev still works because the
+// Vite proxy forwards /api/* to the engine. Override via VITE_API_BASE_URL.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/v1"
 
 export interface ThreadStreamEvent {
   event: string
