@@ -2,7 +2,7 @@ import { useEffect, useCallback, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import type { RunStatus } from "@/types/entities"
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8081/api/v1"
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:18081/api/v1"
 
 export interface ThreadStreamEvent {
   event: string

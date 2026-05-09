@@ -112,7 +112,7 @@ export function NewRunDialog({
     if (createNewThread) {
       try {
         const newThread = await createThreadMutation.mutateAsync()
-        targetThreadId = newThread.id
+        targetThreadId = newThread.thread_id
         queryClient.invalidateQueries({ queryKey: ["threads"] })
       } catch (error) {
         toast.error(`Failed to create thread: ${(error as Error).message}`)
@@ -218,8 +218,8 @@ export function NewRunDialog({
                     </SelectItem>
                   ) : (
                     threads.map((thread) => (
-                      <SelectItem key={thread.id} value={thread.id}>
-                        {thread.id.slice(0, 12)}... ({thread.messages?.length || 0} messages)
+                      <SelectItem key={thread.thread_id} value={thread.thread_id}>
+                        {thread.thread_id.slice(0, 12)}... ({thread.messages?.length || 0} messages)
                       </SelectItem>
                     ))
                   )}
