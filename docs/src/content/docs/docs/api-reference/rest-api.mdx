@@ -191,23 +191,34 @@ All errors follow a consistent format:
 
 ## Rate Limiting
 
-Rate limit headers included in all responses:
+Rate limit headers are included on responses from the rate-limited routes
+(everything except `/health`, `/metrics`, and `/ok`):
 
 ```
 X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1609459260
 ```
 
-When rate limit exceeded:
+When the rate limit is exceeded the engine responds with `429 Too Many
+Requests` and the following headers:
+
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+Retry-After: 30
+```
+
+with a JSON body:
 
 ```json
 {
   "error": "rate_limit_exceeded",
-  "message": "Too many requests",
-  "retry_after": 60
+  "message": "Too many requests. Please slow down.",
+  "retry_after": 30
 }
 ```
+
+The `Retry-After` value is the number of seconds to wait before retrying.
 
 ## Next Steps
 
