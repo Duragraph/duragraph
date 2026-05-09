@@ -179,7 +179,7 @@ function ThreadDetailPage() {
             )}
           </div>
         }
-        description={`Created ${new Date(thread.created_at * 1000).toLocaleString()}`}
+        description={`Created ${new Date(thread.created_at).toLocaleString()}`}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => setShowNewRunDialog(true)}>
@@ -254,7 +254,7 @@ function ThreadDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="text-lg">
-              {new Date(thread.updated_at * 1000).toLocaleDateString()}
+              {new Date(thread.updated_at).toLocaleDateString()}
             </div>
           </CardContent>
         </Card>
