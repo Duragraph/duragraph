@@ -63,7 +63,7 @@ func init() {
 	devCmd.Flags().StringVar(&devWatch, "watch", "./agents",
 		"Directory to watch (recursively) for Python graph files; pass empty string to disable")
 	devCmd.Flags().BoolVar(&devStudio, "studio", false,
-		"Serve bundled Studio at /studio/ (Phase 8 — currently a no-op)")
+		"Serve embedded Studio UI at /studio/")
 
 	rootCmd.AddCommand(devCmd)
 }
@@ -90,7 +90,8 @@ func runDev(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   dashboard: http://localhost:%d/\n", devPort)
 
 	if devStudio {
-		fmt.Println("⚠️  studio bundling not yet implemented (Phase 8); --studio ignored")
+		setIfUnset("DURAGRAPH_DEV_STUDIO", "true")
+		fmt.Println("   studio: http://localhost:" + fmt.Sprint(devPort) + "/studio/")
 	}
 
 	// Phase 5: --watch supervises Python graph workers under devWatch.

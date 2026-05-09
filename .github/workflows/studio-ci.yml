@@ -1,0 +1,50 @@
+name: Studio CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'studio/**'
+      - '.github/workflows/studio-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'studio/**'
+      - '.github/workflows/studio-ci.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        # No `--frozen-lockfile`: studio doesn't commit pnpm-lock.yaml in
+        # its source repo. Future cleanup PR can add a lockfile + flip
+        # back to frozen for reproducibility.
+        run: pnpm install
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # TODO(post-migration): re-enable lint once studio's ESLint config is
+      # migrated from .eslintrc.* (legacy) to eslint.config.js (flat config).
+      # ESLint 9 dropped support for the legacy format. The duragraph-studio
+      # source repo never did the migration; lint was effectively broken
+      # there too. Tracked as a separate cleanup PR.
+      # - name: Lint
+      #   run: pnpm lint
+
+      - name: Build
+        run: pnpm build
