@@ -1,10 +1,16 @@
-name: CI
+name: Go SDK CI
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'go-sdk/**'
+      - '.github/workflows/go-sdk-ci.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'go-sdk/**'
+      - '.github/workflows/go-sdk-ci.yml'
 
 env:
   GO_VERSION: '1.23'
@@ -15,7 +21,9 @@ jobs:
     strategy:
       matrix:
         go-version: ['1.22', '1.23']
-
+    defaults:
+      run:
+        working-directory: go-sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -34,11 +42,14 @@ jobs:
         uses: codecov/codecov-action@v4
         if: matrix.go-version == '1.23'
         with:
-          files: coverage.out
+          files: go-sdk/coverage.out
           fail_ci_if_error: false
 
   lint:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go-sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -51,9 +62,13 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          working-directory: go-sdk
 
   security:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go-sdk
     steps:
       - uses: actions/checkout@v4
 

@@ -38,12 +38,39 @@ jobs:
               uv run python -m py_compile "$example"
           done
 
-  # NOTE: Go-build job intentionally omitted in this PR.
-  # examples/go/* depends on github.com/duragraph/duragraph-go which
-  # hasn't been imported into the monorepo yet (planned in the next
-  # import PR — go-sdk/). The example references SDK APIs (e.g.
-  # worker.WithName) that aren't in the last published v0.1.0 — they
-  # were authored against an unreleased dev branch.
-  # Once go-sdk/ lands, this job comes back, with a replace directive
-  # in each example's go.mod pointing at ../go-sdk so they build
-  # against the local SDK source.
+  go-build:
+    name: Go build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build Go examples
+        # Each example's go.mod has a `replace github.com/duragraph/
+        # duragraph-go => ../../../go-sdk` directive so it builds against
+        # the local SDK source (HEAD), not the published v0.1.0 (which is
+        # missing APIs the example uses). `go mod tidy` resolves the
+        # replace + writes go.sum since examples don't commit go.sum.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for example in examples/go/*/; do
+            if [ -f "$example/main.go" ] || [ -f "$example/go.mod" ]; then
+              echo "Building $example"
+              (
+                cd "$example"
+                if [ -f go.mod ]; then
+                  go mod tidy
+                fi
+                go build ./...
+                if find . -name "*_test.go" | grep -q .; then
+                  go test ./...
+                fi
+                go vet ./...
+              )
+            fi
+          done
