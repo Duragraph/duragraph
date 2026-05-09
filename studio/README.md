@@ -22,34 +22,46 @@ DuraGraph Studio is a React-based UI for interacting with AI agents powered by D
 
 ## Quick Start
 
-### Using Docker (Recommended)
+Studio is embedded into the DuraGraph engine binary at build time. There is no
+standalone Studio image — the engine serves the prebuilt bundle at `/studio/`
+when explicitly opted in.
+
+### Run via the engine (recommended)
 
 ```bash
-docker run -p 3000:80 \
-  -e VITE_DURAGRAPH_API_URL=http://localhost:8081 \
-  ghcr.io/duragraph/duragraph-studio:latest
+# From the monorepo root, with the engine built/installed:
+duragraph dev --studio
 ```
 
-Open http://localhost:3000
+Then open http://localhost:8081/studio/.
 
-### Local Development
+The `--studio` flag sets `DURAGRAPH_DEV_STUDIO=true` for you. Use the env var
+directly with `duragraph serve` if you want Studio mounted on a non-dev server:
 
 ```bash
-# Install dependencies
+DURAGRAPH_DEV_STUDIO=true duragraph serve
+```
+
+### Standalone iteration on Studio source
+
+For hot-reload work on the Studio bundle itself (without rebuilding the engine
+on every change), run the Vite dev server and point it at a running control
+plane:
+
+```bash
 pnpm install
-
-# Start dev server
-pnpm dev
-
-# Build for production
-pnpm build
+pnpm dev   # serves on http://localhost:3300
 ```
+
+`pnpm build` produces the static bundle that the engine embeds (see
+`Dockerfile.server` in the repo root for the multi-stage build).
 
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `VITE_DURAGRAPH_API_URL` | `http://localhost:8081` | DuraGraph API URL |
+| `DURAGRAPH_DEV_STUDIO` | unset | When `true`, the engine mounts Studio at `/studio/`. Set automatically by `duragraph dev --studio`. |
+| `VITE_DURAGRAPH_API_URL` | `http://localhost:8081` | API URL used by the standalone Vite dev server (`pnpm dev` only). |
 
 ## Tech Stack
 
@@ -133,7 +145,7 @@ pnpm preview
 ## Demo cheat sheet
 
 For a live walkthrough against the local-dev stack from
-[`duragraph-examples`](../duragraph-examples). Assumes:
+[`examples/`](../examples). Assumes:
 
 - Control plane on host port `18081` (per the `duragraph-dev-app` container)
 - Studio dev server on host port `13300`
@@ -223,6 +235,7 @@ route the same code to a different upstream model, set
 
 ```bash
 OPENROUTER_MODEL=anthropic/claude-3.5-sonnet uv run --with-editable ../duragraph-python --with openai python main.py
+# (the worker lives under ../examples/python/02-chatbot in the monorepo)
 # or anything from https://openrouter.ai/models
 ```
 
@@ -250,9 +263,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
 ## Related Projects
 
-- [DuraGraph](https://github.com/Duragraph/duragraph) - Control plane
+All siblings now live in the same monorepo:
+
+- [DuraGraph](https://github.com/Duragraph/duragraph) - Control plane (this repo)
 - [DuraGraph Dashboard](https://github.com/Duragraph/duragraph/tree/main/dashboard) - Admin UI
-- [DuraGraph Examples](https://github.com/Duragraph/duragraph-examples) - Example agents
+- [DuraGraph Examples](https://github.com/Duragraph/duragraph/tree/main/examples) - Example agents
 
 ## License
 
