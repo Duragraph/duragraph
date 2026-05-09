@@ -13,8 +13,10 @@ import (
 // DefaultNATSURL is the NATS URL the CLI assumes when neither the --nats
 // flag nor the DURAGRAPH_NATS_URL environment variable is set. Mirrors
 // the embedded-NATS port the `dev` command starts on (binary-modes.yml
-// § subcommands.dev).
-const DefaultNATSURL = "nats://localhost:4222"
+// § subcommands.dev) — defaultNATSEmbeddedPort in internal/config/config.go.
+// Operators connecting to a canonical/external NATS at 4222 should pass
+// --nats nats://localhost:4222 or set DURAGRAPH_NATS_URL.
+const DefaultNATSURL = "nats://localhost:14222"
 
 // NATS subject mapping for `events tail --aggregate` filtering. Mirrors
 // the routing in internal/infrastructure/messaging/outbox_relay.go's
