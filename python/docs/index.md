@@ -237,15 +237,15 @@ class ChatAgent:
     @node()
     def start(self, state):
         return state
-    
+
     @llm_node(model="gpt-4o-mini")
     def process(self, state):
         return state
-    
+
     @node()
     def finish(self, state):
         return state
-    
+
     # Define edges
     start >> process >> finish
 ```
@@ -334,11 +334,11 @@ class CustomEmbeddingProvider(EmbeddingProvider):
     async def aembed_documents(self, texts, **kwargs):
         # Your implementation
         pass
-    
+
     async def aembed_query(self, text, **kwargs):
         # Your implementation
         pass
-    
+
     @property
     def dimension(self):
         return 768

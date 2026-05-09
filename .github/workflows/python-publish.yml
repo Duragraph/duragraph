@@ -1,12 +1,17 @@
-name: Publish to PyPI
+name: Python Publish to PyPI
+
+# Triggered manually only (workflow_dispatch). The original duragraph-python
+# repo's publish workflow ran on `release` events too, but in the monorepo
+# engine releases (e.g. v0.7.0) must NOT auto-publish the SDK. A future
+# follow-up could switch to tag-pattern dispatch (e.g. on tags matching
+# `python-v*`) once the release process is split. For now, operator runs
+# this manually after bumping python/pyproject.toml version.
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       test_pypi:
-        description: 'Publish to Test PyPI instead'
+        description: 'Publish to Test PyPI instead of production PyPI'
         required: false
         default: false
         type: boolean
@@ -15,39 +20,39 @@ jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: "3.12"
+          version: latest
 
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build
+      - name: Set up Python
+        run: uv python install 3.12
 
-      - name: Build package
-        run: python -m build
+      - name: Build distribution
+        run: uv build
 
       - name: Store distribution packages
         uses: actions/upload-artifact@v4
         with:
           name: python-package-distributions
-          path: dist/
+          path: python/dist/
 
   publish-to-pypi:
     name: Publish to PyPI
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.test_pypi)
+    if: github.event_name == 'workflow_dispatch' && !inputs.test_pypi
     needs: build
     runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/p/duragraph-python
     permissions:
-      id-token: write  # Required for trusted publishing
-
+      id-token: write
     steps:
       - name: Download distribution packages
         uses: actions/download-artifact@v4
@@ -68,7 +73,6 @@ jobs:
       url: https://test.pypi.org/p/duragraph-python
     permissions:
       id-token: write
-
     steps:
       - name: Download distribution packages
         uses: actions/download-artifact@v4

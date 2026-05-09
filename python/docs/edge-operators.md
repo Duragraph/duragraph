@@ -15,15 +15,15 @@ class SimpleFlow:
     @node()
     def start(self, state):
         return state
-    
+
     @node()
     def process(self, state):
         return state
-    
+
     @node()
     def finish(self, state):
         return state
-    
+
     # Define the flow
     start >> process >> finish
 ```
@@ -39,19 +39,19 @@ class DataPipeline:
     @node()
     def load(self, state):
         return state
-    
+
     @node()
     def validate(self, state):
         return state
-    
+
     @node()
     def transform(self, state):
         return state
-    
+
     @node()
     def save(self, state):
         return state
-    
+
     # Create a linear pipeline
     load >> validate >> transform >> save
 ```
@@ -67,23 +67,23 @@ class ParallelProcessing:
     @node()
     def start(self, state):
         return state
-    
+
     @node()
     def process_a(self, state):
         return state
-    
+
     @node()
     def process_b(self, state):
         return state
-    
+
     @node()
     def merge(self, state):
         return state
-    
+
     @node()
     def finish(self, state):
         return state
-    
+
     # Create parallel branches that merge
     start >> process_a >> merge
     start >> process_b >> merge
@@ -104,17 +104,17 @@ class AIAssistant:
     def understand(self, state):
         """Understand user intent."""
         return state
-    
+
     @llm_node(model="gpt-4o-mini", temperature=0.7)
     def generate(self, state):
         """Generate response."""
         return state
-    
+
     @llm_node(model="gpt-4o-mini", temperature=0.5)
     def refine(self, state):
         """Refine the response."""
         return state
-    
+
     # Define AI processing pipeline
     understand >> generate >> refine
 ```
@@ -131,17 +131,17 @@ class AsyncFlow:
     async def fetch_data(self, state):
         # Async operation
         return state
-    
+
     @node()
     def process_data(self, state):
         # Sync operation
         return state
-    
+
     @node()
     async def save_data(self, state):
         # Async operation
         return state
-    
+
     # Mix async and sync nodes
     fetch_data >> process_data >> save_data
 ```
@@ -159,36 +159,36 @@ class ConditionalFlow:
     @node()
     def start(self, state):
         return state
-    
+
     @router_node()
     def router(self, state):
         # Return the name of the next node
         if state.get("condition"):
             return "path_a"
         return "path_b"
-    
+
     @node()
     def path_a(self, state):
         return state
-    
+
     @node()
     def path_b(self, state):
         return state
-    
+
     @node()
     def end(self, state):
         return state
-    
+
     # Connect to router
     start >> router
-    
+
     # Router outputs are connected using the edge builder
     # (The >> operator doesn't support conditional routing)
     edge("router").to_conditional({
         "path_a": "path_a",
         "path_b": "path_b"
     })
-    
+
     # Both paths lead to end
     path_a >> end
     path_b >> end
@@ -219,15 +219,15 @@ class ExplicitEdges:
     @node()
     def start(self, state):
         return state
-    
+
     @node()
     def middle(self, state):
         return state
-    
+
     @node()
     def end(self, state):
         return state
-    
+
     # Using edge builder instead of >>
     edges = [
         edge("start").to("middle"),

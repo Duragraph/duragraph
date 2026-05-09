@@ -75,7 +75,7 @@ class ClaudeAgent:
 export OPENAI_API_KEY=sk-...
 export OPENAI_BASE_URL=https://api.openai.com/v1  # optional
 
-# Anthropic  
+# Anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 export ANTHROPIC_BASE_URL=https://api.anthropic.com  # optional
 ```
@@ -186,7 +186,7 @@ from duragraph.llm import get_provider
 # Auto-detected: gpt-* → openai
 provider = get_provider("gpt-4o-mini")
 
-# Auto-detected: claude-* → anthropic  
+# Auto-detected: claude-* → anthropic
 provider = get_provider("claude-3-sonnet")
 ```
 

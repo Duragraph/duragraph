@@ -29,11 +29,11 @@ class MyAgent:
     @llm_node(model="gpt-4o-mini")
     def start(self, state):
         return state
-    
+
     @node()
     def process(self, state):
         return {"processed": True}
-    
+
     start >> process  # Define edge
 ```
 
@@ -180,7 +180,7 @@ result = agent.run(state)
 
 result.run_id           # Execution ID
 result.status           # "completed", "failed", etc.
-result.output           # Final state  
+result.output           # Final state
 result.nodes_executed   # List of executed nodes
 ```
 
@@ -211,22 +211,22 @@ class RouterAgent:
     @llm_node(model="gpt-4o-mini", temperature=0.1)
     def classify(self, state):
         return state
-    
+
     @router_node()
     def route(self, state):
         intent = state.get("intent", "").lower()
         if "billing" in intent:
             return "billing_handler"
         return "general_handler"
-    
+
     @llm_node(model="gpt-4o-mini")
     def billing_handler(self, state):
         return state
-    
+
     @llm_node(model="gpt-4o-mini")
     def general_handler(self, state):
         return state
-    
+
     classify >> route
     billing_handler >> output
     general_handler >> output
@@ -241,15 +241,15 @@ class HITLAgent:
     @llm_node(model="gpt-4o-mini")
     def generate(self, state):
         return state
-    
+
     @human_node(prompt="Please review and approve")
     def review(self, state):
         return state
-    
+
     @node()
     def finalize(self, state):
         return state
-    
+
     generate >> review >> finalize
 ```
 
