@@ -1,11 +1,10 @@
 # DuraGraph Go SDK
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph-go/ci.yml?branch=main&label=CI)](https://github.com/Duragraph/duragraph-go/actions/workflows/ci.yml)
+[![CI](https://github.com/Duragraph/duragraph/actions/workflows/go-sdk-ci.yml/badge.svg)](https://github.com/Duragraph/duragraph/actions/workflows/go-sdk-ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/duragraph/duragraph-go.svg)](https://pkg.go.dev/github.com/duragraph/duragraph-go)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/Duragraph/duragraph-go)](go.mod)
-[![Go Report Card](https://img.shields.io/badge/go%20report-A%2B-brightgreen)](https://goreportcard.com/report/github.com/Duragraph/duragraph-go)
-[![License](https://img.shields.io/github/license/Duragraph/duragraph-go)](LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph-go?style=social)](https://github.com/Duragraph/duragraph-go/stargazers)
+[![Go Report Card](https://img.shields.io/badge/go%20report-A%2B-brightgreen)](https://goreportcard.com/report/github.com/duragraph/duragraph-go)
+[![License](https://img.shields.io/github/license/Duragraph/duragraph)](https://github.com/Duragraph/duragraph/blob/main/LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph?style=social)](https://github.com/Duragraph/duragraph/stargazers)
 
 Go SDK for [DuraGraph](https://github.com/Duragraph/duragraph) - Reliable AI Workflow Orchestration.
 
@@ -14,7 +13,7 @@ Build AI agents with structs and interfaces, deploy to a control plane, and get 
 ## Installation
 
 ```bash
-go get github.com/Duragraph/duragraph-go
+go get github.com/duragraph/duragraph-go
 ```
 
 ## Quick Start
@@ -26,8 +25,8 @@ import (
     "context"
     "log"
 
-    "github.com/Duragraph/duragraph-go/graph"
-    "github.com/Duragraph/duragraph-go/worker"
+    "github.com/duragraph/duragraph-go/graph"
+    "github.com/duragraph/duragraph-go/worker"
 )
 
 // Define your state
@@ -88,16 +87,18 @@ func main() {
 - [REST API Client Reference](docs/client-api.md)
 - [Full Documentation](https://duragraph.ai/docs)
 - [API Reference](https://duragraph.ai/docs/api-reference/overview)
-- [Examples](https://github.com/Duragraph/duragraph-examples)
+- [Examples](https://github.com/Duragraph/duragraph/tree/main/examples)
 
-## Related Repositories
+## Related Components
 
-| Repository | Description |
-|------------|-------------|
-| [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
-| [duragraph-python](https://github.com/Duragraph/duragraph-python) | Python SDK |
-| [duragraph-examples](https://github.com/Duragraph/duragraph-examples) | Example projects |
-| [duragraph-docs](https://github.com/Duragraph/duragraph-docs) | Documentation |
+The Go SDK lives in `go-sdk/` inside the [Duragraph monorepo](https://github.com/Duragraph/duragraph). Other components in the same repo:
+
+| Path | Description |
+|------|-------------|
+| [`/`](https://github.com/Duragraph/duragraph) | Core API server (Go) |
+| [`python/`](https://github.com/Duragraph/duragraph/tree/main/python) | Python SDK |
+| [`examples/`](https://github.com/Duragraph/duragraph/tree/main/examples) | Example projects |
+| [`docs/`](https://github.com/Duragraph/duragraph/tree/main/docs) | Documentation site |
 
 ## Contributing
 

@@ -5,7 +5,7 @@ The `client` package provides a Go client for the DuraGraph control plane REST A
 ## Installation
 
 ```bash
-go get github.com/Duragraph/duragraph-go
+go get github.com/duragraph/duragraph-go
 ```
 
 ## Quick Start
@@ -18,7 +18,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/Duragraph/duragraph-go/client"
+    "github.com/duragraph/duragraph-go/client"
 )
 
 func main() {
@@ -380,7 +380,7 @@ import (
     "log"
     "time"
 
-    "github.com/Duragraph/duragraph-go/client"
+    "github.com/duragraph/duragraph-go/client"
 )
 
 func main() {
