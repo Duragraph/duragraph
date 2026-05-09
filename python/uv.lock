@@ -534,8 +534,8 @@ wheels = [
 ]
 
 [[package]]
-name = "duragraph-python"
-version = "0.2.1"
+name = "duragraph"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

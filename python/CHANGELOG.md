@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - TBD
+
+### Changed
+- **Distribution name renamed from `duragraph-python` to `duragraph`** to
+  match the import path (`from duragraph import ...` was already the
+  convention; only the PyPI dist name carried the `-python` suffix).
+  Migration: `pip install duragraph` going forward. The legacy
+  `duragraph-python` project on PyPI keeps version `0.2.1` as its final
+  release; future versions ship under `duragraph`.
+
+### Other
+- SDK is now developed inside the `Duragraph/duragraph` monorepo at
+  `python/`. The standalone `Duragraph/duragraph-python` repo is archived.
+- `tests/test_llm.py::TestOpenAIProvider::test_acomplete` and
+  `TestAnthropicProvider::test_acomplete` skipped due to a pre-existing
+  bug — `AsyncOpenAI` / `AsyncAnthropic` are imported inside the
+  constructor body so `patch("...AsyncOpenAI")` fails. Fix tracked for
+  the next release.
+
 ## [0.2.1] - 2026-05-01
 
 ### Removed

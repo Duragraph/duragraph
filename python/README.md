@@ -13,17 +13,17 @@ Build AI agents with decorators, deploy to a control plane, and get full observa
 
 ## Installation
 
+The package is published as `duragraph-python` on PyPI. We recommend `uv` for dependency management.
+
 ```bash
-pip install duragraph
+# With uv (recommended)
+uv add duragraph-python
+uv add 'duragraph-python[openai]'
+uv add 'duragraph-python[anthropic]'
+uv add 'duragraph-python[all]'
 
-# With OpenAI support
-pip install duragraph[openai]
-
-# With Anthropic support
-pip install duragraph[anthropic]
-
-# All features
-pip install duragraph[all]
+# With pip
+pip install duragraph-python
 ```
 
 ## Quick Start
@@ -92,7 +92,7 @@ class MyAgent:
 async for event in agent.stream({"message": "Hello"}):
     if event.type == "token":
         print(event.data, end="")
-    elif event.type == "node_complete":
+    elif event.type == "node_completed":
         print(f"\nNode {event.node_id} completed")
 ```
 
