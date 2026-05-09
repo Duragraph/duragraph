@@ -6,10 +6,14 @@
 # module root).
 
 # --- Stage 1a: build the React dashboard ---
-# node:22-alpine: corepack pulls pnpm 11.x, which uses node:sqlite (a Node 22+ builtin).
+# node:22-alpine + pnpm 9 pinned via corepack: pnpm 10+ requires explicit
+# build-script approval (ERR_PNPM_IGNORED_BUILDS) which doesn't fit
+# `--frozen-lockfile` CI; pnpm 11 also depends on the node:sqlite builtin
+# (Node 22+). Pinning to pnpm 9 keeps install behavior aligned with the
+# release.yml workflow (which uses pnpm/action-setup@v4 with version: 9).
 FROM node:22-alpine AS dashboard-builder
 
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 WORKDIR /app/dashboard
 
@@ -22,7 +26,7 @@ RUN pnpm build
 # --- Stage 1b: build the React Studio UI ---
 FROM node:22-alpine AS studio-builder
 
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 WORKDIR /app/studio
 
