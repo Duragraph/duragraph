@@ -5,11 +5,13 @@ import "time"
 // Event type constants — dot-form, mirroring the spec at
 // duragraph-spec/models/events.yml under user_events.
 const (
-	EventTypeUserSignedUp        = "user.signed_up"
-	EventTypeUserPromotedToAdmin = "user.promoted_to_admin"
-	EventTypeUserApproved        = "user.approved"
-	EventTypeUserRejected        = "user.rejected"
-	EventTypeUserSuspended       = "user.suspended"
+	EventTypeUserSignedUp               = "user.signed_up"
+	EventTypeUserRegisteredWithPassword = "user.registered_with_password"
+	EventTypeUserPromotedToAdmin        = "user.promoted_to_admin"
+	EventTypeUserApproved               = "user.approved"
+	EventTypeUserRejected               = "user.rejected"
+	EventTypeUserSuspended              = "user.suspended"
+	EventTypeUserPasswordChanged        = "user.password_changed"
 )
 
 // aggregateTypeUser is the AggregateType() value for all user-domain events.
@@ -121,3 +123,42 @@ func (e UserSuspended) AggregateID() string { return e.UserID }
 
 // AggregateType returns the aggregate type identifier ("user").
 func (e UserSuspended) AggregateType() string { return aggregateTypeUser }
+
+// UserRegisteredWithPassword is emitted when a user self-registers via
+// the email + password flow (POST /api/auth/register). status=pending
+// until an admin approves; the User is NOT yet permitted to log in.
+//
+// Spec: duragraph-spec/auth/password.yml § endpoints.register
+type UserRegisteredWithPassword struct {
+	UserID     string    `json:"user_id"`
+	Email      string    `json:"email"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// EventType returns the dot-form event type identifier.
+func (e UserRegisteredWithPassword) EventType() string { return EventTypeUserRegisteredWithPassword }
+
+// AggregateID returns the User aggregate ID this event belongs to.
+func (e UserRegisteredWithPassword) AggregateID() string { return e.UserID }
+
+// AggregateType returns the aggregate type identifier ("user").
+func (e UserRegisteredWithPassword) AggregateType() string { return aggregateTypeUser }
+
+// UserPasswordChanged is emitted when a user's password_hash is updated
+// (self-change or admin-driven reset). The plaintext is NEVER carried
+// in the payload — only the fact of the change. ChangedByUserID is the
+// actor (== UserID for self-change, != UserID for admin reset).
+type UserPasswordChanged struct {
+	UserID          string    `json:"user_id"`
+	ChangedByUserID string    `json:"changed_by_user_id"`
+	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+// EventType returns the dot-form event type identifier.
+func (e UserPasswordChanged) EventType() string { return EventTypeUserPasswordChanged }
+
+// AggregateID returns the User aggregate ID this event belongs to.
+func (e UserPasswordChanged) AggregateID() string { return e.UserID }
+
+// AggregateType returns the aggregate type identifier ("user").
+func (e UserPasswordChanged) AggregateType() string { return aggregateTypeUser }

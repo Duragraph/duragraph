@@ -14,10 +14,20 @@ package user
 import (
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/duragraph/duragraph/internal/pkg/errors"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 	pkguuid "github.com/duragraph/duragraph/internal/pkg/uuid"
 )
+
+// bcryptCompare wraps bcrypt.CompareHashAndPassword. Hoisted into a
+// helper so tests can swap to a no-op for speed without dragging the
+// real bcrypt crate into every aggregate test (cost-12 hashes are slow
+// on purpose). Production paths always go through the real bcrypt.
+var bcryptCompare = func(hash, plaintext string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plaintext)) == nil
+}
 
 // User represents the User aggregate root.
 type User struct {
@@ -25,11 +35,20 @@ type User struct {
 	email         string
 	oauthProvider string
 	oauthID       string
-	role          Role
-	status        Status
-	createdAt     time.Time
-	updatedAt     time.Time
-	version       int
+	// passwordHash is the bcrypt hash for password-authenticated users.
+	// Empty string for OAuth-only users. The schema's
+	// users_at_least_one_auth_method CHECK enforces that at least one of
+	// (oauthProvider, passwordHash) is non-empty.
+	passwordHash string
+	// authMethod records the most-recent successful auth method. NOT
+	// enforced at login — both methods can succeed if both are configured
+	// on the user. One of "oauth" | "password".
+	authMethod string
+	role       Role
+	status     Status
+	createdAt  time.Time
+	updatedAt  time.Time
+	version    int
 
 	// loadedUpdatedAt is the optimistic-concurrency token: the value of
 	// updated_at as observed when the aggregate was loaded from the
@@ -93,6 +112,8 @@ func RegisterUser(email, oauthProvider, oauthID string, isFirstUser bool) (*User
 		OccurredAt:    now,
 	})
 
+	u.authMethod = "oauth"
+
 	if isFirstUser {
 		// Bootstrap path: self-elevate and self-approve. Per auth/oauth.yml,
 		// this is the documented exception to the self-action guard — there
@@ -116,6 +137,143 @@ func RegisterUser(email, oauthProvider, oauthID string, isFirstUser bool) (*User
 	}
 
 	return u, nil
+}
+
+// RegisterWithPassword creates a new User aggregate from email + password
+// registration (the password-auth alternative to RegisterUser's OAuth path).
+//
+// Spec: duragraph-spec/auth/password.yml § endpoints.register
+//
+// Bootstrap path (isFirstUser == true): same as RegisterUser — auto-elevate
+// to admin, auto-approve, record UserSignedUpWithPassword + UserPromotedToAdmin
+// + UserApproved.
+//
+// Normal signup: status=pending, role=user, only UserSignedUpWithPassword.
+// User CANNOT log in until an admin approves them (LoginWithPassword
+// rejects pending/suspended/rejected users with a generic 401 — see
+// VerifyPassword and the LoginWithPassword command handler).
+//
+// passwordHash MUST be a bcrypt hash. The aggregate does not hash on
+// behalf of callers — the application-layer command handler does that
+// (so cost can be configured via DURAGRAPH_BCRYPT_COST without leaking
+// crypto config into the domain).
+func RegisterWithPassword(email, passwordHash, displayName string, isFirstUser bool) (*User, error) {
+	_ = displayName // reserved for future profile expansion — accepted in API but not stored on User aggregate yet
+	if email == "" {
+		return nil, errors.InvalidInput("email", "email is required")
+	}
+	if passwordHash == "" {
+		return nil, errors.InvalidInput("password_hash", "password_hash is required")
+	}
+
+	now := time.Now()
+	id := pkguuid.New()
+
+	u := &User{
+		id:           id,
+		email:        email,
+		passwordHash: passwordHash,
+		authMethod:   "password",
+		role:         RoleUser,
+		status:       StatusPending,
+		createdAt:    now,
+		updatedAt:    now,
+		version:      1,
+		events:       make([]eventbus.Event, 0),
+	}
+
+	u.recordEvent(UserRegisteredWithPassword{
+		UserID:     id,
+		Email:      email,
+		OccurredAt: now,
+	})
+
+	if isFirstUser {
+		// Bootstrap mirrors RegisterUser. Same self-action-guard exception.
+		u.role = RoleAdmin
+		u.status = StatusApproved
+
+		u.recordEvent(UserPromotedToAdmin{
+			UserID:           id,
+			PromotedByUserID: nil,
+			OccurredAt:       now,
+		})
+		u.recordEvent(UserApproved{
+			UserID:           id,
+			ApprovedByUserID: id,
+			OccurredAt:       now,
+		})
+	}
+
+	return u, nil
+}
+
+// VerifyPassword returns true if the given plaintext matches the user's
+// stored bcrypt hash. Returns false for OAuth-only users (no password set)
+// without a comparison so the bcrypt cost is not paid on guesses against
+// password-less accounts. The bcrypt comparison is constant-time within
+// its own scope.
+//
+// IMPORTANT: callers MUST also check u.Status() — VerifyPassword does
+// NOT enforce the lifecycle gate. The LoginWithPassword command handler
+// is responsible for the (verify password) AND (status == approved)
+// composite check, returning a generic 401 for any failure to prevent
+// account enumeration (per duragraph-spec/auth/password.yml § endpoints.login).
+func (u *User) VerifyPassword(plaintext string) bool {
+	if u.passwordHash == "" {
+		return false
+	}
+	return bcryptCompare(u.passwordHash, plaintext)
+}
+
+// SetPassword updates the user's password_hash. Used for password change
+// (user changes their own) and admin-driven reset (admin sets a new hash
+// for a stuck-out user). Records UserPasswordChanged.
+//
+// Reject if the user is suspended or rejected — those statuses are
+// terminal-ish and shouldn't accept new credentials. Pending users CAN
+// have their password set (e.g. registration → admin reset before approval).
+func (u *User) SetPassword(passwordHash string, changedByUserID string) error {
+	if passwordHash == "" {
+		return errors.InvalidInput("password_hash", "password_hash is required")
+	}
+	if changedByUserID == "" {
+		return errors.InvalidInput("changed_by_user_id", "changed_by_user_id is required")
+	}
+	// The User aggregate uses StatusSuspended for both reject (pending →
+	// suspended) and suspend (approved → suspended). Don't accept new
+	// credentials for either case.
+	if u.status == StatusSuspended {
+		return errors.InvalidState(u.status.String(), "set_password")
+	}
+
+	now := time.Now()
+	u.passwordHash = passwordHash
+	if u.authMethod == "" {
+		u.authMethod = "password"
+	}
+	u.updatedAt = now
+
+	u.recordEvent(UserPasswordChanged{
+		UserID:          u.id,
+		ChangedByUserID: changedByUserID,
+		OccurredAt:      now,
+	})
+
+	return nil
+}
+
+// MarkAuthMethod records the most-recent successful auth method.
+// Called by the LoginWithPassword command handler after a successful
+// password match (so post-OAuth-then-password sequences correctly
+// reflect "password" as the latest method). Doesn't emit an event —
+// this is an audit-trail field, not a state transition.
+func (u *User) MarkAuthMethod(method string) {
+	if method != "oauth" && method != "password" {
+		return // ignore unknown methods rather than panic — defensive
+	}
+	u.authMethod = method
+	u.updatedAt = time.Now()
 }
 
 // Approve transitions a pending user to approved.
@@ -287,6 +445,20 @@ func (u *User) OAuthProvider() string { return u.oauthProvider }
 // OAuthID returns the provider-issued subject identifier.
 func (u *User) OAuthID() string { return u.oauthID }
 
+// PasswordHash returns the user's bcrypt hash, or empty string if the
+// user has no password set (OAuth-only). Exposed for the persistence
+// layer; application code should use VerifyPassword instead of
+// inspecting the hash directly.
+func (u *User) PasswordHash() string { return u.passwordHash }
+
+// HasPassword reports whether the user has a password set (i.e. can log
+// in via /api/auth/login). False for OAuth-only users.
+func (u *User) HasPassword() bool { return u.passwordHash != "" }
+
+// AuthMethod returns the user's most-recent successful authentication
+// method ("oauth" or "password"). Audit field, not enforced at login.
+func (u *User) AuthMethod() string { return u.authMethod }
+
 // Role returns the user's authorization role.
 func (u *User) Role() Role { return u.role }
 
@@ -354,6 +526,8 @@ type UserData struct {
 	Email         string
 	OAuthProvider string
 	OAuthID       string
+	PasswordHash  string // empty for OAuth-only users
+	AuthMethod    string // "oauth" | "password"; defaults to "oauth" if empty
 	Role          string
 	Status        string
 	CreatedAt     time.Time
@@ -384,11 +558,18 @@ func ReconstructFromData(data UserData) *User {
 		status = Status(data.Status)
 	}
 
+	authMethod := data.AuthMethod
+	if authMethod == "" {
+		authMethod = "oauth" // back-compat for rows predating 005_user_password
+	}
+
 	return &User{
 		id:              data.ID,
 		email:           data.Email,
 		oauthProvider:   data.OAuthProvider,
 		oauthID:         data.OAuthID,
+		passwordHash:    data.PasswordHash,
+		authMethod:      authMethod,
 		role:            role,
 		status:          status,
 		createdAt:       data.CreatedAt,
