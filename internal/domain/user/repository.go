@@ -27,6 +27,13 @@ type Repository interface {
 	// when no row matches.
 	GetByOAuth(ctx context.Context, provider, oauthID string) (*User, error)
 
+	// GetByEmail retrieves a user by email, case-insensitive. Used by
+	// the password-login flow (auth/password.yml § endpoints.login):
+	// the client submits {email, password}, we lookup the user by
+	// email then verify the bcrypt hash. Case-insensitive per RFC 5321.
+	// Returns errors.NotFound when no row matches.
+	GetByEmail(ctx context.Context, email string) (*User, error)
+
 	// ListByStatus retrieves users matching the given status with
 	// pagination. Used by the admin UI to render the pending-users
 	// whitelist.

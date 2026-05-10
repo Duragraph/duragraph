@@ -46,6 +46,9 @@ func (r *stubUserRepo) GetByID(ctx context.Context, id string) (*user.User, erro
 func (r *stubUserRepo) GetByOAuth(_ context.Context, provider, oauthID string) (*user.User, error) {
 	return nil, pkgerrors.NotFound("user", provider+"/"+oauthID)
 }
+func (r *stubUserRepo) GetByEmail(_ context.Context, email string) (*user.User, error) {
+	return nil, pkgerrors.NotFound("user", email)
+}
 func (r *stubUserRepo) ListByStatus(_ context.Context, _ user.Status, _, _ int) ([]*user.User, error) {
 	return nil, nil
 }

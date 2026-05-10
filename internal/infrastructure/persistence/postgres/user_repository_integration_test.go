@@ -326,6 +326,115 @@ func TestUserRepository_ListByStatus_FiltersAndPaginates(t *testing.T) {
 	}
 }
 
+// TestUserRepository_PasswordRoundTrip verifies that a password-only
+// user (oauth_provider/oauth_id NULL, password_hash + auth_method set)
+// round-trips through INSERT → SELECT without violating either CHECK
+// constraint added by migration 005:
+//   - users_oauth_provider_check: NULL OK, ” would FAIL
+//   - users_at_least_one_auth_method: requires NULL+hash OR provider+id
+//   - users_auth_method_check: 'password' is in the allowed set
+//
+// If nullable() forwards "" instead of NULL, oauth_provider_check fires
+// on INSERT — this test catches that.
+func TestUserRepository_PasswordRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	pool, _ := platformPool(t, ctx)
+	repo := NewUserRepository(pool)
+
+	hash := "$2a$04$3WULdH9G39hHeavz0UmLmO5Pwjb1oKwKGgSzQpZeaWIpPSLeflQfC" // bcrypt of "swordfish" at MinCost
+	email := freshEmail()
+
+	u, err := user.RegisterWithPassword(email, hash, "Pwd User", false)
+	if err != nil {
+		t.Fatalf("RegisterWithPassword: %v", err)
+	}
+	if err := repo.Save(ctx, u); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, u.ID())
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.OAuthProvider() != "" {
+		t.Errorf("password-only user OAuthProvider = %q, want empty", got.OAuthProvider())
+	}
+	if got.OAuthID() != "" {
+		t.Errorf("password-only user OAuthID = %q, want empty", got.OAuthID())
+	}
+	if got.PasswordHash() != hash {
+		t.Errorf("PasswordHash round-trip mismatch: got %q want %q", got.PasswordHash(), hash)
+	}
+	if got.AuthMethod() != "password" {
+		t.Errorf("AuthMethod = %q, want password", got.AuthMethod())
+	}
+	if !got.HasPassword() {
+		t.Error("HasPassword should be true after round-trip")
+	}
+}
+
+// TestUserRepository_GetByEmail_CaseInsensitive exercises the new
+// LOWER(email)-keyed lookup added for password login.
+func TestUserRepository_GetByEmail_CaseInsensitive(t *testing.T) {
+	ctx := context.Background()
+	pool, _ := platformPool(t, ctx)
+	repo := NewUserRepository(pool)
+
+	hash := "$2a$04$3WULdH9G39hHeavz0UmLmO5Pwjb1oKwKGgSzQpZeaWIpPSLeflQfC"
+	storedEmail := "Mixed.Case+test@Example.COM"
+	u, err := user.RegisterWithPassword(storedEmail, hash, "Case", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.GetByEmail(ctx, "mixed.case+test@example.com")
+	if err != nil {
+		t.Fatalf("GetByEmail (lowercase) failed: %v", err)
+	}
+	if got.ID() != u.ID() {
+		t.Errorf("got %q, want %q", got.ID(), u.ID())
+	}
+
+	// Negative — totally different email returns NotFound.
+	if _, err := repo.GetByEmail(ctx, "nobody@example.com"); !errors.Is(err, pkgerrors.ErrNotFound) {
+		t.Errorf("expected NotFound for unknown email, got: %v", err)
+	}
+}
+
+// TestUserRepository_OAuthUserStillNullPasswordHash verifies the OAuth
+// path still works after the schema change — oauth users persist with
+// password_hash NULL, which the COALESCE in SELECT renders as "" in Go.
+func TestUserRepository_OAuthUserStillNullPasswordHash(t *testing.T) {
+	ctx := context.Background()
+	pool, _ := platformPool(t, ctx)
+	repo := NewUserRepository(pool)
+
+	u, err := user.RegisterUser(freshEmail(), "google", freshOAuthID(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.GetByID(ctx, u.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PasswordHash() != "" {
+		t.Errorf("OAuth user PasswordHash = %q, want empty (NULL)", got.PasswordHash())
+	}
+	if got.HasPassword() {
+		t.Error("OAuth user HasPassword should be false")
+	}
+	if got.AuthMethod() != "oauth" {
+		t.Errorf("AuthMethod = %q, want oauth", got.AuthMethod())
+	}
+}
+
 func TestUserRepository_CountAll(t *testing.T) {
 	ctx := context.Background()
 	pool, _ := platformPool(t, ctx)

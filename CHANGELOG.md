@@ -5,6 +5,49 @@ All notable changes to DuraGraph will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Email + Password Authentication (Phase A)
+
+- **`POST /api/auth/register`** — email + password signup. Returns 201 on
+  success, 409 on duplicate, 400 on short/long password. The first user to
+  register is auto-elevated to admin + approved (bootstrap branch — same
+  semantics as the OAuth bootstrap).
+- **`POST /api/auth/login`** — email + password login. Returns 200 with
+  session cookie + JWT on success. ALL failure modes (unknown email, wrong
+  password, suspended/pending account) collapse to a uniform 401 with
+  message "Invalid email or password" — by design, to prevent account-state
+  enumeration. See `auth/password.yml` § generic_401.
+- **bcrypt cost 12** for password hashing; tests use `bcrypt.MinCost`.
+- **Migration `005_user_password.sql`** — adds `password_hash`, `auth_method`
+  to `platform.users`; `oauth_provider`/`oauth_id` become NULLABLE; CHECK
+  constraint requires at least one auth method per row.
+- **`UserRepository.GetByEmail`** — case-insensitive lookup backed by the
+  new `idx_users_lower_email` functional index.
+
+### Three-flag auth split
+
+The legacy single flag `MIGRATOR_PLATFORM_ENABLED` is split into three
+independent gates so deployments can enable password auth without
+requiring an external NATS server (the multitenant constraint):
+
+- **`AUTH_PASSWORD_ENABLED=true`** — register + login routes + platform DB
+  Bootstrap. Compatible with `NATS_MODE=embedded` (zero-config dev).
+- **`AUTH_OAUTH_ENABLED=true`** — Google/GitHub OAuth routes + provider
+  config. Requires `PLATFORM_BASE_URL` + `OAUTH_SESSION_SECRET`.
+- **`MULTITENANT_ENABLED=true`** — per-user tenant DB provisioning via
+  JetStream. Still requires `NATS_MODE=external` (operator-JWT account
+  isolation).
+
+`MIGRATOR_PLATFORM_ENABLED=true` remains as a legacy alias meaning
+"`AUTH_OAUTH_ENABLED=true MULTITENANT_ENABLED=true`" — existing
+deployments keep working unchanged.
+
+**Footgun to know about**: `AUTH_PASSWORD_ENABLED` and `AUTH_ENABLED`
+(JWT middleware on `/api/v1/*`) are orthogonal. A deployment with only
+`AUTH_PASSWORD_ENABLED=true` exposes register + login but leaves
+`/api/v1/*` unprotected. Set both flags for production.
+
 ## [0.7.0] - 2026-05-09
 
 ### Single-Binary DX (v0.7-DX track)

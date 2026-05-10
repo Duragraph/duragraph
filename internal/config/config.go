@@ -77,9 +77,12 @@ type DatabaseConfig struct {
 //
 // Multitenant constraint: embedded NATS does NOT support operator-JWT
 // mode in any clean way (operator JWT signing keys are an out-of-band
-// setup). When MIGRATOR_PLATFORM_ENABLED=true the binary refuses to
-// start with NATS_MODE=embedded — the operator must point at an
-// externally provisioned NATS with operator-JWT configured.
+// setup). When MULTITENANT_ENABLED=true (or the legacy
+// MIGRATOR_PLATFORM_ENABLED=true alias) the binary refuses to start
+// with NATS_MODE=embedded — the operator must point at an externally
+// provisioned NATS with operator-JWT configured. Single-tenant auth
+// (AUTH_PASSWORD_ENABLED / AUTH_OAUTH_ENABLED without MULTITENANT_ENABLED)
+// is fine on embedded NATS — no per-tenant account isolation needed.
 type NATSConfig struct {
 	Mode string // "external" (default) | "embedded"
 	URL  string
@@ -236,14 +239,24 @@ func Load() (*Config, error) {
 	if natsMode == "embedded" {
 		// Multitenant constraint (binary-modes.yml § nats_jetstream.multitenant_constraint).
 		// Embedded NATS does NOT support operator-JWT signing in any clean
-		// way — it requires out-of-band signing keys. Tenant isolation in
-		// platform mode depends on operator-JWT, so the combination is
-		// refused at startup with a clear pointer at the resolution
-		// (NATS_MODE=external, OR drop MIGRATOR_PLATFORM_ENABLED).
-		if os.Getenv("MIGRATOR_PLATFORM_ENABLED") == "true" {
+		// way — it requires out-of-band signing keys. Per-tenant NATS
+		// account isolation depends on operator-JWT, so embedded NATS +
+		// multi-tenant mode is refused at startup with a clear pointer at
+		// the resolution (NATS_MODE=external, OR drop MULTITENANT_ENABLED).
+		//
+		// Note: this fires only when MULTITENANT_ENABLED=true (or the
+		// legacy MIGRATOR_PLATFORM_ENABLED=true alias from before the
+		// flag split). AUTH_PASSWORD_ENABLED and AUTH_OAUTH_ENABLED do
+		// NOT trigger this constraint — single-tenant auth has no per-user
+		// NATS account to provision, so embedded NATS is fine. This is the
+		// "duragraph dev" zero-config path: a developer can register +
+		// log in against the embedded postgres + NATS pair without
+		// touching operator-JWT.
+		if os.Getenv("MULTITENANT_ENABLED") == "true" || os.Getenv("MIGRATOR_PLATFORM_ENABLED") == "true" {
 			return nil, fmt.Errorf(
 				"multitenant mode requires external NATS (operator-JWT). " +
-					"Set NATS_MODE=external or unset MIGRATOR_PLATFORM_ENABLED",
+					"Set NATS_MODE=external or unset MULTITENANT_ENABLED " +
+					"(legacy: MIGRATOR_PLATFORM_ENABLED)",
 			)
 		}
 
