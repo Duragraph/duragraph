@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - TBD
+## [0.3.1] - 2026-05-10
+
+### Fixed
+- `[project.urls]` in `pyproject.toml` now points at the monorepo
+  (`Duragraph/duragraph`) instead of the archived standalone
+  `duragraph-python` repo. The links shown on PyPI's project page
+  (Repository / Issues / Changelog) now resolve correctly.
+  Metadata-only release; no code changes.
+
+## [0.3.0] - 2026-05-09
 
 ### Changed
 - **Distribution name renamed from `duragraph-python` to `duragraph`** to
