@@ -96,24 +96,27 @@ duragraph-examples/
 └── README.md
 ```
 
-## Related Repositories
+## Related modules
 
-| Repository | Description |
-|------------|-------------|
-| [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
-| [duragraph-python](https://github.com/Duragraph/duragraph-python) | Python SDK |
-| [Go SDK (`go-sdk/`)](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK |
-| [duragraph-docs](https://github.com/Duragraph/duragraph-docs) | Documentation |
+Examples live in the [`duragraph`](https://github.com/Duragraph/duragraph) monorepo alongside the engine and SDKs:
+
+| Path | Description |
+|------|-------------|
+| [`/`](https://github.com/Duragraph/duragraph) | Core engine (Go) |
+| [`python/`](https://github.com/Duragraph/duragraph/tree/main/python) | Python SDK — PyPI: [`duragraph`](https://pypi.org/project/duragraph/) |
+| [`go-sdk/`](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK — [`pkg.go.dev`](https://pkg.go.dev/github.com/duragraph/duragraph/go-sdk) |
+| [`studio/`](https://github.com/Duragraph/duragraph/tree/main/studio) | Visual workflow editor |
+| [`docs/`](https://github.com/Duragraph/duragraph/tree/main/docs) | Documentation site source |
 
 ## Documentation
 
 - [Full Documentation](https://duragraph.ai/docs)
-- [Python SDK](https://github.com/Duragraph/duragraph-python)
-- [Go SDK](https://github.com/Duragraph/duragraph/tree/main/go-sdk)
+- [Python SDK (`python/`)](https://github.com/Duragraph/duragraph/tree/main/python)
+- [Go SDK (`go-sdk/`)](https://github.com/Duragraph/duragraph/tree/main/go-sdk)
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Duragraph/.github/blob/main/CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](https://github.com/Duragraph/duragraph/blob/main/CONTRIBUTING.md) for guidelines.
 
 ### Adding a New Example
 

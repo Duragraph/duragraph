@@ -79,19 +79,21 @@ description: Post description
 Content here...
 ```
 
-## Related Repositories
+## Related modules
 
-| Repository                                                                    | Description      |
-| ----------------------------------------------------------------------------- | ---------------- |
-| [duragraph](https://github.com/Duragraph/duragraph)                           | Core API server  |
-| [duragraph-python](https://github.com/Duragraph/duragraph-python)             | Python SDK       |
-| [Go SDK (`go-sdk/`)](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK           |
-| [duragraph-examples](https://github.com/Duragraph/duragraph-examples)         | Example projects |
-| [duragraph-studio](https://github.com/Duragraph/duragraph-studio)             | Interactive UI   |
+The docs site source lives in the [`duragraph`](https://github.com/Duragraph/duragraph) monorepo alongside the engine and SDKs:
+
+| Path                                                                             | Description                  |
+| -------------------------------------------------------------------------------- | ---------------------------- |
+| [`/`](https://github.com/Duragraph/duragraph)                                    | Core engine (Go)             |
+| [`python/`](https://github.com/Duragraph/duragraph/tree/main/python)             | Python SDK                   |
+| [`go-sdk/`](https://github.com/Duragraph/duragraph/tree/main/go-sdk)             | Go SDK                       |
+| [`studio/`](https://github.com/Duragraph/duragraph/tree/main/studio)             | Visual workflow editor       |
+| [`examples/`](https://github.com/Duragraph/duragraph/tree/main/examples)         | Runnable example projects    |
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Duragraph/.github/blob/main/CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](https://github.com/Duragraph/duragraph/blob/main/CONTRIBUTING.md) for guidelines.
 
 ## License
 
