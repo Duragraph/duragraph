@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "duragraph"
-version = "0.3.1"
+version = "0.3.2"
 description = "Python SDK for DuraGraph - Reliable AI Workflow Orchestration"
 readme = "README.md"
 license = "Apache-2.0"
@@ -71,7 +71,7 @@ duragraph = "duragraph.cli.main:main"
 
 [project.urls]
 Homepage = "https://duragraph.ai"
-Documentation = "https://docs.duragraph.ai"
+Documentation = "https://duragraph.ai/docs"
 Repository = "https://github.com/Duragraph/duragraph"
 Issues = "https://github.com/Duragraph/duragraph/issues"
 Changelog = "https://github.com/Duragraph/duragraph/blob/main/python/CHANGELOG.md"

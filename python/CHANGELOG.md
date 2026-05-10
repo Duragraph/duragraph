@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-10
+
+### Fixed
+- `Documentation` URL in `[project.urls]` corrected from
+  `https://docs.duragraph.ai` (non-canonical) to `https://duragraph.ai/docs`.
+  The PyPI sidebar's Documentation link now resolves.
+  Metadata-only release; no code changes.
+
 ## [0.3.1] - 2026-05-10
 
 ### Fixed
