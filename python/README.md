@@ -1,11 +1,11 @@
 # DuraGraph Python SDK
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph-python/ci.yml?branch=main&label=CI)](https://github.com/Duragraph/duragraph-python/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/duragraph-python)](https://pypi.org/project/duragraph-python/)
-[![Python versions](https://img.shields.io/pypi/pyversions/duragraph-python)](https://pypi.org/project/duragraph-python/)
-[![Downloads](https://img.shields.io/pypi/dm/duragraph-python)](https://pypistats.org/packages/duragraph-python)
-[![License](https://img.shields.io/github/license/Duragraph/duragraph-python)](LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph-python?style=social)](https://github.com/Duragraph/duragraph-python/stargazers)
+[![CI](https://img.shields.io/github/actions/workflow/status/Duragraph/duragraph/python-ci.yml?branch=main&label=CI)](https://github.com/Duragraph/duragraph/actions/workflows/python-ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/duragraph)](https://pypi.org/project/duragraph/)
+[![Python versions](https://img.shields.io/pypi/pyversions/duragraph)](https://pypi.org/project/duragraph/)
+[![Downloads](https://img.shields.io/pypi/dm/duragraph)](https://pypistats.org/packages/duragraph)
+[![License](https://img.shields.io/github/license/Duragraph/duragraph)](../LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph?style=social)](https://github.com/Duragraph/duragraph/stargazers)
 
 Python SDK for [DuraGraph](https://github.com/Duragraph/duragraph) - Reliable AI Workflow Orchestration.
 
@@ -13,17 +13,17 @@ Build AI agents with decorators, deploy to a control plane, and get full observa
 
 ## Installation
 
-The package is published as `duragraph-python` on PyPI. We recommend `uv` for dependency management.
+The package is published as `duragraph` on PyPI (renamed from `duragraph-python` in v0.3.0; the old name is frozen at 0.2.1 and will not receive further releases). We recommend `uv` for dependency management.
 
 ```bash
 # With uv (recommended)
-uv add duragraph-python
-uv add 'duragraph-python[openai]'
-uv add 'duragraph-python[anthropic]'
-uv add 'duragraph-python[all]'
+uv add duragraph
+uv add 'duragraph[openai]'
+uv add 'duragraph[anthropic]'
+uv add 'duragraph[all]'
 
 # With pip
-pip install duragraph-python
+pip install duragraph
 ```
 
 ## Quick Start
@@ -125,20 +125,23 @@ class MainAgent:
 
 - [Full Documentation](https://duragraph.ai/docs)
 - [API Reference](https://duragraph.ai/docs/api-reference/overview)
-- [Examples](https://github.com/Duragraph/duragraph-examples)
+- [Examples (`examples/`)](https://github.com/Duragraph/duragraph/tree/main/examples)
 
-## Related Repositories
+## Related modules
 
-| Repository | Description |
-|------------|-------------|
-| [duragraph](https://github.com/Duragraph/duragraph) | Core API server |
-| [Go SDK (`go-sdk/`)](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK |
-| [duragraph-examples](https://github.com/Duragraph/duragraph-examples) | Example projects |
-| [duragraph-docs](https://github.com/Duragraph/duragraph-docs) | Documentation |
+The Python SDK lives in the [`duragraph`](https://github.com/Duragraph/duragraph) monorepo alongside its siblings:
+
+| Path | Description |
+|------|-------------|
+| [`/`](https://github.com/Duragraph/duragraph) | Core engine (Go, embeds dashboard + Studio) |
+| [`go-sdk/`](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK |
+| [`examples/`](https://github.com/Duragraph/duragraph/tree/main/examples) | Example projects (multi-language) |
+| [`docs/`](https://github.com/Duragraph/duragraph/tree/main/docs) | Documentation site source |
+| [`studio/`](https://github.com/Duragraph/duragraph/tree/main/studio) | Visual workflow editor |
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Duragraph/.github/blob/main/CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](https://github.com/Duragraph/duragraph/blob/main/CONTRIBUTING.md) for guidelines.
 
 ## License
 
