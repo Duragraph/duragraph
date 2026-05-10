@@ -234,13 +234,44 @@ func runServe(_ *cobra.Command, _ []string) error {
 	//   - Always runs MigrateMainDB(ctx, DB_NAME) — drop-in replacement
 	//     for the old initdb seed; existing single-DB deployments
 	//     continue to work without changes.
-	//   - When MIGRATOR_PLATFORM_ENABLED=true, additionally runs
+	//   - When platformEnabled (any auth mode active), additionally runs
 	//     Bootstrap (creates duragraph_platform if absent + applies
-	//     platform migrations, today a no-op) and MigrateAllTenants
+	//     platform migrations including 005_user_password). Defaults off
+	//     so existing single-DB deployments keep working unchanged.
+	//   - When multitenantEnabled, additionally runs MigrateAllTenants
 	//     (per-tenant migrations for approved tenants from
-	//     platform.tenants). Default false until feat/platform-db-init
-	//     and downstream multi-tenant routing land.
-	platformEnabled := os.Getenv("MIGRATOR_PLATFORM_ENABLED") == "true"
+	//     platform.tenants).
+	//
+	// Three independent gates — see duragraph-spec/auth/password.yml
+	// § flag_matrix:
+	//   - AUTH_PASSWORD_ENABLED     enables email+password registration
+	//                                + login (platform.users with
+	//                                password_hash); does NOT need
+	//                                external NATS.
+	//   - AUTH_OAUTH_ENABLED        enables OAuth (google/github);
+	//                                requires PLATFORM_BASE_URL +
+	//                                OAUTH_SESSION_SECRET.
+	//   - MULTITENANT_ENABLED       enables per-user tenant DB
+	//                                provisioning via JetStream;
+	//                                requires NATS_MODE=external
+	//                                (operator-JWT for account isolation).
+	//
+	// MIGRATOR_PLATFORM_ENABLED=true is kept as a legacy alias meaning
+	// "AUTH_OAUTH_ENABLED=true MULTITENANT_ENABLED=true" — that's the
+	// combination it implied before the split, so existing deployments
+	// (CHANGELOG.md, RUNBOOK.md, dev.go defaults) keep working unchanged.
+	passwordAuthEnabled := os.Getenv("AUTH_PASSWORD_ENABLED") == "true"
+	oauthAuthEnabled := os.Getenv("AUTH_OAUTH_ENABLED") == "true"
+	multitenantEnabled := os.Getenv("MULTITENANT_ENABLED") == "true"
+	if os.Getenv("MIGRATOR_PLATFORM_ENABLED") == "true" {
+		oauthAuthEnabled = true
+		multitenantEnabled = true
+	}
+	// platformEnabled gates everything that needs the platform DB:
+	// migrator Bootstrap, platformPool, userRepo, JWT verifier hoist,
+	// platformHandler, admin command handlers. Any auth mode needs
+	// these.
+	platformEnabled := passwordAuthEnabled || oauthAuthEnabled || multitenantEnabled
 	adminDSN := fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/postgres?sslmode=%s",
 		cfg.Database.User, cfg.Database.Password,
@@ -264,7 +295,10 @@ func runServe(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("✅ Main DB migrations applied (%s)\n", cfg.Database.Database)
 
-	if platformEnabled {
+	// MigrateAllTenants is multi-tenant only — without per-tenant DBs to
+	// migrate, this is a no-op. Single-tenant auth-only deployments
+	// (AUTH_PASSWORD_ENABLED alone) skip this entirely.
+	if multitenantEnabled {
 		results := migrator.MigrateAllTenants(ctx)
 		failed := 0
 		for _, r := range results {
@@ -383,15 +417,17 @@ func runServe(_ *cobra.Command, _ []string) error {
 	// single-tenant deployments → those routes simply aren't mounted.
 	var adminHandler *admin.Handler
 	var oauthHandler *authhandler.Handler
+	var passwordHandler *authhandler.PasswordHandler
 	var platformHandler *platformhandler.Handler
 
 	// JWT verifier: shared between TenantMiddleware (when AUTH_ENABLED)
-	// and the OAuth handler's /api/auth/refresh endpoint (when
-	// MIGRATOR_PLATFORM_ENABLED). Hoisted out of the AUTH_ENABLED branch
-	// so the OAuth handler can depend on it without forcing the two
-	// flags to be coupled at the type level. JWT_SECRET drives both —
-	// they MUST share the same secret so refresh round-trips a token
-	// the middleware will accept on the next request.
+	// and the auth handlers' /api/auth/refresh + /api/auth/login (when
+	// any auth mode is active — password or OAuth). Hoisted out of the
+	// AUTH_ENABLED branch so the auth handlers can depend on it without
+	// forcing the flags to be coupled at the type level. JWT_SECRET
+	// drives both — they MUST share the same secret so refresh-issued or
+	// login-issued tokens round-trip through the middleware on the next
+	// request.
 	var verifier *auth.Verifier
 	if os.Getenv("AUTH_ENABLED") == "true" || platformEnabled {
 		jwtSecret := os.Getenv("JWT_SECRET")
@@ -475,123 +511,175 @@ func runServe(_ *cobra.Command, _ []string) error {
 			metricsBackend,
 		)
 
-		// OAuth handler wiring.
-		//
-		// PLATFORM_BASE_URL is the externally-facing URL of this engine
-		// (e.g. https://platform.duragraph.ai). It feeds three things:
-		//   (1) the goth provider redirect URLs ("<base>/api/auth/<p>/callback");
-		//   (2) the cookie-logout CSRF same-origin check (auth.Config.BaseURL);
-		//   (3) the CookieSecure flag (https → true, http → false).
-		// Required when MIGRATOR_PLATFORM_ENABLED — fail fast at startup
-		// rather than 500ing on first /api/auth/<provider>/login.
-		platformBaseURL := os.Getenv("PLATFORM_BASE_URL")
-		if platformBaseURL == "" {
-			return fmt.Errorf("PLATFORM_BASE_URL is required when MIGRATOR_PLATFORM_ENABLED=true")
-		}
-		// CookieSecure derived from the base-URL scheme: production runs
-		// behind Traefik with https, dev runs plain http. Lower-case for
-		// case-insensitive scheme match — RFC 3986 says scheme is
-		// case-insensitive and we control the env var, but be lenient.
-		cookieSecure := strings.HasPrefix(strings.ToLower(platformBaseURL), "https://")
-
-		// OAUTH_SESSION_SECRET keys the gorilla/sessions cookie store
-		// goth uses to hold the OAuth state token between /login and
-		// /callback. Required + ≥32 bytes; ConfigureProviders enforces
-		// the length floor and rejects misconfigured deployments at
-		// startup.
-		oauthSessionSecret := os.Getenv("OAUTH_SESSION_SECRET")
-		if oauthSessionSecret == "" {
-			return fmt.Errorf("OAUTH_SESSION_SECRET is required when MIGRATOR_PLATFORM_ENABLED=true")
-		}
-
-		if err := authhandler.ConfigureProviders(authhandler.ProviderConfig{
-			BaseURL:            platformBaseURL,
-			GoogleClientID:     os.Getenv("OAUTH_GOOGLE_CLIENT_ID"),
-			GoogleClientSecret: os.Getenv("OAUTH_GOOGLE_CLIENT_SECRET"),
-			GitHubClientID:     os.Getenv("OAUTH_GITHUB_CLIENT_ID"),
-			GitHubClientSecret: os.Getenv("OAUTH_GITHUB_CLIENT_SECRET"),
-			SessionSecret:      oauthSessionSecret,
-			CookieSecure:       cookieSecure,
-		}); err != nil {
-			return fmt.Errorf("OAuth provider configuration failed: %w", err)
-		}
-
-		// JWT_SECRET (with the verifier's default fallback) drives BOTH
-		// the verifier hoisted above AND the OAuth handler's
-		// IssueJWT/Refresh round-trip. Must be the same bytes — a
-		// refresh-issued token has to verify against the middleware's
-		// secret on the next request.
-		oauthJWTSecret := os.Getenv("JWT_SECRET")
-		if oauthJWTSecret == "" {
-			oauthJWTSecret = "default-secret-change-in-production"
-		}
-
-		oh, err := authhandler.NewHandler(
-			userRepo,
-			tenantRepo,
-			migrator,
-			verifier,
-			authhandler.NewGothExchanger(),
-			authhandler.NewPoolBootstrapLocker(platformPool),
-			authhandler.Config{
-				SessionTTL:   24 * time.Hour,
-				BaseURL:      platformBaseURL,
-				CookieDomain: os.Getenv("PLATFORM_COOKIE_DOMAIN"), // empty = host-only
-				CookieSecure: cookieSecure,
-				JWTSecret:    []byte(oauthJWTSecret),
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("failed to construct OAuth handler: %w", err)
-		}
-		oauthHandler = oh
-
-		// /api/platform/me handler. Same lifetime + nil-fallback rules
-		// as oauthHandler — only constructed in platform mode.
+		// /api/platform/me handler. Used by both auth modes (password and
+		// OAuth) — any logged-in user wants to see their own profile.
+		// Lives in platformEnabled because it depends on userRepo +
+		// tenantRepo, both of which only exist in this block.
 		platformHandler = platformhandler.NewHandler(userRepo, tenantRepo)
-		fmt.Println("✅ OAuth + /api/platform/me handlers constructed")
+		fmt.Println("✅ /api/platform/me handler constructed")
 
-		// Tenant provisioner subscriber. Uses a JetStream durable
-		// consumer (durable name "tenant-provisioner") bound to the
-		// existing duragraph-events stream — so tenant.provisioning
-		// events published while the engine was offline still get
-		// delivered when it comes back. Separate from the plain-NATS
-		// `subscriber` used by run/execution events because the
-		// platform-admin loop needs at-least-once durability.
-		jsSubscriber, err := nats.NewJetStreamSubscriber(nats.JetStreamSubscriberConfig{
-			URL:           cfg.NATS.URL,
-			StreamName:    messaging.JetStreamStreamName,
-			FilterSubject: messaging.TenantProvisioningTopic,
-			Durable:       messaging.DurableName,
-			MaxDeliver:    10, // bound poison-message redelivery loops
-		})
-		if err != nil {
-			return fmt.Errorf("failed to construct tenant provisioner JetStream subscriber: %w", err)
-		}
-		defer jsSubscriber.Close()
-
-		tenantProvisioner := messaging.NewTenantProvisioner(
-			jsSubscriber,
-			tenantRepo,
-			migrator,
-			messaging.NoopNATSAccountProvisioner{}, // operator-JWT wiring is a follow-up PR
-			log.Default(),
-		)
-		go func() {
-			if err := tenantProvisioner.Run(ctx); err != nil && ctx.Err() == nil {
-				log.Printf("tenant provisioner error: %v", err)
+		// Password auth handler — only when AUTH_PASSWORD_ENABLED.
+		// Wires the register + login command handlers and shares the
+		// JWT_SECRET with the OAuth handler so tokens issued by either
+		// path verify against the same TenantMiddleware secret.
+		if passwordAuthEnabled {
+			pwJWTSecret := os.Getenv("JWT_SECRET")
+			if pwJWTSecret == "" {
+				pwJWTSecret = "default-secret-change-in-production"
 			}
-		}()
-		fmt.Println("✅ Tenant provisioner JetStream subscriber started (durable: tenant-provisioner)")
+			// CookieSecure: same scheme-derived rule as the OAuth handler;
+			// PLATFORM_BASE_URL is optional in password-only mode (no
+			// provider redirect URLs to seed), so default to false in dev
+			// and let an operator opt in via AUTH_COOKIE_SECURE=true.
+			pwCookieSecure := false
+			if base := os.Getenv("PLATFORM_BASE_URL"); base != "" {
+				pwCookieSecure = strings.HasPrefix(strings.ToLower(base), "https://")
+			}
+			if os.Getenv("AUTH_COOKIE_SECURE") == "true" {
+				pwCookieSecure = true
+			}
 
-		// Seed per-tenant assistants_total / threads_total gauges from
-		// the DB before the HTTP server starts. Otherwise those gauges
-		// start at 0 on every restart and the first delete after
-		// restart can produce a negative value. Per-tenant errors are
-		// logged + skipped so a single broken tenant DB doesn't block
-		// engine startup.
-		if err := bootstrapTenantMetrics(ctx, writeConfig, tenantRepo, metrics, log.Default()); err != nil {
-			log.Printf("metrics bootstrap returned error: %v (engine continues)", err)
+			registerCmd := command.NewRegisterUserWithPasswordHandler(userRepo)
+			loginCmd := command.NewLoginWithPasswordHandler(userRepo)
+
+			ph, err := authhandler.NewPasswordHandler(registerCmd, loginCmd, authhandler.PasswordHandlerConfig{
+				JWTSecret:    []byte(pwJWTSecret),
+				SessionTTL:   24 * time.Hour,
+				CookieDomain: os.Getenv("PLATFORM_COOKIE_DOMAIN"),
+				CookieSecure: pwCookieSecure,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to construct password handler: %w", err)
+			}
+			passwordHandler = ph
+			fmt.Println("✅ Password auth handler constructed (POST /api/auth/register, /api/auth/login)")
+		}
+
+		// OAuth handler wiring — only when AUTH_OAUTH_ENABLED.
+		// Password-only deployments skip this entirely (no PLATFORM_BASE_URL
+		// requirement, no provider config, no /api/auth/{provider}/* routes).
+		if oauthAuthEnabled {
+			// PLATFORM_BASE_URL is the externally-facing URL of this engine
+			// (e.g. https://platform.duragraph.ai). It feeds three things:
+			//   (1) the goth provider redirect URLs ("<base>/api/auth/<p>/callback");
+			//   (2) the cookie-logout CSRF same-origin check (auth.Config.BaseURL);
+			//   (3) the CookieSecure flag (https → true, http → false).
+			// Required when AUTH_OAUTH_ENABLED — fail fast at startup
+			// rather than 500ing on first /api/auth/<provider>/login.
+			platformBaseURL := os.Getenv("PLATFORM_BASE_URL")
+			if platformBaseURL == "" {
+				return fmt.Errorf("PLATFORM_BASE_URL is required when AUTH_OAUTH_ENABLED=true")
+			}
+			// CookieSecure derived from the base-URL scheme: production runs
+			// behind Traefik with https, dev runs plain http. Lower-case for
+			// case-insensitive scheme match — RFC 3986 says scheme is
+			// case-insensitive and we control the env var, but be lenient.
+			cookieSecure := strings.HasPrefix(strings.ToLower(platformBaseURL), "https://")
+
+			// OAUTH_SESSION_SECRET keys the gorilla/sessions cookie store
+			// goth uses to hold the OAuth state token between /login and
+			// /callback. Required + ≥32 bytes; ConfigureProviders enforces
+			// the length floor and rejects misconfigured deployments at
+			// startup.
+			oauthSessionSecret := os.Getenv("OAUTH_SESSION_SECRET")
+			if oauthSessionSecret == "" {
+				return fmt.Errorf("OAUTH_SESSION_SECRET is required when AUTH_OAUTH_ENABLED=true")
+			}
+
+			if err := authhandler.ConfigureProviders(authhandler.ProviderConfig{
+				BaseURL:            platformBaseURL,
+				GoogleClientID:     os.Getenv("OAUTH_GOOGLE_CLIENT_ID"),
+				GoogleClientSecret: os.Getenv("OAUTH_GOOGLE_CLIENT_SECRET"),
+				GitHubClientID:     os.Getenv("OAUTH_GITHUB_CLIENT_ID"),
+				GitHubClientSecret: os.Getenv("OAUTH_GITHUB_CLIENT_SECRET"),
+				SessionSecret:      oauthSessionSecret,
+				CookieSecure:       cookieSecure,
+			}); err != nil {
+				return fmt.Errorf("OAuth provider configuration failed: %w", err)
+			}
+
+			// JWT_SECRET (with the verifier's default fallback) drives BOTH
+			// the verifier hoisted above AND the OAuth handler's
+			// IssueJWT/Refresh round-trip. Must be the same bytes — a
+			// refresh-issued token has to verify against the middleware's
+			// secret on the next request.
+			oauthJWTSecret := os.Getenv("JWT_SECRET")
+			if oauthJWTSecret == "" {
+				oauthJWTSecret = "default-secret-change-in-production"
+			}
+
+			oh, err := authhandler.NewHandler(
+				userRepo,
+				tenantRepo,
+				migrator,
+				verifier,
+				authhandler.NewGothExchanger(),
+				authhandler.NewPoolBootstrapLocker(platformPool),
+				authhandler.Config{
+					SessionTTL:   24 * time.Hour,
+					BaseURL:      platformBaseURL,
+					CookieDomain: os.Getenv("PLATFORM_COOKIE_DOMAIN"), // empty = host-only
+					CookieSecure: cookieSecure,
+					JWTSecret:    []byte(oauthJWTSecret),
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("failed to construct OAuth handler: %w", err)
+			}
+			oauthHandler = oh
+			fmt.Println("✅ OAuth handler constructed")
+		}
+
+		// Tenant provisioner — only when MULTITENANT_ENABLED.
+		// Single-tenant deployments don't provision per-user databases or
+		// NATS accounts, so the durable JetStream consumer + provisioner
+		// goroutine are skipped. This is also why config.go rejects
+		// NATS_MODE=embedded only on multi-tenant: embedded NATS can't
+		// signal operator-JWT for account isolation, but single-tenant
+		// has no isolation requirement.
+		if multitenantEnabled {
+			// Tenant provisioner subscriber. Uses a JetStream durable
+			// consumer (durable name "tenant-provisioner") bound to the
+			// existing duragraph-events stream — so tenant.provisioning
+			// events published while the engine was offline still get
+			// delivered when it comes back. Separate from the plain-NATS
+			// `subscriber` used by run/execution events because the
+			// platform-admin loop needs at-least-once durability.
+			jsSubscriber, err := nats.NewJetStreamSubscriber(nats.JetStreamSubscriberConfig{
+				URL:           cfg.NATS.URL,
+				StreamName:    messaging.JetStreamStreamName,
+				FilterSubject: messaging.TenantProvisioningTopic,
+				Durable:       messaging.DurableName,
+				MaxDeliver:    10, // bound poison-message redelivery loops
+			})
+			if err != nil {
+				return fmt.Errorf("failed to construct tenant provisioner JetStream subscriber: %w", err)
+			}
+			defer jsSubscriber.Close()
+
+			tenantProvisioner := messaging.NewTenantProvisioner(
+				jsSubscriber,
+				tenantRepo,
+				migrator,
+				messaging.NoopNATSAccountProvisioner{}, // operator-JWT wiring is a follow-up PR
+				log.Default(),
+			)
+			go func() {
+				if err := tenantProvisioner.Run(ctx); err != nil && ctx.Err() == nil {
+					log.Printf("tenant provisioner error: %v", err)
+				}
+			}()
+			fmt.Println("✅ Tenant provisioner JetStream subscriber started (durable: tenant-provisioner)")
+
+			// Seed per-tenant assistants_total / threads_total gauges from
+			// the DB before the HTTP server starts. Otherwise those gauges
+			// start at 0 on every restart and the first delete after
+			// restart can produce a negative value. Per-tenant errors are
+			// logged + skipped so a single broken tenant DB doesn't block
+			// engine startup.
+			if err := bootstrapTenantMetrics(ctx, writeConfig, tenantRepo, metrics, log.Default()); err != nil {
+				log.Printf("metrics bootstrap returned error: %v (engine continues)", err)
+			}
 		}
 	}
 
@@ -928,6 +1016,16 @@ func runServe(_ *cobra.Command, _ []string) error {
 		e.POST("/api/auth/logout", oauthHandler.Logout)
 		e.POST("/api/auth/refresh", oauthHandler.Refresh)
 		fmt.Println("✅ OAuth routes registered (/api/auth/{provider}/login,callback + /api/auth/logout,refresh)")
+	}
+
+	// Password auth routes — public by design (register issues a 201
+	// without a token, login mints one). Mount on the bare *echo.Echo
+	// before the /api/v1 group so TenantMiddleware never wraps them.
+	// nil in non-AUTH_PASSWORD_ENABLED deployments → routes don't exist.
+	if passwordHandler != nil {
+		e.POST("/api/auth/register", passwordHandler.Register)
+		e.POST("/api/auth/login", passwordHandler.Login)
+		fmt.Println("✅ Password auth routes registered (POST /api/auth/register, /api/auth/login)")
 	}
 
 	// API routes.

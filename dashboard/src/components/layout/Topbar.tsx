@@ -1,5 +1,6 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { Moon, Sun, Monitor, User, Settings, LogOut, Key, Menu } from "lucide-react"
+import { clearAuth, getUser } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -22,26 +23,31 @@ import {
 } from "@/components/ui/breadcrumb"
 import { useRouterState } from "@tanstack/react-router"
 
-// Mock user data - in production this would come from auth context
-const mockUser = {
-  name: "John Doe",
-  email: "john.doe@example.com",
-  avatar: "",
-}
-
 export function Topbar() {
   const { theme, setTheme } = useThemeStore()
   const { toggleMobileMenu } = useUIStore()
   const router = useRouterState()
+  const navigate = useNavigate()
   const pathSegments = router.location.pathname.split("/").filter(Boolean)
 
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2)
+  // Pull from localStorage at render time. We don't subscribe to changes
+  // because the only mutation is sign-in / sign-out, both of which
+  // trigger a navigate that re-renders this component.
+  const authUser = getUser()
+  const displayUser = authUser ?? {
+    email: "unknown@example.com",
+    role: "user",
+  }
+
+  const handleLogout = () => {
+    clearAuth()
+    navigate({ to: "/login" })
+  }
+
+  const getInitials = (email: string) => {
+    // Fallback initials from email local-part: "alice@example.com" → "AL"
+    const local = email.split("@")[0] ?? "?"
+    return local.slice(0, 2).toUpperCase()
   }
 
   return (
@@ -119,21 +125,23 @@ export function Topbar() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="h-8 px-2 gap-2">
               <Avatar className="h-7 w-7">
-                <AvatarImage src={mockUser.avatar} alt={mockUser.name} />
+                <AvatarImage src="" alt={displayUser.email} />
                 <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                  {getInitials(mockUser.name)}
+                  {getInitials(displayUser.email)}
                 </AvatarFallback>
               </Avatar>
               <span className="text-sm font-medium hidden md:inline-block">
-                {mockUser.name}
+                {displayUser.email}
               </span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>
               <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium">{mockUser.name}</p>
-                <p className="text-xs text-muted-foreground">{mockUser.email}</p>
+                <p className="text-sm font-medium">{displayUser.email}</p>
+                <p className="text-xs text-muted-foreground capitalize">
+                  {displayUser.role}
+                </p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -156,7 +164,10 @@ export function Topbar() {
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive focus:text-destructive">
+            <DropdownMenuItem
+              onSelect={handleLogout}
+              className="text-destructive focus:text-destructive cursor-pointer"
+            >
               <LogOut className="h-4 w-4 mr-2" />
               Log out
             </DropdownMenuItem>

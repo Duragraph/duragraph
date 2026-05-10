@@ -577,33 +577,65 @@ func TestLoad_RejectsBadNATSMonitorPort(t *testing.T) {
 // TestLoad_RejectsEmbeddedNATSWithMultitenant verifies the multitenant
 // constraint from binary-modes.yml § nats_jetstream.multitenant_constraint:
 // embedded NATS does not support operator-JWT, so the combination of
-// NATS_MODE=embedded + MIGRATOR_PLATFORM_ENABLED=true must be refused
-// at startup with a clear pointer at the resolution.
+// NATS_MODE=embedded + MULTITENANT_ENABLED=true (or the legacy
+// MIGRATOR_PLATFORM_ENABLED=true alias) must be refused at startup
+// with a clear pointer at the resolution.
 func TestLoad_RejectsEmbeddedNATSWithMultitenant(t *testing.T) {
 	t.Setenv("NATS_MODE", "embedded")
-	t.Setenv("MIGRATOR_PLATFORM_ENABLED", "true")
+	t.Setenv("MULTITENANT_ENABLED", "true")
 
 	cfg, err := Load()
 	if err == nil {
 		t.Fatalf("expected error for embedded NATS + multitenant, got cfg=%+v", cfg)
 	}
-	// The error message should mention the actual remediation paths so
-	// an operator immediately knows whether to flip NATS_MODE or unset
-	// MIGRATOR_PLATFORM_ENABLED.
-	for _, want := range []string{"NATS_MODE=external", "MIGRATOR_PLATFORM_ENABLED"} {
+	for _, want := range []string{"NATS_MODE=external", "MULTITENANT_ENABLED"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}
 	}
 }
 
+// TestLoad_RejectsEmbeddedNATSWithLegacyPlatformFlag verifies the
+// legacy MIGRATOR_PLATFORM_ENABLED=true alias still triggers the
+// multitenant constraint, so back-compat callers of the old flag get
+// the same guard.
+func TestLoad_RejectsEmbeddedNATSWithLegacyPlatformFlag(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	t.Setenv("MIGRATOR_PLATFORM_ENABLED", "true")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatalf("expected error for embedded NATS + legacy platform flag, got cfg=%+v", cfg)
+	}
+}
+
+// TestLoad_EmbeddedNATSWithSingleTenantAuthAllowed is the DX-critical
+// inverse: AUTH_PASSWORD_ENABLED (or AUTH_OAUTH_ENABLED) without
+// MULTITENANT_ENABLED must NOT trigger the embedded-NATS rejection.
+// This is the `duragraph dev` zero-config path — a developer can
+// register + log in against embedded postgres + NATS without touching
+// operator-JWT.
+func TestLoad_EmbeddedNATSWithSingleTenantAuthAllowed(t *testing.T) {
+	t.Setenv("NATS_MODE", "embedded")
+	t.Setenv("AUTH_PASSWORD_ENABLED", "true")
+	// Multitenant explicitly NOT set.
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("AUTH_PASSWORD_ENABLED alone must allow embedded NATS, got error: %v", err)
+	}
+	if cfg.NATS.Mode != "embedded" {
+		t.Errorf("NATS.Mode: got %q, want embedded", cfg.NATS.Mode)
+	}
+}
+
 // TestLoad_ExternalNATSWithMultitenantAllowed is the defensive inverse:
 // the multitenant guard is mode-specific, NOT a blanket prohibition.
-// External NATS + MIGRATOR_PLATFORM_ENABLED=true must continue to work
+// External NATS + MULTITENANT_ENABLED=true must continue to work
 // (it's the canonical platform-mode deployment shape).
 func TestLoad_ExternalNATSWithMultitenantAllowed(t *testing.T) {
 	t.Setenv("NATS_MODE", "external")
-	t.Setenv("MIGRATOR_PLATFORM_ENABLED", "true")
+	t.Setenv("MULTITENANT_ENABLED", "true")
 	t.Setenv("NATS_URL", "nats://prod-nats:4222")
 
 	cfg, err := Load()

@@ -1,7 +1,10 @@
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 
 export function Header() {
   const { activeView, setView } = useUIStore()
+  const user = useAuthStore((s) => s.user)
+  const clearAuth = useAuthStore((s) => s.clearAuth)
 
   const navItems = [
     { key: 'chat' as const, label: 'Chat' },
@@ -33,6 +36,26 @@ export function Header() {
           </button>
         ))}
       </nav>
+
+      <div className="flex items-center gap-3">
+        {user && (
+          <span className="text-xs text-muted-foreground" title={user.email}>
+            {user.email}
+            {user.role === 'admin' && (
+              <span className="ml-1.5 rounded-sm bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                ADMIN
+              </span>
+            )}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={clearAuth}
+          className="px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          Sign out
+        </button>
+      </div>
     </header>
   )
 }

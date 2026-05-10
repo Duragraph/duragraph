@@ -111,6 +111,7 @@ type stubUserRepo struct {
 	saveFn         func(ctx context.Context, u *user.User) error
 	getByOAuthFn   func(ctx context.Context, provider, oauthID string) (*user.User, error)
 	getByIDFn      func(ctx context.Context, id string) (*user.User, error)
+	getByEmailFn   func(ctx context.Context, email string) (*user.User, error)
 	countAllFn     func(ctx context.Context) (int, error)
 	listByStatusFn func(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error)
 }
@@ -132,6 +133,12 @@ func (r *stubUserRepo) GetByOAuth(ctx context.Context, provider, oauthID string)
 		return r.getByOAuthFn(ctx, provider, oauthID)
 	}
 	return nil, pkgerrors.NotFound("user", provider+"/"+oauthID)
+}
+func (r *stubUserRepo) GetByEmail(ctx context.Context, email string) (*user.User, error) {
+	if r.getByEmailFn != nil {
+		return r.getByEmailFn(ctx, email)
+	}
+	return nil, pkgerrors.NotFound("user", email)
 }
 func (r *stubUserRepo) ListByStatus(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error) {
 	if r.listByStatusFn != nil {

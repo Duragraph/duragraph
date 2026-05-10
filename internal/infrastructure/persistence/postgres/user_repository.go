@@ -43,6 +43,22 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 
+// nullable converts an empty Go string to a SQL NULL and a non-empty
+// string to its value. Used for the nullable columns added by migration
+// 005 (oauth_provider, oauth_id, password_hash) — the CHECK constraint
+// `oauth_provider IS NULL OR oauth_provider IN ('google', 'github')`
+// would reject a literal empty string, and `users_at_least_one_auth_method`
+// requires NULL semantics to distinguish "no oauth" from "empty oauth".
+//
+// Returns interface{} (any) so it can be passed directly into pgx's
+// variadic args without further wrapping.
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // Save persists a User aggregate's projection state. New aggregates
 // (LoadedUpdatedAt zero) are inserted; loaded aggregates are updated
 // with optimistic-concurrency check on updated_at.
@@ -70,19 +86,27 @@ func (r *UserRepository) insert(ctx context.Context, u *user.User) error {
 	// RETURNING so the trigger / DEFAULT NOW() value flows back into
 	// the aggregate (avoids any Go/PG clock-skew drift between the
 	// aggregate's loadedUpdatedAt and the DB's column value).
+	//
+	// password_hash + auth_method come from migration 005. password_hash
+	// is NULL for OAuth-only users; oauth_provider / oauth_id are NULL
+	// for password-only users. nullable() converts empty Go strings to
+	// SQL NULL so the users_at_least_one_auth_method CHECK constraint
+	// behaves correctly.
 	const q = `
 		INSERT INTO platform.users
-			(id, oauth_provider, oauth_id, email, role, status, created_at, updated_at)
+			(id, oauth_provider, oauth_id, email, password_hash, auth_method, role, status, created_at, updated_at)
 		VALUES
-			($1, $2, $3, $4, $5, $6, $7, $8)
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING updated_at
 	`
 	var updatedAt time.Time
 	err := r.pool.QueryRow(ctx, q,
 		u.ID(),
-		u.OAuthProvider(),
-		u.OAuthID(),
+		nullable(u.OAuthProvider()),
+		nullable(u.OAuthID()),
 		u.Email(),
+		nullable(u.PasswordHash()),
+		u.AuthMethod(),
 		string(u.Role()),
 		string(u.Status()),
 		u.CreatedAt(),
@@ -112,16 +136,20 @@ func (r *UserRepository) update(ctx context.Context, u *user.User) error {
 		SET oauth_provider = $1,
 		    oauth_id       = $2,
 		    email          = $3,
-		    role           = $4,
-		    status         = $5
-		WHERE id = $6 AND updated_at = $7
+		    password_hash  = $4,
+		    auth_method    = $5,
+		    role           = $6,
+		    status         = $7
+		WHERE id = $8 AND updated_at = $9
 		RETURNING updated_at
 	`
 	var updatedAt time.Time
 	err := r.pool.QueryRow(ctx, q,
-		u.OAuthProvider(),
-		u.OAuthID(),
+		nullable(u.OAuthProvider()),
+		nullable(u.OAuthID()),
 		u.Email(),
+		nullable(u.PasswordHash()),
+		u.AuthMethod(),
 		string(u.Role()),
 		string(u.Status()),
 		u.ID(),
@@ -157,7 +185,11 @@ func (r *UserRepository) update(ctx context.Context, u *user.User) error {
 // no row matches.
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*user.User, error) {
 	const q = `
-		SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+		SELECT id::text,
+			   COALESCE(oauth_provider, ''), COALESCE(oauth_id, ''),
+			   email,
+			   COALESCE(password_hash, ''), auth_method,
+			   role, status, created_at, updated_at
 		FROM platform.users
 		WHERE id = $1
 	`
@@ -169,12 +201,45 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*user.User, er
 // oauth_id) pair. Returns errors.NotFound when no row matches.
 func (r *UserRepository) GetByOAuth(ctx context.Context, provider, oauthID string) (*user.User, error) {
 	const q = `
-		SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+		SELECT id::text,
+			   COALESCE(oauth_provider, ''), COALESCE(oauth_id, ''),
+			   email,
+			   COALESCE(password_hash, ''), auth_method,
+			   role, status, created_at, updated_at
 		FROM platform.users
 		WHERE oauth_provider = $1 AND oauth_id = $2
 	`
 	row := r.pool.QueryRow(ctx, q, provider, oauthID)
 	return r.scanRow(row, "user", provider+"/"+oauthID)
+}
+
+// GetByEmail retrieves a user by email, case-insensitive. Backed by the
+// idx_users_lower_email functional index added in migration 005, so the
+// lookup is O(log n) on a busy platform.users.
+//
+// Used by the password-login flow (auth/password.yml § endpoints.login):
+// the client submits {email, password}, we lookup the user by email,
+// then VerifyPassword against the stored bcrypt hash. The case-insensitive
+// match is intentional — addresses are case-insensitive per RFC 5321 and
+// users routinely re-type their address with different casing across
+// signup vs. login. Pre-005 schema relied on byte-for-byte UNIQUE(email)
+// for OAuth callbacks (where the provider always returns the same
+// canonical address) so case-insensitive lookup is a password-flow
+// addition, not a behavior change for OAuth.
+//
+// Returns errors.NotFound when no row matches.
+func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*user.User, error) {
+	const q = `
+		SELECT id::text,
+			   COALESCE(oauth_provider, ''), COALESCE(oauth_id, ''),
+			   email,
+			   COALESCE(password_hash, ''), auth_method,
+			   role, status, created_at, updated_at
+		FROM platform.users
+		WHERE LOWER(email) = LOWER($1)
+	`
+	row := r.pool.QueryRow(ctx, q, email)
+	return r.scanRow(row, "user", email)
 }
 
 // ListByStatus retrieves users matching the given status with pagination.
@@ -186,7 +251,11 @@ func (r *UserRepository) GetByOAuth(ctx context.Context, provider, oauthID strin
 // LIMIT/OFFSET pagination can drop or duplicate rows across pages.
 func (r *UserRepository) ListByStatus(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error) {
 	const q = `
-		SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+		SELECT id::text,
+			   COALESCE(oauth_provider, ''), COALESCE(oauth_id, ''),
+			   email,
+			   COALESCE(password_hash, ''), auth_method,
+			   role, status, created_at, updated_at
 		FROM platform.users
 		WHERE status = $1
 		ORDER BY created_at ASC, id ASC
@@ -206,6 +275,8 @@ func (r *UserRepository) ListByStatus(ctx context.Context, status user.Status, l
 			&data.OAuthProvider,
 			&data.OAuthID,
 			&data.Email,
+			&data.PasswordHash,
+			&data.AuthMethod,
 			&data.Role,
 			&data.Status,
 			&data.CreatedAt,
@@ -238,7 +309,11 @@ func (r *UserRepository) List(ctx context.Context, status *user.Status, limit, o
 	)
 	if status == nil {
 		const q = `
-			SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+			SELECT id::text,
+			   COALESCE(oauth_provider, ''), COALESCE(oauth_id, ''),
+			   email,
+			   COALESCE(password_hash, ''), auth_method,
+			   role, status, created_at, updated_at
 			FROM platform.users
 			ORDER BY created_at ASC, id ASC
 			LIMIT $1 OFFSET $2
@@ -246,7 +321,11 @@ func (r *UserRepository) List(ctx context.Context, status *user.Status, limit, o
 		rows, err = r.pool.Query(ctx, q, limit, offset)
 	} else {
 		const q = `
-			SELECT id::text, oauth_provider, oauth_id, email, role, status, created_at, updated_at
+			SELECT id::text,
+			   COALESCE(oauth_provider, ''), COALESCE(oauth_id, ''),
+			   email,
+			   COALESCE(password_hash, ''), auth_method,
+			   role, status, created_at, updated_at
 			FROM platform.users
 			WHERE status = $1
 			ORDER BY created_at ASC, id ASC
@@ -267,6 +346,8 @@ func (r *UserRepository) List(ctx context.Context, status *user.Status, limit, o
 			&data.OAuthProvider,
 			&data.OAuthID,
 			&data.Email,
+			&data.PasswordHash,
+			&data.AuthMethod,
 			&data.Role,
 			&data.Status,
 			&data.CreatedAt,
@@ -326,6 +407,8 @@ func (r *UserRepository) scanRow(row pgx.Row, resourceLabel, resourceID string) 
 		&data.OAuthProvider,
 		&data.OAuthID,
 		&data.Email,
+		&data.PasswordHash,
+		&data.AuthMethod,
 		&data.Role,
 		&data.Status,
 		&data.CreatedAt,

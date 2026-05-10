@@ -3,6 +3,7 @@ package mocks
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/duragraph/duragraph/internal/domain/user"
@@ -22,6 +23,7 @@ type UserRepository struct {
 	SaveFunc          func(ctx context.Context, u *user.User) error
 	GetByIDFunc       func(ctx context.Context, id string) (*user.User, error)
 	GetByOAuthFunc    func(ctx context.Context, provider, oauthID string) (*user.User, error)
+	GetByEmailFunc    func(ctx context.Context, email string) (*user.User, error)
 	ListByStatusFunc  func(ctx context.Context, status user.Status, limit, offset int) ([]*user.User, error)
 	ListFunc          func(ctx context.Context, status *user.Status, limit, offset int) ([]*user.User, error)
 	CountByStatusFunc func(ctx context.Context, status *user.Status) (int, error)
@@ -79,6 +81,23 @@ func (m *UserRepository) GetByOAuth(ctx context.Context, provider, oauthID strin
 		return nil, errors.NotFound("user", provider+"/"+oauthID)
 	}
 	return u, nil
+}
+
+// GetByEmail returns the user matching email case-insensitively, or
+// NotFound. Mirrors the postgres repo's LOWER(email) = LOWER($1) lookup.
+func (m *UserRepository) GetByEmail(ctx context.Context, email string) (*user.User, error) {
+	if m.GetByEmailFunc != nil {
+		return m.GetByEmailFunc(ctx, email)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	want := strings.ToLower(email)
+	for _, u := range m.Users {
+		if strings.ToLower(u.Email()) == want {
+			return u, nil
+		}
+	}
+	return nil, errors.NotFound("user", email)
 }
 
 // ListByStatus returns users matching status with pagination. Results

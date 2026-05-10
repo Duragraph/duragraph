@@ -1,9 +1,18 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router"
+import { createFileRoute, Outlet, redirect } from "@tanstack/react-router"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { Topbar } from "@/components/layout/Topbar"
 import { ErrorBoundary } from "@/components/common/ErrorBoundary"
+import { isAuthenticated } from "@/lib/auth"
 
+// Auth gate for the app shell. Any route under /_app/* runs through
+// this beforeLoad — without a token, bounce to /login. Public routes
+// live under /_auth/* (login, register) and are not gated.
 export const Route = createFileRoute("/_app")({
+  beforeLoad: () => {
+    if (!isAuthenticated()) {
+      throw redirect({ to: "/login" })
+    }
+  },
   component: AppLayout,
 })
 
