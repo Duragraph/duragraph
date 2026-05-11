@@ -2,13 +2,20 @@ import { useState, useCallback } from "react"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type { Run, Assistant, Graph } from "@/types/entities"
+import type { Run, RunStatus, Assistant, Graph } from "@/types/entities"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
+import { JsonView } from "@/components/common/JsonView"
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge"
 import { GraphVisualizer, type ExecutionStatus } from "@/components/graph/GraphVisualizer"
 import { useRunStream } from "@/hooks/useRunStream"
@@ -73,11 +80,17 @@ function RunDetailPage() {
     enabled: !!run?.assistant_id,
   })
 
-  // Fetch graph for visualization
+  // Fetch graph for visualization. Gated on assistant_id only — the
+  // engine's /assistants/{id}/graph endpoint resolves the topology
+  // from the worker-registered graph definition when no in-app graph
+  // has been authored. Previously this was gated on assistant.graph_id
+  // being non-empty, but a known bug suppressed graph_id from the
+  // response shape, so the query never fired. With the engine-side
+  // fix in place, the gate is now just "do we have an assistant id".
   const { data: graph, isLoading: isGraphLoading } = useQuery({
     queryKey: ["assistant-graph", run?.assistant_id],
     queryFn: () => api.get<Graph>(`/assistants/${run?.assistant_id}/graph`),
-    enabled: !!assistant?.graph_id,
+    enabled: !!run?.assistant_id,
   })
 
   if (isLoading) {
@@ -121,7 +134,7 @@ function RunDetailPage() {
         title={
           <div className="flex items-center gap-3">
             <span className="font-mono">{runId.slice(0, 16)}...</span>
-            <RunStatusBadge status={run.status} />
+            <RunStatusBadge status={run.status as RunStatus} />
             {isConnected && (
               <Badge variant="outline" className="text-green-600 border-green-600 gap-1">
                 <Radio className="h-3 w-3 animate-pulse" />
@@ -221,7 +234,7 @@ function RunDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Status</span>
-                  <RunStatusBadge status={run.status} />
+                  <RunStatusBadge status={run.status as RunStatus} />
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Created</span>
@@ -291,9 +304,7 @@ function RunDetailPage() {
                 <CardTitle>Input</CardTitle>
               </CardHeader>
               <CardContent>
-                <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto max-h-96">
-                  {JSON.stringify(run.input || {}, null, 2)}
-                </pre>
+                <JsonView value={run.input ?? {}} />
               </CardContent>
             </Card>
             <Card>
@@ -302,11 +313,11 @@ function RunDetailPage() {
               </CardHeader>
               <CardContent>
                 {run.output ? (
-                  <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto max-h-96">
-                    {JSON.stringify(run.output, null, 2)}
-                  </pre>
+                  <JsonView value={run.output} />
                 ) : (
-                  <p className="text-sm text-muted-foreground">No output yet</p>
+                  <p className="text-sm text-muted-foreground">
+                    No output yet
+                  </p>
                 )}
               </CardContent>
             </Card>
@@ -361,14 +372,21 @@ function RunDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Metadata</CardTitle>
+              <CardDescription>
+                Free-form key/value bag attached to the run when it was
+                created (correlation / trace ids, A/B variant tags,
+                customer or org ids, idempotency keys, etc.). The engine
+                round-trips it through unchanged — it doesn't affect
+                execution.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {run.metadata && Object.keys(run.metadata).length > 0 ? (
-                <pre className="bg-muted p-4 rounded-lg text-sm overflow-auto max-h-96">
-                  {JSON.stringify(run.metadata, null, 2)}
-                </pre>
+                <JsonView value={run.metadata} />
               ) : (
-                <p className="text-sm text-muted-foreground">No metadata available.</p>
+                <p className="text-sm text-muted-foreground">
+                  No metadata was attached to this run.
+                </p>
               )}
             </CardContent>
           </Card>

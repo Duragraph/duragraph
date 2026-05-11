@@ -1,6 +1,6 @@
 import { memo } from "react"
 import {
-  getSmoothStepPath,
+  getBezierPath,
   type EdgeProps,
   EdgeLabelRenderer,
   BaseEdge,
@@ -19,30 +19,41 @@ export const WorkflowEdge = memo(function WorkflowEdge({
   targetPosition,
   label,
   selected,
+  markerEnd,
 }: EdgeProps) {
   const deleteEdge = useWorkflowStore((state) => state.deleteEdge)
 
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
+  // Bezier path = curved, organic flow between nodes. The previous
+  // getSmoothStepPath produced right-angle "brick" elbows which
+  // looked rigid even when the layout itself was good.
+  const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
     sourcePosition,
     targetX,
     targetY,
     targetPosition,
-    borderRadius: 8,
+    curvature: 0.25,
   })
 
+  // Pass-through pattern (xyflow idiom): the parent <ReactFlow /> sets
+  // each edge's `markerEnd` to `{type: MarkerType.ArrowClosed}` and
+  // xyflow auto-injects the matching <defs><marker/></defs> into the
+  // canvas. The custom edge just forwards the prop. The previous
+  // hardcoded `markerEnd="url(#arrow)"` pointed at an SVG marker that
+  // was never defined anywhere — which is why edges had no arrowhead.
   return (
     <>
       <BaseEdge
         id={id}
         path={edgePath}
+        markerEnd={markerEnd}
         style={{
           strokeWidth: 2,
-          stroke: selected ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+          stroke: selected ? "var(--primary)" : "var(--muted-foreground)",
         }}
-        markerEnd="url(#arrow)"
       />
+
       {label && (
         <EdgeLabelRenderer>
           <div

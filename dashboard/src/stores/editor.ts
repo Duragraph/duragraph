@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { EditorNode, EditorEdge, EditorNodeType, GraphDefinition } from '@/types/entities'
+import type { EditorNode, EditorEdge, EditorNodeType, GraphDefinitionLocal as GraphDefinition } from '@/types/entities'
 
 let nextNodeId = 1
 let nextEdgeId = 1

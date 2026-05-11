@@ -120,6 +120,14 @@ export function streamRun(
         ]
         if (!stopStates.includes(status)) return
 
+        // Idempotency guard: two setInterval iterations can be
+        // in-flight on `await fetch(...)` concurrently. If both
+        // resolve to terminal state in the same tick, both would
+        // fire `onEvent({event: 'run_completed'})` before the first
+        // could set `completedFired`. That's how the user saw the
+        // same assistant message appended twice on a single turn.
+        // Re-check after the awaits resolve.
+        if (completedFired) return
         completedFired = true
         stopPolling()
         controller.abort()
@@ -209,12 +217,35 @@ export function streamRun(
             currentEvent = line.slice(7).trim()
           } else if (line.startsWith('data: ')) {
             const dataStr = line.slice(6)
+            const evName = currentEvent || 'message'
+
+            // Hard idempotency gate for terminal events. The
+            // assistant-message duplication shipped because *two*
+            // paths can deliver `run_completed`: the engine's own
+            // SSE stream, and the polling fallback that hits
+            // /api/v1/runs/{id}. Either can win the race. Whichever
+            // arrives first sets `completedFired`; subsequent
+            // terminal events (from the other path, or — racier
+            // still — from another iteration of the same path)
+            // skip the forward to the store. Non-terminal events
+            // (output_chunk, node_started, metadata) still pass
+            // through normally.
+            const isTerminal =
+              evName === 'run_completed' ||
+              evName === 'run_failed' ||
+              evName === 'run_requires_action'
+            if (isTerminal) {
+              if (completedFired) {
+                currentEvent = ''
+                continue
+              }
+              completedFired = true
+              stopPolling()
+            }
+
             try {
               const data = JSON.parse(dataStr)
-              callbacks.onEvent({
-                event: currentEvent || 'message',
-                data,
-              })
+              callbacks.onEvent({ event: evName, data })
               if (
                 !runIdCaptured &&
                 typeof data === 'object' &&
@@ -226,7 +257,7 @@ export function streamRun(
               }
             } catch {
               callbacks.onEvent({
-                event: currentEvent || 'message',
+                event: evName,
                 data: { raw: dataStr },
               })
             }

@@ -1,4 +1,106 @@
-// Run status enum matching backend
+// entities.ts holds the SHRINKING set of frontend-only types that
+// don't have a Go DTO counterpart. Anything that crosses the wire to
+// the engine must come from `@/types/generated` (regenerated via
+// `task gen:types` against internal/infrastructure/http/dto).
+//
+// What lives here:
+//   * Domain enums that the engine returns as bare `string` in its
+//     DTOs but that we narrow on the frontend (RunStatus). When the
+//     Go DTOs adopt typed status fields, move these out.
+//   * SSE / NATS event payloads (RunEvent, NodeExecution). Not in
+//     the REST DTOs; until those events get their own Go DTO module
+//     they stay here.
+//   * Editor working-state types (EditorNode, EditorEdge,
+//     GraphDefinitionLocal, EditorNodeType). Local zustand shape
+//     only — never crosses the wire. The wire-canonical equivalents
+//     (GraphDefinition / NodeDefinition / EdgeDefinition) live in
+//     generated.ts and are what worker registration uses.
+//
+// Convenience re-exports (Run, Assistant, Thread, Message, Graph,
+// ToolOutput) point at the generated DTO shapes so existing imports
+// `from "@/types/entities"` keep working during the migration. New
+// code should import from "@/types/generated" directly.
+
+import type {
+  GetRunResponse,
+  AssistantResponse,
+  ListAssistantsResponse,
+  ThreadResponse,
+  ListThreadsResponse,
+  MessageResponse,
+  GraphResponse,
+  GraphNodeResponse,
+  GraphEdgeResponse,
+  ToolOutput as GeneratedToolOutput,
+} from "./generated"
+
+// --- Wire types: re-exported as the legacy frontend names ----------
+// Drop these aliases when every import site has migrated to the
+// generated names. Until then, this preserves the route files.
+//
+// Some aliases extend the generated DTO with frontend-only fields
+// where the engine's wire shape has a known gap:
+//   * Thread.messages — the list endpoint doesn't return messages;
+//     /threads/$threadId hydrates this client-side by reading
+//     run.output.messages from the latest run.
+//   * Message.id/created_at — optimistic playground messages don't
+//     have these until the engine echoes the persisted record back.
+//   * Message.name/tool_call_id — tool-role payload fields not in
+//     the current Go DTO; populated client-side from SSE events.
+
+export type Run = GetRunResponse
+export type Assistant = AssistantResponse
+export type AssistantsResponse = ListAssistantsResponse
+export type Thread = ThreadResponse & {
+  messages?: Message[]
+}
+export type ThreadsResponse = ListThreadsResponse
+export type Message = Omit<MessageResponse, "id" | "created_at"> & {
+  id?: string
+  created_at?: number
+  name?: string
+  tool_call_id?: string
+}
+// Graph / GraphNode / GraphEdge override:
+//
+//   * Graph.entry_point — present on the wire payload but missing
+//     from the current Go DTO (gap to close: add to
+//     internal/infrastructure/http/dto/langgraph.go's GraphResponse).
+//   * GraphNode.position + GraphNode.config — same gap; the
+//     dashboard's xyflow visualisation needs (x, y) and node-level
+//     configuration.
+//   * GraphEdge.condition — same gap; conditional branches in the
+//     domain Graph carry a `condition` field that GraphEdgeResponse
+//     doesn't yet expose.
+//
+// These are typed-superset overrides so callers compile today.
+// They will go away as soon as the Go DTO is brought in line with
+// the wire shape and `task gen:types` regenerates.
+export type GraphNode = GraphNodeResponse & {
+  position?: { x: number; y: number }
+  config?: Record<string, unknown>
+}
+export type GraphEdge = GraphEdgeResponse & {
+  condition?: string
+}
+// Graph overrides `nodes` and `edges` so the union with frontend-only
+// fields propagates down — `GraphResponse.nodes` is typed as
+// `GraphNodeResponse[]`, but consumers expect the augmented
+// `GraphNode[]` with `position` + `config`.
+export type Graph = Omit<GraphResponse, "nodes" | "edges"> & {
+  entry_point?: string
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+export type ToolOutput = GeneratedToolOutput
+
+// --- Run status enum -----------------------------------------------
+//
+// The engine's Run DTO emits status as a bare `string`. The domain
+// (internal/domain/run/run.go) actually has these six values, so we
+// narrow on the frontend. Cast at the route layer:
+//   const status = response.status as RunStatus
+
 export type RunStatus =
   | "queued"
   | "in_progress"
@@ -7,28 +109,12 @@ export type RunStatus =
   | "cancelled"
   | "requires_action"
 
-export interface Run {
-  run_id: string
-  thread_id: string
-  assistant_id: string
-  status: RunStatus
-  input: Record<string, unknown>
-  output?: Record<string, unknown>
-  error?: string
-  required_action?: RequiredAction
-  metadata?: Record<string, unknown>
-  created_at: string
-  started_at?: string
-  completed_at?: string
-  updated_at?: string
-}
-
-export interface RequiredAction {
-  type: "submit_tool_outputs"
-  submit_tool_outputs: {
-    tool_calls: ToolCall[]
-  }
-}
+// --- Required-action / tool-call shapes ----------------------------
+//
+// LangGraph-compat: when a run needs a human-in-the-loop tool output,
+// the engine returns a `required_action` payload. This isn't in the
+// Go DTO yet (gap to close on the backend); when it lands, move
+// these into generated.ts.
 
 export interface ToolCall {
   id: string
@@ -39,99 +125,25 @@ export interface ToolCall {
   }
 }
 
-export interface ToolOutput {
-  tool_call_id: string
-  output: string
+export interface RequiredAction {
+  type: "submit_tool_outputs"
+  submit_tool_outputs: {
+    tool_calls: ToolCall[]
+  }
 }
 
-export interface Assistant {
-  assistant_id: string
-  name: string
-  description?: string
-  model?: string
-  graph_id?: string
-  config?: Record<string, unknown>
-  metadata?: Record<string, unknown>
-  version: number
-  created_at: number // Unix timestamp
-  updated_at: number // Unix timestamp
-}
-
-export interface AssistantsResponse {
-  assistants: Assistant[]
-  total: number
-}
-
-export interface Thread {
-  thread_id: string
-  metadata?: Record<string, unknown>
-  status?: string
-  values?: Record<string, unknown>
-  created_at: string // ISO 8601
-  updated_at: string // ISO 8601
-  // The list endpoint does not include messages. The detail page populates
-  // this client-side by fetching the thread's runs and reading
-  // run.output.messages from the latest one.
-  messages?: Message[]
-}
-
-export interface ThreadsResponse {
-  threads: Thread[]
-  total: number
-}
-
-export interface Message {
-  // id + created_at are populated when a message has been persisted to
-  // a thread; they're undefined for in-flight playground messages that
-  // have not yet been committed (the playground emits user/assistant
-  // pairs to local state before the run completes).
-  id?: string
-  role: "user" | "assistant" | "system" | "tool"
-  content: string
-  created_at?: number // Unix timestamp
-  // Tool-role messages carry the tool name + the originating call ID
-  // so the LLM can correlate the response to its prior tool_call.
-  name?: string
-  tool_call_id?: string
-}
-
-export interface Graph {
-  graph_id: string
-  name: string
-  nodes: GraphNode[]
-  edges: GraphEdge[]
-  entry_point: string
-}
-
-export interface GraphNode {
-  id: string
-  type: "llm" | "tool" | "conditional" | "human" | "start" | "end"
-  config?: Record<string, unknown>
-  position?: { x: number; y: number }
-}
-
-export interface GraphEdge {
-  id: string
-  source: string
-  target: string
-  condition?: string
-}
-
-// --- Run streaming + per-node execution -------------------------------
+// --- SSE / NATS event payloads -------------------------------------
 //
-// Returned from the /api/v1/stream?run_id= SSE endpoint. The shape is
-// intentionally generic — the inner `data` payload differs per event
-// type (`run.started`, `run.completed`, `node.started`, ...) and is
-// best parsed at the consumer.
+// Emitted by the /api/v1/stream and /api/v1/threads/.../runs/.../stream
+// endpoints. Not present in the REST DTOs — they live in the
+// `internal/infrastructure/messaging` events package. AsyncAPI codegen
+// is a follow-up; until then, hand-roll the minimum here.
 
 export interface RunEvent {
   event: string
   data: Record<string, unknown>
 }
 
-// NodeExecution is one step of a run's execution graph — emitted as a
-// node moves through started → completed/failed. Used in the run
-// inspector / reasoning-trace UI.
 export interface NodeExecution {
   node_id: string
   node_type: string
@@ -144,15 +156,12 @@ export interface NodeExecution {
   error?: string
 }
 
-// --- Workflow editor (builder route) ----------------------------------
+// --- Editor working-state types ------------------------------------
 //
-// The editor's working-state types are intentionally separate from the
-// persisted `Graph` / `GraphNode` types above:
-//   * `EditorNode` carries (x, y) directly while `GraphNode` uses
-//     `position: { x, y }` (server canonical form).
-//   * `EditorNode` has `label` + `isEntrypoint` for the in-editor UI;
-//     these collapse to graph metadata on save.
-// Conversion happens in the editor store's toDefinition() / loadGraph().
+// Used only by the workflow builder's zustand store
+// (src/stores/editor.ts). The persisted form crosses the wire as
+// `GraphDefinition` (in generated.ts) — these types are the in-editor
+// representation only.
 
 export type EditorNodeType =
   | "function"
@@ -179,7 +188,12 @@ export interface EditorEdge {
   label?: string
 }
 
-export interface GraphDefinition {
+// GraphDefinitionLocal is the editor's working-graph shape (uses
+// EditorNode/EditorEdge with `x`/`y` flat fields). The wire-canonical
+// `GraphDefinition` (in generated.ts) uses `NodeDefinition` with a
+// `position: { x, y }` object. Convert at save time in the editor
+// store's `toDefinition()`.
+export interface GraphDefinitionLocal {
   id: string
   name: string
   description: string
@@ -187,24 +201,4 @@ export interface GraphDefinition {
   edges: EditorEdge[]
   created_at?: string
   updated_at?: string
-}
-
-// --- Deployments (agent fleet management) -----------------------------
-//
-// Today the deployments view ships with mock data only — the engine
-// doesn't persist Deployment yet. Keeping the type so the placeholder
-// UI compiles, ready for the backend to land.
-export interface Deployment {
-  deployment_id: string
-  assistant_id: string
-  assistant_name: string
-  graph_id: string
-  status: "active" | "stopped" | "error" | "deploying"
-  workers: number
-  active_runs: number
-  completed_runs: number
-  failed_runs: number
-  created_at: string
-  updated_at: string
-  config?: Record<string, unknown>
 }

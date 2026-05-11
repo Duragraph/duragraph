@@ -151,7 +151,7 @@ export function WorkflowCanvas() {
             >
               <path
                 d="M2,2 L10,6 L2,10 L4,6 Z"
-                fill="hsl(var(--muted-foreground))"
+                fill="var(--muted-foreground)"
               />
             </marker>
           </defs>

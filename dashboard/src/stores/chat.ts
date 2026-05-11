@@ -34,7 +34,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sseStatus: 'closed',
   nodeExecutions: [],
 
-  setThread: (id) => set({ selectedThreadId: id, messages: [], nodeExecutions: [] }),
+  // setThread distinguishes two cases:
+  //   * Attaching a newly-created thread (current id is null) — keep
+  //     `messages` and `nodeExecutions`, because the playground has
+  //     just added the user's optimistic message and is about to
+  //     stream a run. Clearing here would wipe that message.
+  //   * Switching between two distinct, already-persisted threads —
+  //     reset, because the prior thread's chat state is no longer
+  //     relevant to the new one. The thread-detail page will reload
+  //     persisted messages from the engine for the newly selected id.
+  setThread: (id) =>
+    set((s) => {
+      if (id === s.selectedThreadId) return {}
+      if (s.selectedThreadId === null) {
+        return { selectedThreadId: id }
+      }
+      return { selectedThreadId: id, messages: [], nodeExecutions: [] }
+    }),
   // Switching assistants always starts a fresh conversation. The control
   // plane's default multitask_strategy is "reject", so reusing a thread
   // across assistants 409s if a prior run is still active or paused.
