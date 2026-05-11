@@ -25,6 +25,11 @@ func spaHandler(distFS fs.FS) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		req := c.Request()
 		path := strings.TrimPrefix(req.URL.Path, "/")
+		// Trim trailing slash before fs.Open — io/fs treats "studio/"
+		// as an invalid name and returns ErrInvalid rather than ErrNotExist,
+		// which would otherwise propagate as a 500 for any URL ending in "/"
+		// that doesn't map to a real subtree (e.g. /studio/ post-merge).
+		path = strings.TrimSuffix(path, "/")
 		if path == "" {
 			path = "index.html"
 		}
@@ -33,7 +38,7 @@ func spaHandler(distFS fs.FS) echo.HandlerFunc {
 			f.Close()
 			fileServer.ServeHTTP(c.Response().Writer, req)
 			return nil
-		} else if !errors.Is(err, fs.ErrNotExist) {
+		} else if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrInvalid) {
 			return err
 		}
 

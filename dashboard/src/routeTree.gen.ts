@@ -18,7 +18,11 @@ import { Route as AppThreadsRouteImport } from './routes/_app/threads'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppRunsRouteImport } from './routes/_app/runs'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
+import { Route as AppPlaygroundRouteImport } from './routes/_app/playground'
+import { Route as AppInspectorRouteImport } from './routes/_app/inspector'
+import { Route as AppDeploymentsRouteImport } from './routes/_app/deployments'
 import { Route as AppCostsRouteImport } from './routes/_app/costs'
+import { Route as AppBuilderRouteImport } from './routes/_app/builder'
 import { Route as AppAssistantsRouteImport } from './routes/_app/assistants'
 import { Route as AppAnalyticsRouteImport } from './routes/_app/analytics'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
@@ -73,9 +77,29 @@ const AppProfileRoute = AppProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPlaygroundRoute = AppPlaygroundRouteImport.update({
+  id: '/playground',
+  path: '/playground',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInspectorRoute = AppInspectorRouteImport.update({
+  id: '/inspector',
+  path: '/inspector',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDeploymentsRoute = AppDeploymentsRouteImport.update({
+  id: '/deployments',
+  path: '/deployments',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppCostsRoute = AppCostsRouteImport.update({
   id: '/costs',
   path: '/costs',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBuilderRoute = AppBuilderRouteImport.update({
+  id: '/builder',
+  path: '/builder',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAssistantsRoute = AppAssistantsRouteImport.update({
@@ -134,7 +158,11 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRouteWithChildren
   '/analytics': typeof AppAnalyticsRoute
   '/assistants': typeof AppAssistantsRouteWithChildren
+  '/builder': typeof AppBuilderRoute
   '/costs': typeof AppCostsRoute
+  '/deployments': typeof AppDeploymentsRoute
+  '/inspector': typeof AppInspectorRoute
+  '/playground': typeof AppPlaygroundRoute
   '/profile': typeof AppProfileRoute
   '/runs': typeof AppRunsRouteWithChildren
   '/settings': typeof AppSettingsRoute
@@ -153,7 +181,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/analytics': typeof AppAnalyticsRoute
   '/assistants': typeof AppAssistantsRouteWithChildren
+  '/builder': typeof AppBuilderRoute
   '/costs': typeof AppCostsRoute
+  '/deployments': typeof AppDeploymentsRoute
+  '/inspector': typeof AppInspectorRoute
+  '/playground': typeof AppPlaygroundRoute
   '/profile': typeof AppProfileRoute
   '/runs': typeof AppRunsRouteWithChildren
   '/settings': typeof AppSettingsRoute
@@ -176,7 +208,11 @@ export interface FileRoutesById {
   '/_app/admin': typeof AppAdminRouteWithChildren
   '/_app/analytics': typeof AppAnalyticsRoute
   '/_app/assistants': typeof AppAssistantsRouteWithChildren
+  '/_app/builder': typeof AppBuilderRoute
   '/_app/costs': typeof AppCostsRoute
+  '/_app/deployments': typeof AppDeploymentsRoute
+  '/_app/inspector': typeof AppInspectorRoute
+  '/_app/playground': typeof AppPlaygroundRoute
   '/_app/profile': typeof AppProfileRoute
   '/_app/runs': typeof AppRunsRouteWithChildren
   '/_app/settings': typeof AppSettingsRoute
@@ -198,7 +234,11 @@ export interface FileRouteTypes {
     | '/admin'
     | '/analytics'
     | '/assistants'
+    | '/builder'
     | '/costs'
+    | '/deployments'
+    | '/inspector'
+    | '/playground'
     | '/profile'
     | '/runs'
     | '/settings'
@@ -217,7 +257,11 @@ export interface FileRouteTypes {
   to:
     | '/analytics'
     | '/assistants'
+    | '/builder'
     | '/costs'
+    | '/deployments'
+    | '/inspector'
+    | '/playground'
     | '/profile'
     | '/runs'
     | '/settings'
@@ -239,7 +283,11 @@ export interface FileRouteTypes {
     | '/_app/admin'
     | '/_app/analytics'
     | '/_app/assistants'
+    | '/_app/builder'
     | '/_app/costs'
+    | '/_app/deployments'
+    | '/_app/inspector'
+    | '/_app/playground'
     | '/_app/profile'
     | '/_app/runs'
     | '/_app/settings'
@@ -326,11 +374,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProfileRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/playground': {
+      id: '/_app/playground'
+      path: '/playground'
+      fullPath: '/playground'
+      preLoaderRoute: typeof AppPlaygroundRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/inspector': {
+      id: '/_app/inspector'
+      path: '/inspector'
+      fullPath: '/inspector'
+      preLoaderRoute: typeof AppInspectorRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/deployments': {
+      id: '/_app/deployments'
+      path: '/deployments'
+      fullPath: '/deployments'
+      preLoaderRoute: typeof AppDeploymentsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/costs': {
       id: '/_app/costs'
       path: '/costs'
       fullPath: '/costs'
       preLoaderRoute: typeof AppCostsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/builder': {
+      id: '/_app/builder'
+      path: '/builder'
+      fullPath: '/builder'
+      preLoaderRoute: typeof AppBuilderRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/assistants': {
@@ -473,7 +549,11 @@ interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRouteWithChildren
   AppAnalyticsRoute: typeof AppAnalyticsRoute
   AppAssistantsRoute: typeof AppAssistantsRouteWithChildren
+  AppBuilderRoute: typeof AppBuilderRoute
   AppCostsRoute: typeof AppCostsRoute
+  AppDeploymentsRoute: typeof AppDeploymentsRoute
+  AppInspectorRoute: typeof AppInspectorRoute
+  AppPlaygroundRoute: typeof AppPlaygroundRoute
   AppProfileRoute: typeof AppProfileRoute
   AppRunsRoute: typeof AppRunsRouteWithChildren
   AppSettingsRoute: typeof AppSettingsRoute
@@ -486,7 +566,11 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRouteWithChildren,
   AppAnalyticsRoute: AppAnalyticsRoute,
   AppAssistantsRoute: AppAssistantsRouteWithChildren,
+  AppBuilderRoute: AppBuilderRoute,
   AppCostsRoute: AppCostsRoute,
+  AppDeploymentsRoute: AppDeploymentsRoute,
+  AppInspectorRoute: AppInspectorRoute,
+  AppPlaygroundRoute: AppPlaygroundRoute,
   AppProfileRoute: AppProfileRoute,
   AppRunsRoute: AppRunsRouteWithChildren,
   AppSettingsRoute: AppSettingsRoute,

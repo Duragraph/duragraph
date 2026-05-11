@@ -1,11 +1,14 @@
 # syntax=docker/dockerfile:1.6
 #
-# Multi-stage build for the duragraph server. The React dashboard AND
-# the React Studio UI are built first and their dist/ outputs are
-# embedded into the Go binary via go:embed (see embeds.go at the
-# module root).
+# Multi-stage build for the duragraph server. The React dashboard is
+# built first and its dist/ output is embedded into the Go binary via
+# go:embed (see embeds.go at the module root).
+#
+# Studio used to ship as a second builder stage + embed; it's now
+# folded into the dashboard at /playground, /builder, /deployments,
+# /inspector and there is no separate Studio build.
 
-# --- Stage 1a: build the React dashboard ---
+# --- Stage 1: build the React dashboard ---
 # node:22-alpine + pnpm 9 pinned via corepack: pnpm 10+ requires explicit
 # build-script approval (ERR_PNPM_IGNORED_BUILDS) which doesn't fit
 # `--frozen-lockfile` CI; pnpm 11 also depends on the node:sqlite builtin
@@ -23,20 +26,7 @@ RUN pnpm install --frozen-lockfile
 COPY dashboard/ ./
 RUN pnpm build
 
-# --- Stage 1b: build the React Studio UI ---
-FROM node:22-alpine AS studio-builder
-
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
-
-WORKDIR /app/studio
-
-COPY studio/package.json studio/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
-
-COPY studio/ ./
-RUN pnpm build
-
-# --- Stage 2: build the Go binary with both dists embedded ---
+# --- Stage 2: build the Go binary with the dashboard dist embedded ---
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
@@ -48,11 +38,10 @@ RUN go mod download
 
 COPY . .
 
-# Replace the committed placeholder dists with the freshly built ones
-# before compiling. The placeholders ship as `dist/index.html` only;
-# the real Vite output replaces them here.
+# Replace the committed placeholder dist with the freshly built one
+# before compiling. The placeholder ships as `dist/index.html` only;
+# the real Vite output replaces it here.
 COPY --from=dashboard-builder /app/dashboard/dist ./dashboard/dist
-COPY --from=studio-builder /app/studio/dist ./studio/dist
 
 # Build the canonical cobra entrypoint (./cmd/duragraph). cmd/server/
 # remains as a shim that calls into cmd/duragraph/cmd.Execute().

@@ -38,13 +38,18 @@ var (
 	devPort    int
 	devDataDir string
 	devWatch   string
-	devStudio  bool
 
 	devCmd = &cobra.Command{
 		Use:   "dev",
 		Short: "Run duragraph with embedded postgres, nats, and watch mode",
 		Long: `Zero-config dev mode: embedded Postgres + embedded NATS + dashboard
-+ optional Studio + worker watch mode.
++ worker watch mode.
+
+Studio's developer-UI surface (chat playground, workflow builder,
+deployments, run inspector) now lives inside the dashboard itself under
+the Playground section of the sidebar — there is no separate Studio
+mount point. The --studio flag accepts a value silently for
+backwards-compat but is otherwise a no-op.
 
 Defaults to a single-tenant deployment with auth disabled — designed for
 the local-laptop demo path described in binary-modes.yml § subcommands.
@@ -62,8 +67,14 @@ func init() {
 		"Data directory for embedded postgres + NATS storage. Created on first run.")
 	devCmd.Flags().StringVar(&devWatch, "watch", "./agents",
 		"Directory to watch (recursively) for Python graph files; pass empty string to disable")
-	devCmd.Flags().BoolVar(&devStudio, "studio", false,
-		"Serve embedded Studio UI at /studio/")
+	// --studio kept as a deprecated no-op so existing scripts that pass
+	// it don't error. The studio UI is now folded into the dashboard
+	// under /playground, /builder, /deployments, /inspector. Hidden from
+	// help to discourage new usage.
+	var devStudioCompat bool
+	devCmd.Flags().BoolVar(&devStudioCompat, "studio", false,
+		"Deprecated no-op — studio is now folded into the dashboard.")
+	_ = devCmd.Flags().MarkHidden("studio")
 
 	rootCmd.AddCommand(devCmd)
 }
@@ -89,10 +100,8 @@ func runDev(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   data dir: %s\n", absDataDir)
 	fmt.Printf("   dashboard: http://localhost:%d/\n", devPort)
 
-	if devStudio {
-		setIfUnset("DURAGRAPH_DEV_STUDIO", "true")
-		fmt.Println("   studio: http://localhost:" + fmt.Sprint(devPort) + "/studio/")
-	}
+	// --studio is a deprecated no-op (studio is now folded into the
+	// dashboard). Nothing to print.
 
 	// Phase 5: --watch supervises Python graph workers under devWatch.
 	// We have to start the watcher BEFORE serveCmd.RunE because runServe

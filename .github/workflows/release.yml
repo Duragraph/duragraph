@@ -41,38 +41,33 @@ jobs:
         with:
           version: 9
 
-      - name: Mask placeholder dists from git
+      - name: Mask placeholder dist from git
         # `pnpm build` overwrites the committed placeholder
-        # dashboard/dist/index.html and studio/dist/index.html. That
-        # leaves the working tree dirty, and GoReleaser refuses to
-        # release from a dirty tree. We can't simply commit the change
-        # either — that would advance HEAD past the release tag, and
-        # GoReleaser also rejects "tag not made against HEAD".
+        # dashboard/dist/index.html. That leaves the working tree dirty,
+        # and GoReleaser refuses to release from a dirty tree. We can't
+        # simply commit the change either — that would advance HEAD past
+        # the release tag, and GoReleaser also rejects "tag not made
+        # against HEAD".
         #
         # `git update-index --skip-worktree` tells git to ignore
-        # subsequent local changes to these tracked files. Vite still
-        # rewrites them on disk (so go:embed picks up the real UI), but
-        # `git status` stays clean. New files Vite produces under dist/
-        # are already covered by `dist/*` in each .gitignore, so they
-        # don't show as untracked either.
+        # subsequent local changes to that tracked file. Vite still
+        # rewrites it on disk (so go:embed picks up the real UI), but
+        # `git status` stays clean. New files Vite produces under
+        # dashboard/dist/ are already covered by `dist/*` in
+        # dashboard/.gitignore, so they don't show as untracked either.
         run: |
-          git update-index --skip-worktree dashboard/dist/index.html studio/dist/index.html
+          git update-index --skip-worktree dashboard/dist/index.html
 
       - name: Build dashboard
         # GoReleaser builds the engine binary which embeds dashboard/dist
         # via go:embed. The placeholder index.html ships in git for local
         # `go build` convenience; the real release embeds the Vite output.
+        # Studio used to ship as a second build step here — it's now
+        # folded into the dashboard at /playground, /builder,
+        # /deployments, /inspector and there is no separate Studio build.
         run: |
           pnpm -C dashboard install --frozen-lockfile
           pnpm -C dashboard build
-
-      - name: Build Studio
-        # Same story for studio/dist (mounted at /studio/* when --studio
-        # is passed). Without this step the released binary ships the
-        # placeholder Studio.
-        run: |
-          pnpm -C studio install --frozen-lockfile
-          pnpm -C studio build
 
       - name: Set up Go
         uses: actions/setup-go@v5
