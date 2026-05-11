@@ -576,7 +576,7 @@ func TestGetAssistantGraphHandler_WithGraph(t *testing.T) {
 	g, _ := workflow.NewGraph(a.ID(), "main", "1.0.0", "test graph", nodes, edges, map[string]interface{}{"key": "val"})
 	graphRepo.Graphs[g.ID()] = g
 
-	handler := NewGetAssistantGraphHandler(assistantRepo, graphRepo)
+	handler := NewGetAssistantGraphHandler(assistantRepo, graphRepo, nil)
 	result, err := handler.Handle(context.Background(), a.ID())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -599,7 +599,7 @@ func TestGetAssistantGraphHandler_NoGraphs(t *testing.T) {
 	a, _ := workflow.NewAssistant("test", "", "", "", nil, nil)
 	assistantRepo.Assistants[a.ID()] = a
 
-	handler := NewGetAssistantGraphHandler(assistantRepo, graphRepo)
+	handler := NewGetAssistantGraphHandler(assistantRepo, graphRepo, nil)
 	result, err := handler.Handle(context.Background(), a.ID())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -616,7 +616,7 @@ func TestGetAssistantGraphHandler_AssistantNotFound(t *testing.T) {
 	assistantRepo := mocks.NewAssistantRepository()
 	graphRepo := mocks.NewGraphRepository()
 
-	handler := NewGetAssistantGraphHandler(assistantRepo, graphRepo)
+	handler := NewGetAssistantGraphHandler(assistantRepo, graphRepo, nil)
 	_, err := handler.Handle(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for non-existent assistant")

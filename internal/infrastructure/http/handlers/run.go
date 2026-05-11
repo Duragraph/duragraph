@@ -755,20 +755,7 @@ func (h *RunHandler) ListRuns(c echo.Context) error {
 		})
 	}
 
-	// Convert to response format
-	responses := make([]dto.GetRunResponse, 0, len(runDTOs))
-	for _, runDTO := range runDTOs {
-		responses = append(responses, dto.GetRunResponse{
-			RunID:       runDTO.ID,
-			ThreadID:    runDTO.ThreadID,
-			AssistantID: runDTO.AssistantID,
-			Status:      runDTO.Status,
-			CreatedAt:   runDTO.CreatedAt,
-			UpdatedAt:   runDTO.UpdatedAt,
-		})
-	}
-
-	return c.JSON(http.StatusOK, responses)
+	return c.JSON(http.StatusOK, runDTOsToResponses(runDTOs))
 }
 
 // ListAllRuns handles GET /runs (list all runs across all threads)
@@ -786,20 +773,38 @@ func (h *RunHandler) ListAllRuns(c echo.Context) error {
 		})
 	}
 
-	// Convert to response format
+	return c.JSON(http.StatusOK, runDTOsToResponses(runDTOs))
+}
+
+// runDTOsToResponses converts the application-layer RunDTO list into
+// the over-the-wire GetRunResponse shape. The previous implementations
+// of ListRuns/ListAllRuns hand-copied just six fields, which silently
+// stripped Input/Output/StartedAt/CompletedAt/Error/Metadata from list
+// responses — the dashboard's chain view couldn't render the user
+// message that started each run. The DTO already carries those fields
+// (they're populated by query.GetRunHandler the same way), so the list
+// path should expose them too. The single-run endpoint and the list
+// endpoint now return the same shape.
+func runDTOsToResponses(runDTOs []*query.RunDTO) []dto.GetRunResponse {
 	responses := make([]dto.GetRunResponse, 0, len(runDTOs))
-	for _, runDTO := range runDTOs {
+	for _, r := range runDTOs {
 		responses = append(responses, dto.GetRunResponse{
-			RunID:       runDTO.ID,
-			ThreadID:    runDTO.ThreadID,
-			AssistantID: runDTO.AssistantID,
-			Status:      runDTO.Status,
-			CreatedAt:   runDTO.CreatedAt,
-			UpdatedAt:   runDTO.UpdatedAt,
+			RunID:       r.ID,
+			ThreadID:    r.ThreadID,
+			AssistantID: r.AssistantID,
+			Status:      r.Status,
+			Input:       r.Input,
+			Output:      r.Output,
+			Error:       r.Error,
+			Metadata:    r.Metadata,
+			Config:      r.Config,
+			CreatedAt:   r.CreatedAt,
+			StartedAt:   r.StartedAt,
+			CompletedAt: r.CompletedAt,
+			UpdatedAt:   r.UpdatedAt,
 		})
 	}
-
-	return c.JSON(http.StatusOK, responses)
+	return responses
 }
 
 // SubmitToolOutputs handles POST /runs/:id/submit_tool_outputs

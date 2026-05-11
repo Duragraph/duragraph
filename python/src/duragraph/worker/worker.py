@@ -204,7 +204,29 @@ class Worker:
         self._health_metrics["registration_attempts"] += 1
         max_retries = 5
 
-        graphs = [{"graph_id": g.graph_id, "definition": g.to_ir()} for g in self._graphs.values()]
+        # The control plane parses each entry as a flat
+        # `GraphDefinition` (see
+        # internal/infrastructure/http/dto/worker.go) — keys
+        # `graph_id`, `name`, `description`, `nodes`, `edges`,
+        # `entry_point` at the top level. Earlier revisions of this
+        # SDK nested the IR under `{"definition": g.to_ir()}` which
+        # the control plane silently ignored, so the worker-graphs
+        # endpoint returned empty topology and the dashboard's Graph
+        # tab stayed blank. Emit the flat shape here.
+        graphs = [
+            {
+                "graph_id": g.graph_id,
+                "name": getattr(g, "name", "") or g.graph_id,
+                "description": getattr(g, "description", "") or "",
+                "nodes": [
+                    {"id": name, "type": meta.node_type, "config": meta.config}
+                    for name, meta in g.nodes.items()
+                ],
+                "edges": [e.to_dict() for e in g.edges],
+                "entry_point": g.entrypoint,
+            }
+            for g in self._graphs.values()
+        ]
 
         payload = {
             "worker_id": self.name,
