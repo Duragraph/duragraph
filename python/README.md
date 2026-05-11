@@ -7,9 +7,9 @@
 [![License](https://img.shields.io/github/license/Duragraph/duragraph)](../LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/Duragraph/duragraph?style=social)](https://github.com/Duragraph/duragraph/stargazers)
 
-Python SDK for [DuraGraph](https://github.com/Duragraph/duragraph) - Reliable AI Workflow Orchestration.
+Python SDK for [DuraGraph](https://github.com/Duragraph/duragraph) — durable, replayable agent workflows.
 
-Build AI agents with decorators, deploy to a control plane, and get full observability out of the box.
+Define a graph with decorators, register it with the control plane, and get crash-safe execution, event-sourced replay, and live observability for free. Like Temporal for AI agents — in Python.
 
 ## Installation
 

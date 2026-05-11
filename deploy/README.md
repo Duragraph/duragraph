@@ -67,9 +67,9 @@ All deployments include:
 │                DuraGraph Stack              │
 ├─────────────────────────────────────────────┤
 │  API Server (Go/Echo)                       │
-│  - LangGraph Cloud-compatible API           │
+│  - REST + SSE API for runs, threads, ...    │
 │  - Event sourcing with CQRS                 │
-│  - GraphQL execution engine                 │
+│  - Graph execution engine                   │
 ├─────────────────────────────────────────────┤
 │  PostgreSQL 15                              │
 │  - Event store                              │
@@ -80,7 +80,7 @@ All deployments include:
 │  - Event bus                                │
 │  - Server-Sent Events (SSE)                 │
 ├─────────────────────────────────────────────┤
-│  Dashboard (Svelte)                         │
+│  Dashboard (React, embedded in binary)      │
 │  - Real-time workflow visualization         │
 │  - Run monitoring                           │
 └─────────────────────────────────────────────┘

@@ -77,7 +77,7 @@ nats://localhost:4222
 | ---- | ------------------ | ------------ |
 | 8080 | API Server         | Notify       |
 | 8081 | API Server (alt)   | Notify       |
-| 5173 | Dashboard (Svelte) | Notify       |
+| 3303 | Dashboard (React)  | Notify       |
 | 3000 | Docs/Website       | Notify       |
 | 5432 | PostgreSQL         | Silent       |
 | 4222 | NATS               | Silent       |

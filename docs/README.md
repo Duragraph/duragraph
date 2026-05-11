@@ -3,7 +3,7 @@
 [![Deploy](https://github.com/Duragraph/duragraph/actions/workflows/docs-deploy.yml/badge.svg)](https://github.com/Duragraph/duragraph/actions/workflows/docs-deploy.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Official documentation, blog, and landing page for DuraGraph - Reliable AI Workflow Orchestration.
+Official documentation, blog, and landing page for DuraGraph — durable, replayable agent workflows.
 
 **Live site:** [duragraph.ai](https://duragraph.ai)
 

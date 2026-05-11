@@ -15,7 +15,7 @@ Demonstrates human approval workflows using `@human_node` for content review bef
 
 ```bash
 DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
-  uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+  uv run --with-editable ../../../python \
   python main.py
 ```
 
