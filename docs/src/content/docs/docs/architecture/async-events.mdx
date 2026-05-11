@@ -3,9 +3,9 @@ title: Async Event Architecture
 description: NATS JetStream event taxonomy, multi-tenant Accounts, streams, and consumers. The canonical contract that every implementation follows.
 ---
 
-DuraGraph's runtime is event-driven. Every cross-process boundary — control plane to workers, workers back to the control plane, platform onboarding workflows, audit logging, real-time client streaming — is an event published to NATS JetStream. The complete contract is defined in [`duragraph-spec/async/asyncapi.yml`](https://github.com/duragraph/duragraph-spec/blob/main/async/asyncapi.yml) (AsyncAPI 3.0).
+DuraGraph's runtime is event-driven. Every cross-process boundary — control plane to workers, workers back to the control plane, platform onboarding workflows, audit logging, real-time client streaming — is an event published to NATS JetStream.
 
-This page is a guided tour of that spec. It is the most architecture-revealing artifact in the project: the [REST API](/docs/api-reference) tells you what clients can call, the AsyncAPI tells you how the system actually breathes.
+This page describes the live event taxonomy. The [REST API](/docs/api-reference) tells you what clients can call; the events on this page tell you how the system actually breathes between processes.
 
 ---
 
@@ -317,5 +317,3 @@ The contract is in the spec; the wiring is in the Go and Python implementations.
 - [Components](/docs/architecture/components) — Run aggregate, event store, graph engine
 - [Architecture Overview](/docs/architecture/overview) — Horizontal scaling and concurrency
 - [Security Model](/docs/architecture/security-model) — Auth, rate limiting, threat model
-- [`asyncapi.yml`](https://github.com/duragraph/duragraph-spec/blob/main/async/asyncapi.yml) — Full machine-readable spec
-- [`models/events.yml`](https://github.com/duragraph/duragraph-spec/blob/main/models/events.yml) — Canonical event payload schemas

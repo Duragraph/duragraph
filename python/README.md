@@ -133,11 +133,10 @@ The Python SDK lives in the [`duragraph`](https://github.com/Duragraph/duragraph
 
 | Path | Description |
 |------|-------------|
-| [`/`](https://github.com/Duragraph/duragraph) | Core engine (Go, embeds dashboard + Studio) |
+| [`/`](https://github.com/Duragraph/duragraph) | Core engine (Go, embeds the React dashboard incl. visual workflow editor) |
 | [`go-sdk/`](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK |
 | [`examples/`](https://github.com/Duragraph/duragraph/tree/main/examples) | Example projects (multi-language) |
 | [`docs/`](https://github.com/Duragraph/duragraph/tree/main/docs) | Documentation site source |
-| [`studio/`](https://github.com/Duragraph/duragraph/tree/main/studio) | Visual workflow editor |
 
 ## Contributing
 

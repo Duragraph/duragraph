@@ -69,13 +69,9 @@ dashboard/
 └── public/
 ```
 
-## Specifications
+## Design system
 
-The full design spec lives in [duragraph-spec/frontend/](https://github.com/Duragraph/duragraph-spec/tree/main/frontend):
-
-- `frontend.yml` — overview, stack, routing
-- `components.yml` — shadcn component inventory
-- `wireframes.yml` — ASCII wireframes for every screen
-- `design-system.yml` — tokens (zero border-radius, Space Grotesk, coral accent)
-- `user-flows.yml`, `user-journeys.yml` — UX flows
-- `graph-builder.yml`, `graph-visualization.yml` — visual editor specs (deferred)
+- Zero border-radius, Space Grotesk display font, coral accent
+- shadcn/ui primitives + sidebar-07 block; xyflow for graph viz
+- React 19 + TypeScript strict, no `any`
+- The visual workflow editor (formerly a standalone `studio/` app) is folded into this dashboard as of #190
