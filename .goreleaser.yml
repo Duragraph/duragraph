@@ -95,7 +95,7 @@ brews:
       token: "{{ .Env.INFISICAL_HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/Duragraph/duragraph"
-    description: "LangGraph-compatible AI workflow orchestration platform — durable, self-hostable, single binary."
+    description: "Temporal for AI agents — durable, replayable agent workflows on your infra. Self-hosted, event-sourced, single binary."
     license: "Apache-2.0"
     commit_author:
       name: duragraph-release-bot

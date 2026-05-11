@@ -22,5 +22,5 @@ jobs:
           username: ${{ secrets.INFISICAL_DOCKER_USERNAME }}
           password: ${{ secrets.INFISICAL_DOCKER_PASSWORD }}
           repository: ${{ secrets.INFISICAL_DOCKER_USERNAME }}/duragraph
-          short-description: "Open-source LangGraph Cloud-compatible AI workflow orchestration with event sourcing & CQRS"
+          short-description: "Temporal for AI agents — durable, replayable, event-sourced workflow orchestration. Self-hosted."
           enable-url-completion: true
