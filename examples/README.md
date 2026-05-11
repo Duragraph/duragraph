@@ -105,7 +105,6 @@ Examples live in the [`duragraph`](https://github.com/Duragraph/duragraph) monor
 | [`/`](https://github.com/Duragraph/duragraph) | Core engine (Go) |
 | [`python/`](https://github.com/Duragraph/duragraph/tree/main/python) | Python SDK — PyPI: [`duragraph`](https://pypi.org/project/duragraph/) |
 | [`go-sdk/`](https://github.com/Duragraph/duragraph/tree/main/go-sdk) | Go SDK — [`pkg.go.dev`](https://pkg.go.dev/github.com/duragraph/duragraph/go-sdk) |
-| [`studio/`](https://github.com/Duragraph/duragraph/tree/main/studio) | Visual workflow editor |
 | [`docs/`](https://github.com/Duragraph/duragraph/tree/main/docs) | Documentation site source |
 
 ## Documentation

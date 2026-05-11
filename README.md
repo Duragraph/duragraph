@@ -56,10 +56,9 @@ DuraGraph is a monorepo. The control plane, SDKs, dashboard, and docs all live h
 |------|------------|
 | `cmd/duragraph` | The control-plane binary — engine, embedded dashboard, dev-mode bootstrapper |
 | `internal/` | Domain / application / infrastructure layers (DDD + event sourcing + CQRS) |
-| `dashboard/` | React + TanStack Router + xyflow dashboard, embedded in the binary at build time |
+| `dashboard/` | React + TanStack Router + xyflow dashboard (incl. visual workflow editor), embedded in the binary at build time |
 | `python/` | Python worker SDK (`duragraph` on PyPI) |
 | `go-sdk/` | Go worker SDK |
-| `studio/` | Visual workflow editor (alpha) |
 | `docs/` | Astro Starlight documentation site |
 | `examples/` | Reference agents in Go and Python |
 | `deploy/` | Docker, SQL migrations, Helm charts |
@@ -135,7 +134,7 @@ What works today:
 - Python and Go worker SDKs
 - OpenTelemetry-friendly Prometheus metrics
 
-In flight (see [`spec/roadmap.yml`](spec/roadmap.yml)):
+In flight:
 
 - Per-node REST spans endpoint (currently SSE-only)
 - Multi-tenant + NATS Accounts isolation
@@ -153,7 +152,7 @@ task dev   # runs the engine + dashboard against a local Postgres + NATS
 task test  # unit + integration suite
 ```
 
-The spec is the source of truth — behavioural changes update [`spec/`](spec/) first, then the implementation. See [`CLAUDE.md`](CLAUDE.md) for the full development workflow.
+See [`CLAUDE.md`](CLAUDE.md) for the full development workflow.
 
 ## License
 

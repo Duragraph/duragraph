@@ -27,7 +27,5 @@ file-source format as the tenant migrations next door.
 ## Why this lives next to the engine code
 
 `go:embed` only reads files inside or below the package directory. The SQL
-files were originally at `deploy/sql/{platform,tenant}/` per the
-`duragraph-spec` `backend/development-guide.yml` convention, but to keep
-embedding straightforward they now live alongside the migrator. A follow-up
-update PR to `Duragraph/duragraph-spec` will revise the spec to match.
+files were originally at `deploy/sql/{platform,tenant}/`, but to keep
+embedding straightforward they now live alongside the migrator.

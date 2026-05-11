@@ -88,7 +88,6 @@ The docs site source lives in the [`duragraph`](https://github.com/Duragraph/dur
 | [`/`](https://github.com/Duragraph/duragraph)                            | Core engine (Go)          |
 | [`python/`](https://github.com/Duragraph/duragraph/tree/main/python)     | Python SDK                |
 | [`go-sdk/`](https://github.com/Duragraph/duragraph/tree/main/go-sdk)     | Go SDK                    |
-| [`studio/`](https://github.com/Duragraph/duragraph/tree/main/studio)     | Visual workflow editor    |
 | [`examples/`](https://github.com/Duragraph/duragraph/tree/main/examples) | Runnable example projects |
 
 ## Contributing
