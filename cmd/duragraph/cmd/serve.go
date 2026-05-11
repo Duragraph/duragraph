@@ -26,7 +26,6 @@ import (
 	authhandler "github.com/duragraph/duragraph/internal/infrastructure/http/handlers/auth"
 	platformhandler "github.com/duragraph/duragraph/internal/infrastructure/http/handlers/platform"
 	"github.com/duragraph/duragraph/internal/infrastructure/http/middleware"
-	"github.com/duragraph/duragraph/internal/infrastructure/http/studio"
 	"github.com/duragraph/duragraph/internal/infrastructure/mcp"
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging"
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
@@ -1191,18 +1190,6 @@ func runServe(_ *cobra.Command, _ []string) error {
 		)
 		platformHandler.Register(platformGroup)
 		fmt.Println("✅ Platform handlers registered at /api/platform/*")
-	}
-
-	// Embedded Studio UI at /studio/* — opt-in via DURAGRAPH_DEV_STUDIO
-	// (set by `duragraph dev --studio`). Mounted BEFORE the dashboard
-	// because dashboard.Register catches `/*` and would shadow /studio.
-	if os.Getenv("DURAGRAPH_DEV_STUDIO") == "true" {
-		if distFS, err := duragraph.StudioFS(); err == nil {
-			studio.Register(e, distFS)
-			fmt.Println("✅ Studio UI mounted at /studio/")
-		} else {
-			log.Printf("studio not available: %v", err)
-		}
 	}
 
 	// Embedded React dashboard. Must be registered after API routes so Echo's

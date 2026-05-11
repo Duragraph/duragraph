@@ -17,6 +17,10 @@ import {
   Users,
   Gauge,
   X,
+  Sparkles,
+  GitBranch,
+  Rocket,
+  Microscope,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -30,8 +34,18 @@ const navItems = [
   { icon: MessageSquare, label: "Threads", path: "/threads" },
 ]
 
+// Playground items: the developer/end-user surface ported from studio.
+// Distinct from the observability surface below — these let the user
+// build, run, and inspect agents interactively.
+const playgroundItems = [
+  { icon: Sparkles, label: "Playground", path: "/playground" },
+  { icon: GitBranch, label: "Builder", path: "/builder" },
+  { icon: Rocket, label: "Deployments", path: "/deployments" },
+]
+
 const observabilityItems = [
   { icon: Search, label: "Traces", path: "/traces" },
+  { icon: Microscope, label: "Inspector", path: "/inspector" },
   { icon: BarChart3, label: "Analytics", path: "/analytics" },
   { icon: DollarSign, label: "Costs", path: "/costs" },
 ]
@@ -119,6 +133,23 @@ export function Sidebar() {
         {/* Navigation */}
         <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
           {navItems.map((item) => (
+            <NavItem
+              key={item.path}
+              {...item}
+              isActive={currentPath === item.path}
+              collapsed={sidebarCollapsed && !mobileMenuOpen}
+            />
+          ))}
+
+          <Separator className="my-3" />
+
+          <div className={cn("px-3 py-2", sidebarCollapsed && !mobileMenuOpen && "hidden")}>
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Playground
+            </span>
+          </div>
+
+          {playgroundItems.map((item) => (
             <NavItem
               key={item.path}
               {...item}
