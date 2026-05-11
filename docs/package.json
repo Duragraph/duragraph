@@ -8,13 +8,11 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "validate-links": "node scripts/validate-links.mjs",
-    "prepare": "lefthook install"
+    "validate-links": "node scripts/validate-links.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",
     "@commitlint/config-conventional": "^19.6.0",
-    "lefthook": "^1.10.10",
     "prettier": "^3.4.2",
     "prettier-plugin-astro": "^0.14.1"
   },
