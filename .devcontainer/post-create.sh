@@ -18,9 +18,6 @@ go mod download
 echo "📦 Installing dashboard dependencies..."
 [ -d dashboard ] && (cd dashboard && pnpm install)
 
-echo "📦 Installing website dependencies..."
-[ -d website ] && (cd website && pnpm install)
-
 echo "📦 Installing docs dependencies..."
 [ -d docs ] && (cd docs && pnpm install)
 
@@ -121,33 +118,17 @@ else
     echo "ℹ️  GH_PAT not set, skipping GitHub CLI authentication"
 fi
 
-# Setup Act configuration
-echo "🎬 Setting up Act (GitHub Actions local runner)..."
-# task act:setup 2>/dev/null || echo "⚠️  Run 'task act:setup' manually to configure Act"
-
-# Verify Act installation
-if command -v act &> /dev/null; then
-    echo "✅ Act installed: $(act --version)"
-else
-    echo "⚠️  Act installation failed, run 'task act:install' to retry"
-fi
-
 echo ""
 echo "✅ Development environment ready!"
 echo ""
-echo "💡 PostgreSQL and NATS are already running via devcontainer!"
+echo "💡 PostgreSQL and NATS are running via devcontainer sidecars."
+echo "   Or run 'duragraph dev' for an embedded Postgres + NATS one-shot."
 echo ""
 echo "Quick commands:"
-echo "  task up          - Start all services"
-echo "  task dev         - Run API server in dev mode"
-echo "  task dashboard:dev - Run dashboard dev server"
-echo "  task docs:build  - Build docs + website"
-echo "  task test        - Run all tests"
-echo ""
-echo "GitHub Actions (local testing with Act):"
-echo "  task act:setup   - Setup Act configuration & secrets"
-echo "  task act:list    - List all workflows"
-echo "  task act:ci      - Run CI workflow locally"
-echo "  task conformance - Run LangGraph conformance tests"
-echo ""
-echo "  task --list      - See all available tasks"
+echo "  duragraph dev          - Engine + dashboard on :8081 (embedded data plane)"
+echo "  task dev               - Engine against the sidecar Postgres + NATS"
+echo "  task dashboard:dev     - Vite dev server on :3303"
+echo "  task gen:types         - Regenerate dashboard types from Go DTOs"
+echo "  task test              - Run all tests"
+echo "  task test:conformance  - API conformance suite"
+echo "  task --list            - See all available tasks"

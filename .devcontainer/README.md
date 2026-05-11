@@ -1,329 +1,247 @@
 # DuraGraph Development Container
 
-Complete development environment for DuraGraph with all tools pre-installed.
+A complete development environment for hacking on DuraGraph. Boots Postgres + NATS as sidecar services, pre-installs Go / Node / Python toolchains, and wires up the dashboard + docs build paths.
 
-## 🚀 What's Included
+## What's included
 
-### Languages & Runtimes
+### Languages and runtimes
 
-- **Go 1.25.4** - API server development
-- **Node.js 22.12** (via fnm) - Frontend development
-- **Python 3.12** (via uv) - Testing & tooling
+- **Go 1.25** — engine and Go SDK
+- **Node.js 22** (via fnm) — dashboard (React + Vite) and docs (Astro Starlight)
+- **Python 3.12** (via uv) — Python SDK and conformance tests
 
-### Package Managers
+### Package managers
 
-- **pnpm 9** - Fast, efficient Node.js package manager
-- **uv** - Ultra-fast Python package installer
-- **go modules** - Go dependency management
+- **pnpm** — Node.js package manager (dashboard, docs)
+- **uv** — Python package manager (never use `pip` directly)
+- **go modules** — Go dependency management
 
-### Development Tools
+### Development tools
 
-- **Task** - Task runner (replacement for Make)
-- **Act** - Run GitHub Actions locally
-- **GitHub CLI (gh)** - GitHub from the command line
-- **Docker-in-Docker** - Build and run Docker containers
-- **PostgreSQL client** - Database access
-- **Git** - Version control
+- **Task** — task runner (`Taskfile.yml` at the repo root)
+- **GitHub CLI (`gh`)** — branch / PR / release ops
+- **Docker-in-Docker** — build and run containers from inside the devcontainer
+- **PostgreSQL client** — `psql` against the sidecar Postgres
+- **Git** — with sensible defaults (rebase pulls, prune on fetch, `main` as default branch)
 
-### Go Tools
+### Go tools
 
-- **gopls** - Go language server
-- **delve (dlv)** - Go debugger
-- **golangci-lint** - Go linter
-- **goimports** - Import formatter
+- `gopls` — language server
+- `dlv` — debugger
+- `golangci-lint` — linter
+- `goimports` — import formatter
 
-### Python Tools
+### Python tools
 
-- **pre-commit** - Git hooks framework
-- **ruff** - Fast Python linter
-- **black** - Python formatter
-- **pytest** - Testing framework
+- `pre-commit` — runs the hooks declared in `.pre-commit-config.yaml`
+- `ruff` — linter + formatter
+- `pytest` — test runner
 
 ### Shell
 
-- **zsh** - Default shell with better experience
-- **bash** - Available as alternative
+- `zsh` (default), `bash` available
 
-## 📦 Services
+## Services
 
-The devcontainer includes these services via Docker Compose on a shared network (`duragraph-network`):
+Two sidecar services come up via Docker Compose on the `duragraph-network`:
 
-- **PostgreSQL 15** - Database (accessible at `db:5432` from devcontainer, `localhost:5432` from host)
-- **NATS JetStream** - Message broker (accessible at `nats:4222` from devcontainer, `localhost:4222` from host)
+- **PostgreSQL 15** — `db:5432` from inside the container, `localhost:5432` from your host
+- **NATS JetStream** — `nats:4222` from inside, `localhost:4222` from host
 
-### Connecting to Services
-
-From within the devcontainer:
 ```bash
-# PostgreSQL connection string
+# From inside the devcontainer
 postgresql://appuser:apppass@db:5432/appdb
-
-# NATS connection URL
 nats://nats:4222
-```
 
-From your host machine:
-```bash
-# PostgreSQL connection string
+# From your host
 postgresql://appuser:apppass@localhost:5432/appdb
-
-# NATS connection URL
 nats://localhost:4222
 ```
 
-## 🔌 Port Forwarding
+These are intended for the long-running dev workflow against external services. If you only need a one-shot self-contained run, `duragraph dev` boots **embedded** Postgres + NATS instead and you can ignore the sidecars entirely.
 
-| Port | Service            | Auto-forward |
-| ---- | ------------------ | ------------ |
-| 8080 | API Server         | Notify       |
-| 8081 | API Server (alt)   | Notify       |
-| 3303 | Dashboard (React)  | Notify       |
-| 3000 | Docs/Website       | Notify       |
-| 5432 | PostgreSQL         | Silent       |
-| 4222 | NATS               | Silent       |
-| 8222 | NATS Monitor       | Silent       |
+## Port forwarding
 
-## 🎨 VS Code Extensions
+| Port | Service                            | Auto-forward |
+| ---- | ---------------------------------- | ------------ |
+| 8081 | DuraGraph API + embedded dashboard | Notify       |
+| 3303 | Dashboard dev server (Vite)        | Notify       |
+| 4321 | Docs dev server (Astro)            | Notify       |
+| 5432 | PostgreSQL                         | Silent       |
+| 4222 | NATS                               | Silent       |
+| 8222 | NATS monitoring UI                 | Silent       |
 
-### Go Development
+## VS Code extensions
 
-- `golang.go` - Go language support
-- `ms-azuretools.vscode-docker` - Docker support
+### Backend
 
-### Python Development
+- `golang.go` — Go language support
+- `ms-python.python` + `ms-python.vscode-pylance` — Python
+- `ms-azuretools.vscode-docker` — Docker
 
-- `ms-python.python` - Python support
-- `ms-python.vscode-pylance` - Python language server
+### Frontend
 
-### Frontend Development
-
-- `svelte.svelte-vscode` - Svelte support
-- `dbaeumer.vscode-eslint` - ESLint
-- `esbenp.prettier-vscode` - Prettier formatter
-- `bradlc.vscode-tailwindcss` - Tailwind CSS
+- `dbaeumer.vscode-eslint` — ESLint
+- `esbenp.prettier-vscode` — Prettier
+- `bradlc.vscode-tailwindcss` — Tailwind CSS
 
 ### Productivity
 
-- `task.vscode-task` - Task runner integration
-- `anthropic.claude-code` - Claude Code AI assistant
-- `github.copilot` - GitHub Copilot
-- `github.copilot-chat` - Copilot chat
-- `eamodio.gitlens` - Git supercharged
+- `task.vscode-task` — Task runner integration
+- `anthropic.claude-code` — Claude Code
+- `github.copilot` + `github.copilot-chat` — Copilot
+- `eamodio.gitlens` — Git history / blame
 
-### CI/CD & Testing
+### Code quality
 
-- `nektos.act` - Run GitHub Actions locally
-- `github.vscode-github-actions` - GitHub Actions editor
+- `usernamehw.errorlens` — inline diagnostics
+- `gruntfuggly.todo-tree` — TODO scanner
+- `streetsidesoftware.code-spell-checker` — spell checker
 
-### Code Quality
+## First-time setup
 
-- `usernamehw.errorlens` - Inline error display
-- `gruntfuggly.todo-tree` - TODO comments tree
-- `streetsidesoftware.code-spell-checker` - Spell checker
+`post-create.sh` runs automatically on container build and:
 
-## 🚀 Quick Start
+1. Installs Go toolchain (`gopls`, `dlv`, `golangci-lint`, `goimports`) and `go mod download`s the engine
+2. `pnpm install`s the dashboard and docs
+3. Installs Playwright browsers if the dashboard pulls in `@playwright/test`
+4. Installs the pre-commit hooks (`pre-commit install` + `--hook-type commit-msg`)
+5. Sets git defaults (`pull.rebase=true`, `fetch.prune=true`, `init.defaultBranch=main`)
+6. Optionally configures git user, GPG signing, and `gh` auth from env vars (all optional — see Configuration below)
 
-### First Time Setup
-
-The devcontainer runs `post-create.sh` automatically, which:
-
-1. Installs Go dependencies
-2. Installs Node.js dependencies (dashboard, website, docs)
-3. Sets up pre-commit hooks
-4. Configures Act for local GitHub Actions testing
-5. Configures git defaults
-
-### Common Commands
+## Common commands
 
 ```bash
-# Development
-task dev              # Start API server
-task dashboard:dev    # Start dashboard dev server
-task website:dev      # Start website dev server
+# Run the engine in dev mode (embedded Postgres + NATS, dashboard served at :8081)
+duragraph dev
 
-# Testing
-task test             # Run all tests
-task test:unit        # Run unit tests only
-task conformance      # Run LangGraph conformance tests
+# Or against the sidecar Postgres + NATS:
+task dev
 
-# GitHub Actions (local)
-task act:setup        # Setup Act configuration
-task act:list         # List all workflows
-task act:ci           # Run CI workflow locally
-task act:job -- unit_go  # Run specific job
+# Dashboard
+task install:dashboard      # one-time pnpm install
+task dashboard:dev          # vite dev server on :3303
+task build:dashboard        # production build into dashboard/dist/
 
-# Building
-task build            # Build all components
-task build:server     # Build Go binary
-task build:dashboard  # Build dashboard for production
-task docs:build       # Build docs + website
+# Engine + types
+task build:duragraph        # build the engine binary to bin/duragraph
+task gen:types              # regenerate dashboard/src/types/generated.ts from Go DTOs (tygo)
+
+# Tests
+task test                   # full test suite
+task test:go                # Go unit tests
+task test:integration       # integration tests (real Postgres + NATS)
+task test:conformance       # API conformance suite
+task test:dashboard         # dashboard tests
+task test:e2e               # end-to-end suite
+task test:soak              # load / soak tests
+
+# Lint + format
+task lint                   # lint all (Go + dashboard)
+task lint:go
+task lint:dashboard
+task format                 # format all
+task format:go
+task format:dashboard
 
 # Docker
-task up               # Start all services
-task down             # Stop all services
-task logs             # View logs
-task health           # Check service health
+task docker:build           # build all images
+task docker:build:api       # just the engine image
 
-# Database
-task db:psql          # Connect to PostgreSQL
-task db:migrate       # Run migrations
-task db:reset         # Reset database
-
-# Code Quality
-task lint             # Lint all code
-task format           # Format all code
-task pre-commit       # Run pre-commit checks
-
-# Utilities
-task --list           # Show all available tasks
-task clean            # Clean build artifacts
+# Misc
+task health                 # health-check the API
+task clean                  # clean build artifacts
+task --list                 # full target list
 ```
 
-## 🎬 Testing GitHub Actions Locally
-
-The devcontainer includes **Act** for running GitHub Actions locally:
+Docs site has no Taskfile wrapper — run it directly from `docs/`:
 
 ```bash
-# Setup Act (creates .secrets and .env files)
-task act:setup
-
-# Edit secrets file (optional - for LLM API keys)
-nano .github/workflows/.secrets
-
-# List all workflows
-task act:list
-
-# Run full CI pipeline
-task act:ci
-
-# Run specific job
-task act:job -- unit_go
-
-# Dry run (preview what would run)
-task act:ci:dry
+cd docs
+pnpm dev          # astro dev on :4321
+pnpm build        # static build into docs/dist/
+pnpm preview      # serve the built site locally
 ```
 
-See [README.act.md](../README.act.md) for full Act guide.
+## Configuration
 
-## 🔧 Configuration
+### Environment variables (auto-set)
 
-### Environment Variables
+- `DOCKER_BUILDKIT=1` — BuildKit for Docker builds
+- `COMPOSE_DOCKER_CLI_BUILD=1` — BuildKit with Compose
+- `PATH` — includes Go, Node (fnm), Python (uv), and tool binaries
 
-The devcontainer sets these automatically:
+### Git (all optional)
 
-- `DOCKER_BUILDKIT=1` - Use BuildKit for Docker builds
-- `COMPOSE_DOCKER_CLI_BUILD=1` - Use BuildKit with Compose
-- `PATH` - Includes Go, Node, Python, and tool binaries
+Defaults to your host git config. Override per-devcontainer via env vars:
 
-### Git Configuration (All Optional)
+- `GIT_USER_NAME` — git user name
+- `GIT_USER_EMAIL` — git user email
+- `GPG_KEY_ID` + `GPG_PRIVATE_KEY` (base64) — GPG key for signed commits (maintainers only)
+- `ENABLE_GPG_SIGNING=true` — auto-sign every commit
+- `GH_PAT` — `gh` CLI auth token
 
-**For most users**: No setup needed! The devcontainer uses your existing git configuration.
+GPG signing is **not** required for contributing — these are entirely optional.
 
-**Optional customization** :
-
-- `GIT_USER_NAME` - Custom git name (optional - defaults to your host git config)
-- `GIT_USER_EMAIL` - Custom git email (optional - defaults to your host git config)
-- `GPG_KEY_ID` - GPG key for commit signing (optional - maintainers only)
-- `GPG_PRIVATE_KEY` - Base64-encoded GPG private key (optional - maintainers only)
-- `ENABLE_GPG_SIGNING` - Auto-sign all commits (optional - requires GPG configured)
-
-**Default settings** (applied to all users):
+### Default git settings applied to all users
 
 - Default branch: `main`
 - Pull strategy: `rebase`
 - Auto-prune on fetch
 
-**Fork-friendly design**: GPG signing is NOT required for contributing. All environment variables are optional and only affect YOUR devcontainer, not repository requirements.
+### Shell
 
-### Shell Configuration
+- Default: `zsh`
+- `fnm` (Fast Node Manager) auto-loaded in `.zshrc` and `.bashrc`
+- `uv` available on `PATH` via `~/.local/bin`
 
-- Default shell: `zsh`
-- fnm (Fast Node Manager) auto-loaded in `.zshrc` and `.bashrc`
-- Python via uv available in `~/.local/bin`
+## Workspace mounts
 
-## 📂 Workspace Mounts
+- `~/.claude` (host) → `/home/vscode/.claude` (container) — preserves Claude Code configuration across rebuilds.
 
-- `.claude` directory is mounted from host (`~/.claude` → `/home/vscode/.claude`)
-  - Preserves Claude Code configuration across rebuilds
-
-## 🔄 Rebuilding the Container
-
-If you need to rebuild (e.g., to update tools):
+## Rebuilding the container
 
 ```bash
-# From VS Code
-# 1. Open Command Palette (Cmd/Ctrl+Shift+P)
-# 2. Type: "Dev Containers: Rebuild Container"
+# From VS Code: Command Palette → "Dev Containers: Rebuild Container"
 
-# Or manually
+# Or manually:
 docker compose -f .devcontainer/docker-compose.yml down
 docker compose -f .devcontainer/docker-compose.yml up -d --build
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### Go modules not working
+**Go modules not resolving**
 
 ```bash
-go mod download
-go mod tidy
+go mod download && go mod tidy
 ```
 
-### Node/pnpm not found
+**Node / pnpm not found**
 
 ```bash
 eval "$(fnm env)"
-fnm install 22.12
+fnm install 22
 ```
 
-### Python not found
+**Python not found**
 
 ```bash
 uv python install 3.12
 ```
 
-### Act not working
+**Docker socket issues** — Docker-in-Docker is enabled; the socket should be at `/var/run/docker.sock`. If it's missing, rebuild the container.
+
+**Port already in use**
 
 ```bash
-# Verify installation
-act --version
-
-# Reinstall if needed
-task act:install
+sudo lsof -i :8081           # find the process
+duragraph dev --port 9000    # or override the engine port
 ```
 
-### Docker socket issues
-
-```bash
-# Docker-in-Docker is enabled, socket should be available at:
-ls -la /var/run/docker.sock
-
-# If issues persist, rebuild container
-```
-
-### Port already in use
-
-```bash
-# Check what's using the port
-sudo lsof -i :8080
-
-# Or use different port in Taskfile.yml
-```
-
-## 📚 Resources
+## Resources
 
 - [VS Code Dev Containers](https://code.visualstudio.com/docs/devcontainers/containers)
-- [Task Documentation](https://taskfile.dev/)
-- [Act Documentation](https://github.com/nektos/act)
-- [fnm (Fast Node Manager)](https://github.com/Schniz/fnm)
-- [uv (Python)](https://github.com/astral-sh/uv)
-
-## 🆘 Support
-
-- Check [Taskfile.yml](../Taskfile.yml) for available commands
-- See [README.act.md](../README.act.md) for Act usage
-- Review [.github/workflows/](../.github/workflows/) for CI/CD
-
----
-
-**Happy coding!** 🚀
+- [Task](https://taskfile.dev/) — see `Taskfile.yml` at the repo root for the canonical target list
+- [fnm](https://github.com/Schniz/fnm) — Node version manager
+- [uv](https://github.com/astral-sh/uv) — Python package manager
