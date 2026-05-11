@@ -118,11 +118,32 @@ __pycache__/
 GOVERNANCE.md
 PROJECT_OVERVIEW.md
 STRATEGY.md
+INFRASTRUCTURE.md
+TEST_COMMIT_STRATEGY.md
+TEST_COVERAGE_PLAN.md
+assign-ready-to-work.sh
 spec/
+spec-dummy/
 .e2e/go_worker/go_worker
 tests/e2e/go_worker/worker/go_worker
+tests/e2e/go_worker/go_worker
 
 
 # Crush IDE artifacts (per CLAUDE.md: never commit)
 .crush-lsp.json
 .crush/
+
+# Local dev artifacts (per-user; never commit)
+.air.toml
+.env.development
+.task/
+graphify-out/
+tmp/
+tasks/
+
+# Root-level compiled binary from `go build` without -o
+/server
+
+# Old standalone studio app — folded into dashboard/ as of #190.
+# Ignored so leftover working-tree files don't show up in git status.
+studio/
