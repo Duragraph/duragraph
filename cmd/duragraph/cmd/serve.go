@@ -816,7 +816,14 @@ func runServe(_ *cobra.Command, _ []string) error {
 	getAssistantSchemaHandler := query.NewGetAssistantSchemaHandler(assistantRepo, graphRepo)
 
 	// Initialize graph query handlers
-	getAssistantGraphHandler := query.NewGetAssistantGraphHandler(assistantRepo, graphRepo)
+	// `workerRepo` doubles as the WorkerGraphSource — the query handler
+	// uses its FindGraphDefinition() to resolve assistant.graph_id to
+	// the registered worker's graph topology when no in-app graph has
+	// been authored yet. This is the "engine resolves assistant →
+	// graph_id → worker-graphs store" path that closes the empty-Graph-
+	// tab gap shipped before the workflow.GraphRepository write path
+	// existed.
+	getAssistantGraphHandler := query.NewGetAssistantGraphHandler(assistantRepo, graphRepo, workerRepo)
 	getSubgraphsHandler := query.NewGetSubgraphsHandler(assistantRepo, graphRepo)
 
 	// Initialize application services

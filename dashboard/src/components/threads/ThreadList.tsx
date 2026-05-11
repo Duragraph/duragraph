@@ -9,7 +9,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
-import { MessageSquare, MoreHorizontal, Eye, Trash2 } from "lucide-react"
+import { MessageSquare, MoreHorizontal, Eye, Plus, Trash2 } from "lucide-react"
+import { CreateThreadDialog } from "@/components/threads/CreateThreadDialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,15 +69,22 @@ export function ThreadList({ showFilters = true }: ThreadListProps) {
 
   if (!threads || threads.length === 0) {
     return (
-      <Card className="p-12 text-center">
-        <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
-        <h3 className="text-lg font-semibold mb-2">
-          No threads yet
-        </h3>
-        <p className="text-muted-foreground mb-4">
-          Threads are created when you start a new conversation
-        </p>
-        <Button>Create Thread</Button>
+      <Card className="flex flex-col items-center gap-3 p-12 text-center">
+        <MessageSquare className="size-10 text-muted-foreground/40" />
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold">No threads yet</h3>
+          <p className="text-sm text-muted-foreground">
+            Threads are created when you start a new conversation.
+          </p>
+        </div>
+        <CreateThreadDialog
+          trigger={
+            <Button size="sm" className="mt-1">
+              <Plus className="size-4" />
+              New thread
+            </Button>
+          }
+        />
       </Card>
     )
   }

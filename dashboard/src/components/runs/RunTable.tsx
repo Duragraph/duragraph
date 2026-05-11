@@ -24,7 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { DeleteConfirmationDialog } from "@/components/ui/delete-confirmation-dialog"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type { Run } from "@/types/entities"
+import type { Run, RunStatus } from "@/types/entities"
 import { useRunsStream } from "@/hooks/useRunStream"
 import { SearchFilter } from "@/components/common/SearchFilter"
 import { toast } from "sonner"
@@ -216,7 +216,7 @@ function RunRow({ run }: RunRowProps) {
     <>
       <TableRow className="cursor-pointer hover:bg-muted/50">
         <TableCell>
-          <RunStatusBadge status={run.status} />
+          <RunStatusBadge status={run.status as RunStatus} />
         </TableCell>
         <TableCell>
           <Link

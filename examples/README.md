@@ -16,18 +16,18 @@ Real-world examples demonstrating [DuraGraph](https://github.com/Duragraph/durag
 
 1. **Start DuraGraph locally:**
    ```bash
-   cd docker-compose/local-dev
-   docker compose up -d
+   duragraph dev
+   # → engine + dashboard on http://localhost:8081, embedded Postgres + NATS
    ```
 
 2. **Run your first example:**
 
-   > Python examples are run with `uv` — never `pip install`, never `python -m venv`. The SDK is installed as an editable dep from the sibling `duragraph-python` checkout.
+   > Python examples are run with `uv` — never `pip install`, never `python -m venv`. The editable-install path below points at the in-monorepo SDK source (`python/`); if you only want to *run* the example, `uv add duragraph` from PyPI works too.
 
    ```bash
    cd python/01-hello-world
-   DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
-     uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+   DURAGRAPH_URL=http://localhost:8081 PYTHONUNBUFFERED=1 \
+     uv run --with-editable ../../../python \
      python main.py
    ```
 

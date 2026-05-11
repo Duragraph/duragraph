@@ -2,13 +2,36 @@ import { useRef, useEffect, useCallback, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useChatStore } from "@/stores/chat"
 import { useAssistants } from "@/api/assistants"
-import { useCreateThread } from "@/api/threads"
+import { useCreateThread, useThreads } from "@/api/threads"
 import { streamRun } from "@/lib/sse"
 import { ChatMessage } from "@/components/playground/ChatMessage"
 import { ChatInput } from "@/components/playground/ChatInput"
 import { NodeExecutionPanel } from "@/components/playground/NodeExecutionPanel"
 import { ApprovalDialog } from "@/components/playground/ApprovalDialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Separator } from "@/components/ui/separator"
 import type { Message } from "@/types/entities"
+
+// Sentinel value for the "new thread" option. Radix's Select disallows
+// an empty-string value because it conflicts with the cleared state;
+// we serialise the picker's "new thread" intent as this constant and
+// translate at the boundary before calling setThread.
+const NEW_THREAD_VALUE = "__new__"
+const NO_ASSISTANT_VALUE = "__none__"
 
 // Playground — the chat playground ported from studio. Distinct from
 // `/threads/:threadId` (which inspects a persisted thread): playground
@@ -41,10 +64,19 @@ function PlaygroundPage() {
     setSSEStatus,
   } = useChatStore()
 
-  // Inline assistant picker (studio originally drove this from its
-  // sidebar; the dashboard sidebar is observability-shaped so we host
-  // the selector inside the page).
+  // Inline assistant + thread pickers (studio originally drove these
+  // from its sidebar; the dashboard sidebar is observability-shaped so
+  // we host the selectors inside the page).
+  //
+  // Thread selection: "" = new thread (created lazily on first message
+  // via createThread.mutateAsync). An existing thread_id resumes that
+  // conversation; the chat-store's setThread() clears local messages
+  // so the page re-renders empty — re-fetching prior messages from the
+  // server would need a /threads/{id}/messages call which is out of
+  // scope for the picker bring-up.
   const { data: assistants } = useAssistants()
+  const { data: threadsResp } = useThreads()
+  const threads = threadsResp ?? []
   const createThread = useCreateThread()
   const scrollRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -140,39 +172,88 @@ function PlaygroundPage() {
   return (
     <div className="flex h-full -m-6">
       <div className="flex flex-1 flex-col">
-        {/* Assistant picker + SSE status bar */}
-        <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-4 py-2">
-          <div className="flex items-center gap-2">
-            <label htmlFor="assistant" className="text-xs text-muted-foreground">
-              Assistant:
-            </label>
-            <select
-              id="assistant"
-              value={selectedAssistantId ?? ""}
-              onChange={(e) => setAssistant(e.target.value || null)}
-              className="border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">— select —</option>
-              {assistants?.map((a) => (
-                <option key={a.assistant_id} value={a.assistant_id}>
-                  {a.name || a.assistant_id.slice(0, 8)}
-                </option>
-              ))}
-            </select>
+        {/* Assistant + Thread pickers + SSE status bar */}
+        <div className="flex items-center justify-between gap-3 border-b bg-card px-4 py-3">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="assistant" className="text-xs">
+                Assistant
+              </Label>
+              <Select
+                value={selectedAssistantId ?? NO_ASSISTANT_VALUE}
+                onValueChange={(v) =>
+                  setAssistant(v === NO_ASSISTANT_VALUE ? null : v)
+                }
+              >
+                <SelectTrigger id="assistant" size="sm" className="w-[200px]">
+                  <SelectValue placeholder="Select assistant" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ASSISTANT_VALUE}>
+                    — select —
+                  </SelectItem>
+                  {assistants?.map((a) => (
+                    <SelectItem key={a.assistant_id} value={a.assistant_id}>
+                      {a.name || a.assistant_id.slice(0, 8)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Separator orientation="vertical" className="h-6" />
+
+            <div className="flex items-center gap-2">
+              <Label htmlFor="thread" className="text-xs">
+                Thread
+              </Label>
+              <Select
+                value={selectedThreadId ?? NEW_THREAD_VALUE}
+                onValueChange={(v) =>
+                  setThread(v === NEW_THREAD_VALUE ? null : v)
+                }
+              >
+                <SelectTrigger id="thread" size="sm" className="w-[240px]">
+                  <SelectValue placeholder="New thread" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NEW_THREAD_VALUE}>
+                    — new thread —
+                  </SelectItem>
+                  {threads.map((t) => (
+                    <SelectItem key={t.thread_id} value={t.thread_id}>
+                      {t.thread_id.slice(0, 8)}
+                      {t.updated_at &&
+                        ` · ${new Date(t.updated_at).toLocaleString()}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+
           {sseStatus !== "closed" && (
-            <span className="flex items-center gap-2 text-xs">
+            <Badge
+              variant="outline"
+              className={
+                sseStatus === "open"
+                  ? "border-green-500/50 text-green-600 dark:text-green-400"
+                  : sseStatus === "connecting"
+                    ? "border-yellow-500/50 text-yellow-600 dark:text-yellow-400"
+                    : "border-destructive/50 text-destructive"
+              }
+            >
               <span
-                className={`inline-block h-2 w-2 ${
+                className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${
                   sseStatus === "open"
                     ? "bg-green-500"
                     : sseStatus === "connecting"
                       ? "bg-yellow-500 animate-pulse"
-                      : "bg-red-500"
+                      : "bg-destructive"
                 }`}
               />
-              <span className="text-muted-foreground">{sseStatus}</span>
-            </span>
+              {sseStatus}
+            </Badge>
           )}
         </div>
 
@@ -180,14 +261,18 @@ function PlaygroundPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-3xl space-y-4">
             {messages.length === 0 && !isStreaming && (
-              <div className="py-20 text-center text-muted-foreground">
-                <p className="text-lg font-medium">DuraGraph Playground</p>
-                <p className="mt-2 text-sm">
-                  {selectedAssistantId
-                    ? "Send a message to start a conversation"
-                    : "Select an assistant from the sidebar to begin"}
-                </p>
-              </div>
+              <Card className="mx-auto mt-20 max-w-md border-dashed bg-transparent shadow-none">
+                <CardHeader className="text-center">
+                  <CardTitle className="text-lg">
+                    DuraGraph Playground
+                  </CardTitle>
+                  <CardDescription>
+                    {selectedAssistantId
+                      ? "Send a message to start a conversation."
+                      : "Pick an assistant above to begin."}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
             )}
 
             {messages.map((msg, i) => (

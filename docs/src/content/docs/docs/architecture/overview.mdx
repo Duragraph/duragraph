@@ -9,8 +9,8 @@ This document provides a high-level overview of the components and data flows in
 
 ## Components
 
-- **API Server (`cmd/server`)**
-  Exposes REST + SSE endpoints. Implements LangGraph Cloud-compatible API. Handles request validation, rate limiting, and error responses.
+- **API Server (`cmd/duragraph`)**
+  Exposes the DuraGraph REST + SSE API surface (assistants, threads, runs, graphs, stream). Handles request validation, rate limiting, and error responses.
 
 - **Command Handlers (`internal/application/command`)**
   Process write operations following CQRS. Create and modify domain aggregates, emitting domain events.

@@ -1,4 +1,7 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from "react"
+import { Loader2, SendHorizontal } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 
 interface ChatInputProps {
   onSend: (content: string) => void
@@ -6,19 +9,34 @@ interface ChatInputProps {
   isStreaming: boolean
 }
 
+// Composed from shadcn primitives — <Textarea> for the message body
+// (auto-grows to ~6 rows of content) and <Button> for the send action.
+// Enter sends; Shift+Enter inserts a newline (matches the studio
+// behaviour the playground inherits).
 export function ChatInput({ onSend, disabled, isStreaming }: ChatInputProps) {
-  const [value, setValue] = useState('')
+  const [value, setValue] = useState("")
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-resize: bump the textarea height to fit content up to a cap
+  // so a multi-paragraph paste isn't squashed into a single row, but a
+  // huge blob of text doesn't shove the messages list off-screen.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, 192)}px`
+  }, [value])
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
     onSend(trimmed)
-    setValue('')
+    setValue("")
   }, [value, disabled, onSend])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault()
         handleSubmit()
       }
@@ -26,32 +44,44 @@ export function ChatInput({ onSend, disabled, isStreaming }: ChatInputProps) {
     [handleSubmit],
   )
 
+  const placeholder = disabled
+    ? isStreaming
+      ? "Waiting for response…"
+      : "Select an assistant to start"
+    : "Type your message… (Enter to send, Shift+Enter for newline)"
+
   return (
-    <div className="border-t border-border p-4">
-      <div className="mx-auto flex max-w-3xl gap-2">
-        <textarea
+    <div className="border-t bg-background p-4">
+      <form
+        className="mx-auto flex max-w-3xl items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          handleSubmit()
+        }}
+      >
+        <Textarea
+          ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={
-            disabled
-              ? isStreaming
-                ? 'Waiting for response...'
-                : 'Select an assistant to start'
-              : 'Type your message...'
-          }
+          placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className="flex-1 resize-none border border-input bg-background px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          className="min-h-10 resize-none"
         />
-        <button
-          onClick={handleSubmit}
+        <Button
+          type="submit"
+          size="icon"
           disabled={disabled || !value.trim()}
-          className="bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          aria-label="Send message"
         >
-          Send
-        </button>
-      </div>
+          {isStreaming ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <SendHorizontal className="size-4" />
+          )}
+        </Button>
+      </form>
     </div>
   )
 }

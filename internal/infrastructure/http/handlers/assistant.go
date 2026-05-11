@@ -106,6 +106,7 @@ func (h *AssistantHandler) Create(c echo.Context) error {
 
 	return c.JSON(http.StatusCreated, dto.CreateAssistantResponse{
 		AssistantID:  assistantID,
+		GraphID:      req.GraphID,
 		Name:         req.Name,
 		Description:  req.Description,
 		Model:        req.Model,
@@ -128,6 +129,7 @@ func (h *AssistantHandler) Get(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, dto.AssistantResponse{
 		ID:           assistant.ID(),
+		GraphID:      assistant.GraphID(),
 		Name:         assistant.Name(),
 		Description:  assistant.Description(),
 		Model:        assistant.Model(),
@@ -168,6 +170,7 @@ func (h *AssistantHandler) List(c echo.Context) error {
 	for i, assistant := range assistants {
 		response[i] = dto.AssistantResponse{
 			ID:           assistant.ID(),
+			GraphID:      assistant.GraphID(),
 			Name:         assistant.Name(),
 			Description:  assistant.Description(),
 			Model:        assistant.Model(),

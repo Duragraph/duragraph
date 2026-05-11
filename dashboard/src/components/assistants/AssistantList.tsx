@@ -186,7 +186,7 @@ function AssistantCard({ assistant }: AssistantCardProps) {
             </p>
             <div className="mt-4 pt-4 border-t">
               <p className="text-xs text-muted-foreground">
-                Created {new Date(assistant.created_at * 1000).toLocaleDateString()}
+                Created {new Date(assistant.created_at).toLocaleDateString()}
               </p>
             </div>
           </CardContent>

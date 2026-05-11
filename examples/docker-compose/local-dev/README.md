@@ -6,8 +6,7 @@ Complete local development environment with DuraGraph and all dependencies.
 
 | Service | Port | Description |
 |---------|------|-------------|
-| DuraGraph API | 8081 | Control plane REST API |
-| DuraGraph Studio | 3000 | Interactive UI for agent interaction |
+| DuraGraph | 8081 | Control plane REST API + embedded dashboard (same origin) |
 | PostgreSQL | 5432 | Event store and projections |
 | NATS JetStream | 4222 | Message broker |
 | NATS Monitoring | 8222 | NATS HTTP monitoring |
@@ -45,8 +44,7 @@ docker compose --profile with-redis up -d
 
 ## Accessing Services
 
-- **DuraGraph Studio:** http://localhost:3000 (Interactive UI)
-- **DuraGraph API:** http://localhost:8081
+- **DuraGraph API + Dashboard:** http://localhost:8081 (dashboard is embedded; same origin as the API)
 - **Health Check:** http://localhost:8081/health
 - **Metrics:** http://localhost:9090/metrics
 - **NATS Monitor:** http://localhost:8222

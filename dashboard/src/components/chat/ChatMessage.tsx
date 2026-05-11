@@ -43,7 +43,7 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
           </span>
           {message.created_at !== undefined && (
             <span className="text-xs text-muted-foreground">
-              {new Date(message.created_at * 1000).toLocaleTimeString()}
+              {new Date(message.created_at).toLocaleTimeString()}
             </span>
           )}
           {isStreaming && (

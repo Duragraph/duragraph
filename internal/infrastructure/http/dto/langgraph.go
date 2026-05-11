@@ -101,9 +101,13 @@ type CreateAssistantRequest struct {
 	Context      []map[string]interface{} `json:"context,omitempty"`
 }
 
-// CreateAssistantResponse represents the response from creating an assistant
+// CreateAssistantResponse represents the response from creating an assistant.
+// `graph_id` echoes the request so clients (dashboard, SDKs) can confirm
+// the assistant was bound to the expected registered graph without
+// re-fetching via GET.
 type CreateAssistantResponse struct {
 	AssistantID  string                   `json:"assistant_id"`
+	GraphID      string                   `json:"graph_id,omitempty"`
 	Name         string                   `json:"name"`
 	Description  string                   `json:"description,omitempty"`
 	Model        string                   `json:"model,omitempty"`

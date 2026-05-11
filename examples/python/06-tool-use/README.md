@@ -22,7 +22,7 @@ Demonstrates how to define and use tools with DuraGraph's `@tool` decorator and 
 
    ```bash
    DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
-     uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+     uv run --with-editable ../../../python \
      python main.py
    ```
 

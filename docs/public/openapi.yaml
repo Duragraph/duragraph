@@ -3,8 +3,9 @@ info:
   title: DuraGraph API
   version: 1.0.0
   description: |
-    DuraGraph is a LangGraph Cloud-compatible API for AI workflow orchestration.
-    This specification documents all Phase 1 endpoints for assistant, thread, and run management.
+    DuraGraph is a durable, event-sourced API for AI workflow orchestration —
+    self-hosted, replayable, observable. This specification documents the
+    REST + SSE endpoints for assistant, thread, run, and graph management.
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0

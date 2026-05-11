@@ -5,7 +5,7 @@ description: Open-source AI workflow control plane built for production
 
 import { Badge } from '@astrojs/starlight/components';
 
-<Badge text="v0.2.1" variant="success" /> <Badge text="Apache-2.0" variant="note" />
+<Badge text="v0.7.2" variant="success" /> <Badge text="Apache-2.0" variant="note" />
 
 ## What is DuraGraph?
 
@@ -37,7 +37,7 @@ This architecture gives you **deterministic execution**, **point-in-time state r
 
 ```mermaid
 flowchart LR
-  client["Client SDKs<br/>Python · Go · TypeScript"]
+  client["Client SDKs<br/>Python · Go"]
   api[API Layer]
   commands[Commands / Queries]
   engine[Graph Engine]
@@ -55,10 +55,6 @@ flowchart LR
 
 - Providing a custom LLM runtime (we integrate with existing providers — OpenAI, Anthropic, any HTTP-compatible model).
 - Becoming a full-featured cloud platform (our scope is orchestration, not hosting).
-
-## LangGraph Compatibility
-
-DuraGraph implements a compatibility layer with LangGraph Cloud APIs. If you have existing LangGraph workflows, see the [migration guide](/docs/user-guide/tutorials/langgraph-migration) for a step-by-step walkthrough.
 
 ## Success Metrics
 

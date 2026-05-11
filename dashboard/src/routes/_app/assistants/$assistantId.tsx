@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type { Assistant, Run, Graph } from "@/types/entities"
+import type { Assistant, Run, RunStatus, Graph } from "@/types/entities"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -55,7 +55,7 @@ function AssistantDetailPage() {
   const { data: graph, isLoading: isGraphLoading } = useQuery({
     queryKey: ["assistant-graph", assistantId],
     queryFn: () => api.get<Graph>(`/assistants/${assistantId}/graph`),
-    enabled: !!assistant?.graph_id,
+    enabled: !!assistantId,
   })
 
   if (isLoading) {
@@ -201,11 +201,11 @@ function AssistantDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Created</span>
-                  <span>{new Date(assistant.created_at * 1000).toLocaleDateString()}</span>
+                  <span>{new Date(assistant.created_at).toLocaleDateString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Updated</span>
-                  <span>{new Date(assistant.updated_at * 1000).toLocaleDateString()}</span>
+                  <span>{new Date(assistant.updated_at).toLocaleDateString()}</span>
                 </div>
               </CardContent>
             </Card>
@@ -232,7 +232,7 @@ function AssistantDetailPage() {
                             {new Date(run.created_at).toLocaleString()}
                           </div>
                         </div>
-                        <RunStatusBadge status={run.status} />
+                        <RunStatusBadge status={run.status as RunStatus} />
                       </Link>
                     ))}
                   </div>
@@ -326,7 +326,7 @@ function AssistantDetailPage() {
                       <Badge variant="default">v{assistant.version}</Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {new Date(assistant.created_at * 1000).toLocaleDateString()}
+                      {new Date(assistant.created_at).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
                       <span className="text-xs text-muted-foreground">Current</span>
@@ -373,7 +373,7 @@ function AssistantDetailPage() {
                           {run.thread_id.slice(0, 12)}...
                         </TableCell>
                         <TableCell>
-                          <RunStatusBadge status={run.status} />
+                          <RunStatusBadge status={run.status as RunStatus} />
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {new Date(run.created_at).toLocaleString()}

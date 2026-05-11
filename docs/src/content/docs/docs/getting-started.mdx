@@ -1,121 +1,97 @@
 ---
 title: Quick Start
-description: Get up and running with DuraGraph in 5 minutes
+description: Get DuraGraph running and execute your first workflow in 60 seconds.
 ---
 
-Get DuraGraph running locally and execute your first workflow.
+DuraGraph ships as a single binary with embedded PostgreSQL and NATS — no infrastructure to provision, no `docker compose up`.
 
-## Prerequisites
+## 1. Install
 
-- Docker and Docker Compose
-- Git
-- [Task](https://taskfile.dev/) (optional, for convenience commands)
-
-## 1. Start DuraGraph
-
-Option A — Clone and run from source:
+Pick whichever fits your environment:
 
 ```bash
-git clone https://github.com/Duragraph/duragraph.git
-cd duragraph
-task up
+# Homebrew (macOS, Linux)
+brew install Duragraph/tap/duragraph
+
+# One-line install script
+curl -fsSL https://duragraph.ai/install.sh | sh
+
+# From Go
+go install github.com/Duragraph/duragraph/cmd/duragraph@latest
 ```
 
-Option B — Pull the Docker image directly:
+Or download a prebuilt binary from the [releases page](https://github.com/Duragraph/duragraph/releases).
+
+## 2. Run
 
 ```bash
-docker pull ghcr.io/duragraph/duragraph:0.2.1
+duragraph dev
 ```
 
-See [Self-Hosted Installation](/docs/user-guide/installation/self-hosted) for full Docker Compose and Kubernetes guides.
+That's it. The binary boots an embedded PostgreSQL + NATS, starts the engine, and serves the dashboard from the same port:
 
-This starts:
+- **API** — `http://localhost:8081`
+- **Dashboard** — `http://localhost:8081` (same origin; SPA routing)
+- **Bootstrap admin** — credentials are printed on first start; sign in with those.
 
-- **API Server** (port 8081) — REST API and SSE streaming
-- **PostgreSQL** — Event store and projections
-- **NATS JetStream** — Event streaming
-- **Dashboard** (port 3000) — Workflow monitoring UI
+## 3. Run your first workflow
 
-Verify services are running:
+Open `http://localhost:8081`, sign in, and head to **Playground**. Pick a registered assistant, send a message, and watch the workflow execute live: each node lighting up as it runs, the full graph topology, and a replayable event log under **Traces**.
 
-```bash
-task health
-```
+For richer examples — RAG, tool-using agents, document processing, evals — browse the [`examples/`](https://github.com/Duragraph/duragraph/tree/main/examples) directory. Each example runs against `duragraph dev` out of the box.
 
-## 2. Create Your First Workflow
+## 4. Hit the API directly
 
-Create an assistant:
+If you'd rather drive DuraGraph from your own code, the headline REST endpoints are:
 
 ```bash
+# Create an assistant
 curl -X POST http://localhost:8081/api/v1/assistants \
   -H "Content-Type: application/json" \
-  -d '{"name": "hello-assistant", "graph_schema": {}}'
-```
+  -d '{"name": "hello-assistant", "graph_id": "hello_world"}'
 
-Create a thread:
-
-```bash
+# Create a thread
 curl -X POST http://localhost:8081/api/v1/threads \
   -H "Content-Type: application/json" \
   -d '{}'
-```
 
-Create a run (replace `<thread_id>` and `<assistant_id>` with values from above):
-
-```bash
-curl -X POST http://localhost:8081/api/v1/runs \
+# Kick off a run on the thread
+curl -X POST http://localhost:8081/api/v1/threads/<thread_id>/runs \
   -H "Content-Type: application/json" \
   -d '{
-    "thread_id": "<thread_id>",
     "assistant_id": "<assistant_id>",
     "input": {"message": "Hello!"}
   }'
+
+# Stream execution events live (SSE)
+curl -N http://localhost:8081/api/v1/threads/<thread_id>/runs/<run_id>/stream
 ```
 
-## 3. Monitor Your Workflow
+Full API reference: [API docs](/docs/api-reference/rest-api).
 
-Open the Dashboard at [http://localhost:3000](http://localhost:3000) to:
+## Next steps
 
-- View workflow execution logs
-- Monitor run status in real-time
-- Debug failed runs
-- Explore workflow graphs
-
-## 4. Stream Events
-
-Subscribe to real-time updates for a run:
-
-```bash
-curl -N "http://localhost:8081/api/v1/stream?run_id=<run_id>"
-```
-
-## Next Steps
-
-- **[Self-Hosted Installation](/docs/user-guide/installation/self-hosted)** — Production deployment
-- **[First Workflow Tutorial](/docs/user-guide/tutorials/first-workflow)** — Build a complete workflow
-- **[LangGraph Migration](/docs/user-guide/tutorials/langgraph-migration)** — Migrate from LangGraph Cloud
-- **[Architecture Overview](/docs/architecture/overview)** — Understand the system design
+- **[Python SDK](/docs/sdk/python)** — Register graphs from Python with the `@Graph` / `@node` decorators.
+- **[Go SDK](/docs/sdk/go)** — Same model with typed structs and interfaces.
+- **[Architecture Overview](/docs/architecture/overview)** — Why event sourcing + CQRS for agent workflows.
+- **[Self-Hosted Installation](/docs/user-guide/installation/self-hosted)** — Production deployment with external Postgres + NATS.
 
 ## Troubleshooting
 
-**Services won't start?**
+**Port already in use?** `duragraph dev` defaults to `:8081`. Override with `--port 9000` (or whatever).
 
 ```bash
-# Check service status
-docker compose ps
-
-# View logs
-docker compose logs api
+duragraph dev --port 9000
 ```
 
-**Port already in use?**
+**Need to wipe the embedded data plane?** It lives under a data directory (defaults to a per-user XDG path). Pass `--data-dir /tmp/duragraph` for a throwaway run, then `rm -rf /tmp/duragraph` to reset.
+
+**Running on a remote host?** Bind to `0.0.0.0` and add SSH port forwarding from your laptop:
 
 ```bash
-# Find what's using the port
-lsof -i :8081
-
-# Stop all services and restart
-task down && task up
+duragraph dev --host 0.0.0.0
+# On your laptop:
+ssh -L 8081:localhost:8081 vps-host
 ```
 
-Need help? [Join our community](https://github.com/Duragraph/duragraph/discussions) or [report an issue](https://github.com/Duragraph/duragraph/issues).
+Need help? [Join the discussions](https://github.com/Duragraph/duragraph/discussions) or [open an issue](https://github.com/Duragraph/duragraph/issues).

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type { Thread, Run, Message } from "@/types/entities"
+import type { Thread, Run, RunStatus, Message } from "@/types/entities"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -351,7 +351,7 @@ function ThreadDetailPage() {
                           {run.assistant_id.slice(0, 12)}...
                         </TableCell>
                         <TableCell>
-                          <RunStatusBadge status={run.status} />
+                          <RunStatusBadge status={run.status as RunStatus} />
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {new Date(run.created_at).toLocaleString()}

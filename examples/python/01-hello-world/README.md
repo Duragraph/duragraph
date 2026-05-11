@@ -20,11 +20,11 @@ The simplest DuraGraph example: a worker that registers a two-node graph with th
 
 > **Always use `uv` — never `pip install`, never `python -m venv`, never `source .venv/bin/activate`.**
 
-The Python SDK lives in the sibling repo `duragraph-python/`. We install it as an editable dep via `uv run`:
+The Python SDK lives in the monorepo at `python/`. We install it as an editable dep via `uv run` (the relative path below walks up to the repo root and back down into `python/`):
 
 ```bash
 DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
-  uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+  uv run --with-editable ../../../python \
   python main.py
 ```
 
@@ -75,9 +75,9 @@ curl -s http://localhost:18081/api/v1/workers | jq
 ### 3. Start the Python worker (in pane A)
 
 ```bash
-cd /home/qwe/platform/duragraph-org/duragraph-examples/python/01-hello-world
+cd examples/python/01-hello-world
 DURAGRAPH_URL=http://localhost:18081 PYTHONUNBUFFERED=1 \
-  uv run --with-editable /home/qwe/platform/duragraph-org/duragraph-python \
+  uv run --with-editable ../../../python \
   python main.py
 ```
 

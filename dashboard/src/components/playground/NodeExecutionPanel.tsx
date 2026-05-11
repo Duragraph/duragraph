@@ -1,11 +1,35 @@
-import type { NodeExecution } from '@/types/entities'
+import {
+  Activity,
+  Bot,
+  CircuitBoard,
+  GitBranch,
+  Wrench,
+  User as UserIcon,
+  type LucideIcon,
+} from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { cn } from "@/lib/utils"
+import type { NodeExecution } from "@/types/entities"
 
-const NODE_ICONS: Record<string, string> = {
-  function: 'fn',
-  llm: 'AI',
-  tool: 'T',
-  router: 'R',
-  human: 'H',
+// Maps the engine's node_type string to a lucide icon. Falls back to
+// `Activity` for anything unrecognised so the panel never shows a
+// blank tile when a new node type lands before the icon map updates.
+const NODE_ICON: Record<string, LucideIcon> = {
+  function: CircuitBoard,
+  llm: Bot,
+  tool: Wrench,
+  router: GitBranch,
+  human: UserIcon,
+}
+
+const STATUS_STYLES: Record<NodeExecution["status"], string> = {
+  started:
+    "border-yellow-500/40 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300",
+  completed:
+    "border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-300",
+  failed: "border-destructive/40 bg-destructive/10 text-destructive",
 }
 
 interface NodeExecutionPanelProps {
@@ -14,45 +38,61 @@ interface NodeExecutionPanelProps {
 
 export function NodeExecutionPanel({ executions }: NodeExecutionPanelProps) {
   return (
-    <div className="w-72 border-l border-border overflow-y-auto bg-card">
-      <div className="border-b border-border p-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+    <Card className="w-72 rounded-none border-l-0 border-y-0 border-r-0 p-0 gap-0 shadow-none">
+      <CardHeader className="border-b py-3 px-4">
+        <CardTitle className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <Activity className="size-3.5" />
           Execution
-        </h3>
-      </div>
-      <div className="p-3 space-y-2">
-        {executions.map((exec, i) => (
-          <div
-            key={`${exec.node_id}-${i}`}
-            className="flex items-start gap-2 border border-border p-2"
-          >
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center bg-muted text-[10px] font-mono font-bold">
-              {NODE_ICONS[exec.node_type] ?? 'fn'}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-medium truncate">
-                  {exec.node_id}
-                </span>
-                <span
-                  className={`inline-block h-1.5 w-1.5 shrink-0 ${
-                    exec.status === 'completed'
-                      ? 'bg-green-500'
-                      : exec.status === 'started'
-                        ? 'bg-yellow-500 animate-pulse'
-                        : 'bg-red-500'
-                  }`}
-                />
-              </div>
-              {exec.error && (
-                <p className="mt-0.5 text-[10px] text-red-600 truncate">
-                  {exec.error}
-                </p>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+        </CardTitle>
+      </CardHeader>
+      <ScrollArea className="flex-1">
+        <CardContent className="space-y-2 p-3">
+          {executions.map((exec, i) => {
+            const Icon = NODE_ICON[exec.node_type] ?? Activity
+            return (
+              <Card
+                key={`${exec.node_id}-${i}`}
+                className="gap-1.5 p-2.5 shadow-none"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded bg-muted">
+                    <Icon className="size-3.5" />
+                  </span>
+                  <span className="flex-1 truncate font-mono text-xs">
+                    {exec.node_id}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={cn("text-[10px]", STATUS_STYLES[exec.status])}
+                  >
+                    <span
+                      className={cn(
+                        "mr-1 inline-block size-1.5 rounded-full",
+                        exec.status === "started" &&
+                          "bg-yellow-500 animate-pulse",
+                        exec.status === "completed" && "bg-green-500",
+                        exec.status === "failed" && "bg-destructive",
+                      )}
+                    />
+                    {exec.status}
+                  </Badge>
+                </div>
+                {exec.error && (
+                  <p className="line-clamp-2 text-[10px] text-destructive">
+                    {exec.error}
+                  </p>
+                )}
+              </Card>
+            )
+          })}
+
+          {executions.length === 0 && (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              No nodes executed yet
+            </p>
+          )}
+        </CardContent>
+      </ScrollArea>
+    </Card>
   )
 }

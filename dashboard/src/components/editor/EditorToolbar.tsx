@@ -1,15 +1,33 @@
-import { useEditorStore } from '@/stores/editor'
+import { Download, Trash2, Upload } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
+import { useEditorStore } from "@/stores/editor"
+
+// Editor toolbar — graph metadata inputs on the left, status + actions
+// on the right. Plain DOM file pickers for import/export because
+// downloading a synthesised JSON file from React state doesn't need a
+// shadcn primitive beyond the trigger button.
 
 export function EditorToolbar() {
-  const { graphName, graphDescription, setGraphMeta, toDefinition, clear, isDirty, nodes, edges } =
-    useEditorStore()
+  const {
+    graphName,
+    graphDescription,
+    setGraphMeta,
+    toDefinition,
+    clear,
+    isDirty,
+    nodes,
+    edges,
+  } = useEditorStore()
 
   function handleExport() {
     const def = toDefinition()
     const json = JSON.stringify(def, null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
+    const blob = new Blob([json], { type: "application/json" })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
+    const a = document.createElement("a")
     a.href = url
     a.download = `${def.id}.json`
     a.click()
@@ -17,9 +35,9 @@ export function EditorToolbar() {
   }
 
   function handleImport() {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.json'
+    const input = document.createElement("input")
+    input.type = "file"
+    input.accept = ".json"
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
       if (!file) return
@@ -28,58 +46,69 @@ export function EditorToolbar() {
         const def = JSON.parse(text)
         useEditorStore.getState().loadGraph(def)
       } catch {
-        alert('Invalid graph definition file')
+        // TODO: replace with shadcn Sonner toast once we wire the
+        // app-level <Toaster />; alert() unblocks until then.
+        alert("Invalid graph definition file")
       }
     }
     input.click()
   }
 
+  const empty = nodes.length === 0
+
   return (
-    <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-2">
-      <input
-        type="text"
+    <div className="flex items-center gap-3 border-b bg-card px-4 py-2">
+      <Input
         value={graphName}
         onChange={(e) => setGraphMeta(e.target.value, graphDescription)}
-        className="border border-input bg-background px-2 py-1 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-ring w-48"
+        placeholder="Graph name"
+        className="h-8 w-48 font-semibold"
       />
 
-      <input
-        type="text"
+      <Input
         value={graphDescription}
         onChange={(e) => setGraphMeta(graphName, e.target.value)}
-        placeholder="Description..."
-        className="border border-input bg-background px-2 py-1 text-sm text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-64"
+        placeholder="Description…"
+        className="h-8 w-64"
       />
 
       <div className="flex-1" />
 
-      <span className="text-xs text-muted-foreground font-mono">
-        {nodes.length} nodes, {edges.length} edges
-        {isDirty && ' (unsaved)'}
+      <span className="font-mono text-xs text-muted-foreground">
+        {nodes.length} nodes · {edges.length} edges
       </span>
+      {isDirty && (
+        <Badge variant="outline" className="text-[10px] uppercase">
+          Unsaved
+        </Badge>
+      )}
 
-      <button
-        onClick={handleImport}
-        className="border border-input bg-background px-3 py-1 text-xs hover:bg-accent"
-      >
+      <Separator orientation="vertical" className="h-6" />
+
+      <Button variant="outline" size="sm" onClick={handleImport}>
+        <Upload className="size-4" />
         Import
-      </button>
+      </Button>
 
-      <button
+      <Button
+        variant="outline"
+        size="sm"
         onClick={handleExport}
-        disabled={nodes.length === 0}
-        className="border border-input bg-background px-3 py-1 text-xs hover:bg-accent disabled:opacity-50"
+        disabled={empty}
       >
+        <Download className="size-4" />
         Export JSON
-      </button>
+      </Button>
 
-      <button
+      <Button
+        variant="destructive"
+        size="sm"
         onClick={clear}
-        disabled={nodes.length === 0}
-        className="border border-destructive text-destructive px-3 py-1 text-xs hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+        disabled={empty}
       >
+        <Trash2 className="size-4" />
         Clear
-      </button>
+      </Button>
     </div>
   )
 }
