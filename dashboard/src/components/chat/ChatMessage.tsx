@@ -41,9 +41,11 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
           <span className="text-sm font-medium capitalize">
             {message.role}
           </span>
-          <span className="text-xs text-muted-foreground">
-            {new Date(message.created_at * 1000).toLocaleTimeString()}
-          </span>
+          {message.created_at !== undefined && (
+            <span className="text-xs text-muted-foreground">
+              {new Date(message.created_at * 1000).toLocaleTimeString()}
+            </span>
+          )}
           {isStreaming && (
             <span className="text-xs text-green-600 animate-pulse">
               typing...
