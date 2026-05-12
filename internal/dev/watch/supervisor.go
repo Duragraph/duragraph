@@ -65,7 +65,14 @@ type WorkerSupervisor struct {
 func newWorkerSupervisor(cfg supervisorConfig) *WorkerSupervisor {
 	prefix := "[" + filepath.Base(cfg.File) + "] "
 	if cfg.SIGTERMGrace == 0 {
-		cfg.SIGTERMGrace = 10 * time.Second
+		// 2s is enough time for a worker that actually handles SIGTERM
+		// to flush logs + exit; workers that ignore it get SIGKILL'd
+		// 8 seconds sooner than the previous 10s default, which made
+		// `duragraph dev` Ctrl-C take 10–13s end-to-end. Dev iteration
+		// loops benefit far more from snappiness than from gentle
+		// shutdown — anyone reaching for the long-grace path should
+		// configure SIGTERMGrace explicitly.
+		cfg.SIGTERMGrace = 2 * time.Second
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
