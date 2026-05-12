@@ -58,7 +58,7 @@ import '../styles/landing.css';
           <!-- Actions -->
           <div class="flex items-center gap-2">
             <a
-              href="https://github.com/duragraph/duragraph"
+              href="https://github.com/Duragraph/duragraph"
               target="_blank"
               rel="noopener noreferrer"
               class="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
@@ -152,10 +152,31 @@ import '../styles/landing.css';
               horizontal scaling, and full observability — on your infrastructure.
             </p>
 
+            <!-- Quick install -->
+            <div
+              class="max-w-2xl mx-auto mb-10 bg-card border border-border p-5 text-left font-mono text-sm shadow-[var(--shadow-card)]"
+            >
+              <div class="text-muted-foreground text-xs mb-3 uppercase tracking-wide">
+                Try it in 60 seconds
+              </div>
+              <div class="space-y-1">
+                <div>
+                  <span class="text-muted-foreground select-none">$ </span>brew install
+                  Duragraph/tap/duragraph
+                </div>
+                <div>
+                  <span class="text-muted-foreground select-none">$ </span>duragraph dev
+                </div>
+                <div class="text-muted-foreground pt-1">
+                  # → http://localhost:8081 — embedded Postgres + NATS, no setup
+                </div>
+              </div>
+            </div>
+
             <!-- CTAs -->
             <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
               <a
-                href="https://github.com/duragraph/duragraph"
+                href="https://github.com/Duragraph/duragraph"
                 class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 transition-colors"
               >
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"
@@ -305,9 +326,9 @@ import '../styles/landing.css';
             </div>
             <div class="bg-background p-6">
               <div class="text-3xl font-bold text-primary font-mono mb-3">02</div>
-              <h3 class="text-base font-semibold text-foreground mb-2">Generate Code</h3>
+              <h3 class="text-base font-semibold text-foreground mb-2">Author in Code</h3>
               <p class="text-sm text-muted-foreground">
-                Auto-generate type-safe workflow code from your graph
+                Write nodes and edges in Python or Go — the graph <em>is</em> the code
               </p>
             </div>
             <div class="bg-background p-6">
@@ -446,9 +467,9 @@ import '../styles/landing.css';
                     d="M5 13l4 4L19 7"></path></svg
                 >
                 <div>
-                  <h3 class="font-medium text-foreground">RBAC & Multi-tenancy</h3>
+                  <h3 class="font-medium text-foreground">Pluggable Auth</h3>
                   <p class="text-sm text-muted-foreground mt-1">
-                    Enterprise access control included
+                    Password + OAuth out of the box; RBAC and multi-tenancy on the roadmap
                   </p>
                 </div>
               </div>
@@ -659,7 +680,7 @@ import '../styles/landing.css';
 
           <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a
-              href="https://github.com/duragraph/duragraph"
+              href="https://github.com/Duragraph/duragraph"
               target="_blank"
               rel="noopener noreferrer"
               class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-foreground bg-secondary hover:bg-secondary/80 transition-colors"
@@ -737,7 +758,7 @@ import '../styles/landing.css';
                 >Docs</a
               >
               <a
-                href="https://github.com/duragraph/duragraph"
+                href="https://github.com/Duragraph/duragraph"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-sm text-muted-foreground hover:text-foreground transition-colors"
