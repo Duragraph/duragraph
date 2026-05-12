@@ -24,7 +24,7 @@ render blueprint launch --file deploy/render/render.yaml
 
 ## After deploy
 
-- Visit the service URL Render assigns. Sign in with the bootstrap admin credentials printed in the engine logs on first boot.
+- Visit the service URL Render assigns and go to `/register`. The first user to register is auto-promoted to admin. No default credentials — choose your own email and password.
 - (Optional) Set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the service's **Environment** tab if you want assistants backed by real models.
 - (Optional) Flip `AUTH_PASSWORD_ENABLED` to `true` to require email+password login — first registered user becomes the admin.
 

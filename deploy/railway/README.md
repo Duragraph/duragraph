@@ -35,7 +35,7 @@ railway up
 
 ## After deploy
 
-- Open the public URL Railway assigns; sign in with the bootstrap admin credentials in the logs (**Deploys → Logs**).
+- Open the public URL Railway assigns and visit `/register`. The first user to register is auto-promoted to admin. No default credentials ship with the binary — choose your own email and password. Subsequent users register as pending until an admin approves them.
 - (Optional) Flip `AUTH_PASSWORD_ENABLED` to `true` via env vars to enable login.
 
 ## Scaling considerations

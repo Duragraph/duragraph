@@ -34,7 +34,7 @@ doctl apps create --spec deploy/digitalocean/.do/app.yaml
 
 ## After deploy
 
-- Visit the public URL App Platform assigns. Sign in with the bootstrap admin credentials in the **Runtime Logs** of the api component.
+- Visit the public URL App Platform assigns and go to `/register`. The first user to register is auto-promoted to admin. No default credentials — choose your own email and password.
 - (Optional) Flip `AUTH_PASSWORD_ENABLED` to `true` in env vars to require email+password login.
 
 ## Scaling considerations

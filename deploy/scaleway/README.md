@@ -37,7 +37,7 @@ docker push rg.fr-par.scw.cloud/<namespace>/duragraph:latest
 
 ## After deploy
 
-- Hit the public URL Scaleway assigns. Sign in with the bootstrap admin credentials printed in the container logs.
+- Hit the public URL Scaleway assigns and visit `/register`. The first user to register is auto-promoted to admin. No default credentials — choose your own email and password.
 
 ## Scaling considerations
 
