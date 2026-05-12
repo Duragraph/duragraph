@@ -1,22 +1,37 @@
+# DuraGraph on Scaleway Serverless Containers — single container,
+# embedded Postgres + NATS. State persists on the local SSD volume
+# mounted at /data.
+
 version: "1.0"
 name: duragraph
 
 services:
   api:
     type: container
-    name: duragraph-api
+    name: duragraph
     port: 8080
     protocol: http
     privacy: public
     min_scale: 1
-    max_scale: 5
+    max_scale: 1 # embedded Postgres pins the container to a single instance
     cpu_limit: 1000
     memory_limit: 1024
+
     image:
-      name: duragraph-api
+      name: duragraph
       build:
         context: .
         dockerfile: deploy/docker/Dockerfile.server
+
+    # Override the image CMD to boot in embedded mode.
+    command:
+      - "./duragraph"
+      - "dev"
+      - "--port"
+      - "8080"
+      - "--data-dir"
+      - "/data"
+
     health_check:
       path: /health
       port: 8080
@@ -24,86 +39,20 @@ services:
       timeout: 5s
       unhealthy_threshold: 3
       healthy_threshold: 2
-    environment:
-      - name: PORT
-        value: "8080"
-      - name: HOST
-        value: "0.0.0.0"
-      - name: DB_HOST
-        from_database: postgres
-        attribute: host
-      - name: DB_PORT
-        from_database: postgres
-        attribute: port
-      - name: DB_USER
-        from_database: postgres
-        attribute: user
-      - name: DB_PASSWORD
-        from_database: postgres
-        attribute: password
-      - name: DB_NAME
-        from_database: postgres
-        attribute: database
-      - name: DB_SSLMODE
-        value: "require"
-      - name: NATS_URL
-        value: "nats://nats:4222"
-    secrets:
-      - OPENAI_API_KEY
-      - ANTHROPIC_API_KEY
-      - JWT_SECRET
 
-  nats:
-    type: container
-    name: duragraph-nats
-    port: 4222
-    privacy: private
-    min_scale: 1
-    max_scale: 1
-    cpu_limit: 500
-    memory_limit: 512
-    image:
-      registry: docker.io
-      name: nats
-      tag: 2.10-alpine
-    command:
-      - "-js"
-      - "-sd"
-      - "/data"
-      - "-m"
-      - "8222"
     volumes:
       - type: local_ssd
-        name: nats-data
+        name: duragraph-data
         mount_path: /data
-        size: 5
+        size: 10
 
-  dashboard:
-    type: container
-    name: duragraph-dashboard
-    port: 80
-    protocol: http
-    privacy: public
-    min_scale: 1
-    max_scale: 3
-    cpu_limit: 500
-    memory_limit: 512
-    image:
-      name: duragraph-dashboard
-      build:
-        context: dashboard
-        dockerfile: ../deploy/docker/Dockerfile.dashboard
     environment:
-      - name: API_URL
-        from_service: api
-        attribute: url
+      - name: HOST
+        value: "0.0.0.0"
 
-databases:
-  postgres:
-    type: postgresql
-    version: "15"
-    node_type: db-dev-s
-    volume_size: 10
-    backup:
-      enabled: true
-      schedule: "0 2 * * *"
+    secrets:
+      # Optional LLM provider keys + auth toggles.
+      - OPENAI_API_KEY
+      - ANTHROPIC_API_KEY
+      - AUTH_PASSWORD_ENABLED
+      - AUTH_OAUTH_ENABLED

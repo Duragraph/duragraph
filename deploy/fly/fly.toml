@@ -1,13 +1,30 @@
 app = "duragraph"
 primary_region = "iad"
 
+# DuraGraph runs as a single container with embedded PostgreSQL + NATS
+# JetStream (the `duragraph dev` flavour of the binary). No managed
+# Postgres or NATS sidecar to provision. Data lives on a persistent
+# volume mounted at /data; replacing or moving the machine preserves
+# the state as long as the volume is attached.
+
 [build]
   dockerfile = "../docker/Dockerfile.server"
 
+[experimental]
+  # Override the image CMD so the binary boots in embedded mode.
+  # Equivalent to `duragraph dev` on a laptop, but bound to 0.0.0.0
+  # and using the mounted volume for persistence.
+  cmd = ["./duragraph", "dev", "--port", "8080", "--data-dir", "/data"]
+
 [env]
-  PORT = "8080"
   HOST = "0.0.0.0"
-  DB_SSLMODE = "require"
+
+[[mounts]]
+  source = "duragraph_data"
+  destination = "/data"
+  # First boot will create the embedded postgres data dir + NATS
+  # JetStream stream dir under here. Tune size in `flyctl volumes
+  # create duragraph_data --size <gb>`.
 
 [http_service]
   internal_port = 8080
@@ -18,7 +35,7 @@ primary_region = "iad"
   processes = ["app"]
 
   [[http_service.checks]]
-    grace_period = "10s"
+    grace_period = "30s"
     interval = "30s"
     method = "GET"
     timeout = "5s"
@@ -41,13 +58,3 @@ primary_region = "iad"
     type = "connections"
     hard_limit = 1000
     soft_limit = 500
-
-# PostgreSQL via Fly Postgres
-[[services]]
-  protocol = "tcp"
-  internal_port = 5432
-
-# NATS JetStream
-[[services]]
-  protocol = "tcp"
-  internal_port = 4222
