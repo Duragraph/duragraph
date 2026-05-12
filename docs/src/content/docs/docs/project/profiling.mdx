@@ -98,18 +98,18 @@ Opens an interactive HTML viewer.
 
 ## Available endpoints
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /debug/pprof/` | HTML index of available profiles |
-| `GET /debug/pprof/heap` | Current heap snapshot |
-| `GET /debug/pprof/goroutine` | Goroutine count + stack dumps (`?debug=2` for full stacks) |
-| `GET /debug/pprof/profile?seconds=N` | CPU profile (default 30 s) |
-| `GET /debug/pprof/allocs` | Cumulative alloc tracking (all allocations since start) |
-| `GET /debug/pprof/mutex` | Mutex contention profile |
-| `GET /debug/pprof/block` | Goroutine blocking events |
-| `GET /debug/pprof/trace?seconds=N` | Runtime execution trace |
-| `GET /debug/pprof/cmdline` | The engine's argv |
-| `GET /debug/pprof/symbol` | Symbol resolution helper (used by pprof itself) |
+| Endpoint                             | Purpose                                                    |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `GET /debug/pprof/`                  | HTML index of available profiles                           |
+| `GET /debug/pprof/heap`              | Current heap snapshot                                      |
+| `GET /debug/pprof/goroutine`         | Goroutine count + stack dumps (`?debug=2` for full stacks) |
+| `GET /debug/pprof/profile?seconds=N` | CPU profile (default 30 s)                                 |
+| `GET /debug/pprof/allocs`            | Cumulative alloc tracking (all allocations since start)    |
+| `GET /debug/pprof/mutex`             | Mutex contention profile                                   |
+| `GET /debug/pprof/block`             | Goroutine blocking events                                  |
+| `GET /debug/pprof/trace?seconds=N`   | Runtime execution trace                                    |
+| `GET /debug/pprof/cmdline`           | The engine's argv                                          |
+| `GET /debug/pprof/symbol`            | Symbol resolution helper (used by pprof itself)            |
 
 ## Security recap
 
