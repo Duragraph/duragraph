@@ -19,6 +19,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -190,7 +191,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 		return fmt.Errorf("watch: %s is not a directory", absDir)
 	}
 
-	fmt.Printf("🔍 Watch mode: scanning %s\n", absDir)
+	slog.Info("watch mode: scanning", "dir", absDir)
 
 	// Initial scan.
 	files, err := ScanGraphs(absDir)

@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	cronlib "github.com/robfig/cron/v3"
@@ -39,7 +39,7 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := s.processDueJobs(ctx); err != nil {
-				log.Printf("cron scheduler error: %v", err)
+				slog.Error("cron scheduler error", "err", err)
 			}
 		}
 	}
@@ -59,16 +59,16 @@ func (s *CronScheduler) processDueJobs(ctx context.Context) error {
 	for _, job := range jobs {
 		nextRun, err := ComputeNextRun(job.Schedule, job.Timezone, now)
 		if err != nil {
-			log.Printf("cron %s: failed to compute next run: %v", job.CronID, err)
+			slog.Error("cron failed to compute next run", "cron_id", job.CronID, "err", err)
 			continue
 		}
 
 		if err := s.cronRepo.UpdateNextRun(ctx, job.CronID, nextRun); err != nil {
-			log.Printf("cron %s: failed to update next run: %v", job.CronID, err)
+			slog.Error("cron failed to update next run", "cron_id", job.CronID, "err", err)
 			continue
 		}
 
-		log.Printf("cron %s: triggered (next run: %s)", job.CronID, nextRun.Format(time.RFC3339))
+		slog.Info("cron triggered", "cron_id", job.CronID, "next_run", nextRun.Format(time.RFC3339))
 	}
 
 	return nil

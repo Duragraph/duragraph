@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	natsgo "github.com/nats-io/nats.go"
@@ -101,13 +101,13 @@ func (q *TaskQueue) Subscribe(ctx context.Context, consumerGroup string, graphID
 		sub, err := q.js.Subscribe(subject, func(m *natsgo.Msg) {
 			var taskMsg TaskMessage
 			if err := json.Unmarshal(m.Data, &taskMsg); err != nil {
-				log.Printf("failed to unmarshal task message: %v", err)
+				slog.Error("failed to unmarshal task message", "err", err)
 				m.Nak()
 				return
 			}
 
 			if err := handler(ctx, taskMsg); err != nil {
-				log.Printf("failed to handle task %d: %v", taskMsg.TaskID, err)
+				slog.Error("failed to handle task", "task_id", taskMsg.TaskID, "err", err)
 				m.Nak()
 				return
 			}
