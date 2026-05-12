@@ -21,7 +21,7 @@ package platform
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -166,7 +166,7 @@ func (h *Handler) lookupTenantID(ctx context.Context, u *user.User) *string {
 		// provision atomically) but the dashboard renders fine with
 		// a null tenant_id — the user can still log out. Log so the
 		// case is diagnosable post-hoc.
-		log.Printf("platform/me: tenant lookup failed for approved user %s: %v", u.ID(), err)
+		slog.Error("platform/me: tenant lookup failed for approved user", "user_id", u.ID(), "err", err)
 		return nil
 	}
 	id := t.ID()

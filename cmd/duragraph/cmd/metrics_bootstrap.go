@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 
 	"github.com/duragraph/duragraph/internal/domain/tenant"
 	"github.com/duragraph/duragraph/internal/infrastructure/monitoring"
@@ -75,7 +76,7 @@ func bootstrapTenantMetrics(
 		}
 		seeded++
 	}
-	fmt.Printf("✅ Tenant metrics bootstrap complete (%d/%d tenants seeded)\n", seeded, len(tenants))
+	slog.Info("tenant metrics bootstrap complete", "seeded", seeded, "total", len(tenants))
 	return nil
 }
 

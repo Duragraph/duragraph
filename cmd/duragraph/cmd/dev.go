@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -96,9 +97,10 @@ func runDev(cmd *cobra.Command, args []string) error {
 		DataDir: absDataDir,
 	})
 
-	fmt.Println("🚀 duragraph dev — embedded postgres + nats, single-tenant")
-	fmt.Printf("   data dir: %s\n", absDataDir)
-	fmt.Printf("   dashboard: http://localhost:%d/\n", devPort)
+	slog.Info("duragraph dev — embedded postgres + nats, single-tenant",
+		"data_dir", absDataDir,
+		"dashboard_url", fmt.Sprintf("http://localhost:%d/", devPort),
+	)
 
 	// --studio is a deprecated no-op (studio is now folded into the
 	// dashboard). Nothing to print.
@@ -133,7 +135,7 @@ func runDev(cmd *cobra.Command, args []string) error {
 		go func() {
 			defer close(watcherDone)
 			if err := w.Run(watcherCtx); err != nil {
-				log.Printf("watch: %v", err)
+				slog.Error("watch supervisor failed", "err", err)
 			}
 		}()
 	}

@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/run"
@@ -109,7 +110,7 @@ func (s *WorkerService) DispatchRun(ctx context.Context, runID string) (string, 
 			Config:      runAgg.Config(),
 			CreatedAt:   task.CreatedAt,
 		}); err != nil {
-			fmt.Printf("NATS task notification failed (PostgreSQL task persisted): %v\n", err)
+			slog.Warn("nats task notification failed (postgres task persisted)", "err", err)
 		}
 	}
 
@@ -192,7 +193,7 @@ func (s *WorkerService) MonitorExpiredLeases(ctx context.Context) error {
 
 	for _, task := range expired {
 		if err := s.taskRepo.RetryOrFail(ctx, task.ID); err != nil {
-			fmt.Printf("failed to retry/fail task %d: %v\n", task.ID, err)
+			slog.Error("failed to retry/fail task", "task_id", task.ID, "err", err)
 			continue
 		}
 

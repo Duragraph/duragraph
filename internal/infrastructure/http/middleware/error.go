@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -57,8 +57,13 @@ func ErrorHandler() echo.HTTPErrorHandler {
 		if reqID != "" {
 			resp.RequestID = reqID
 		}
-		log.Printf("[ERROR] request_id=%s method=%s path=%s status=500 error=%q",
-			reqID, c.Request().Method, c.Request().URL.Path, err.Error())
+		slog.Error("unhandled request error",
+			"request_id", reqID,
+			"method", c.Request().Method,
+			"path", c.Request().URL.Path,
+			"status", 500,
+			"err", err.Error(),
+		)
 		c.JSON(http.StatusInternalServerError, resp)
 	}
 }
@@ -103,7 +108,13 @@ func sanitizeErrorMessage(msg string) string {
 
 func logError(c echo.Context, status int, code, message, reqID string) {
 	if status >= 500 {
-		log.Printf("[ERROR] request_id=%s method=%s path=%s status=%d code=%s message=%q",
-			reqID, c.Request().Method, c.Request().URL.Path, status, code, message)
+		slog.Error("request failed",
+			"request_id", reqID,
+			"method", c.Request().Method,
+			"path", c.Request().URL.Path,
+			"status", status,
+			"code", code,
+			"message", message,
+		)
 	}
 }

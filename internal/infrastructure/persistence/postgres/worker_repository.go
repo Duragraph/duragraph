@@ -3,7 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/worker"
@@ -129,7 +129,7 @@ func (r *WorkerRepository) FindForGraph(ctx context.Context, graphID string, thr
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
-		fmt.Printf("FindForGraph query error (graphID=%s): %v\n", graphID, err)
+		slog.Error("FindForGraph query failed", "graph_id", graphID, "err", err)
 		return nil, errors.Internal("failed to find worker for graph", err)
 	}
 

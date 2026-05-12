@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/humanloop"
@@ -102,7 +103,7 @@ func (s *RunService) ApplyMultitaskStrategy(ctx context.Context, threadID, strat
 	case "interrupt", "rollback":
 		if existingRunID != "" {
 			if cancelErr := s.CancelRun(ctx, existingRunID); cancelErr != nil {
-				fmt.Printf("Warning: failed to cancel existing run %s: %v\n", existingRunID, cancelErr)
+				slog.Warn("failed to cancel existing run", "run_id", existingRunID, "err", cancelErr)
 			}
 		}
 		return true, nil
@@ -129,14 +130,17 @@ func (s *RunService) ExecuteRun(ctx context.Context, runID string) error {
 			if err := s.runRepo.Update(ctx, runAgg); err != nil {
 				return err
 			}
-			fmt.Printf("Run %s dispatched to worker %s\n", runID, workerID)
+			slog.Info("run dispatched to worker", "run_id", runID, "worker_id", workerID)
 			return nil
 		}
 		if dispatchErr != nil {
-			fmt.Printf("Worker dispatch failed for run %s: %v, falling back to local execution\n", runID, dispatchErr)
+			slog.Warn("worker dispatch failed, falling back to local execution", "run_id", runID, "err", dispatchErr)
 		}
 		if workerID == "" && dispatchErr == nil {
-			fmt.Printf("No healthy worker found for run %s (assistant=%s), falling back to local execution\n", runID, runAgg.AssistantID())
+			slog.Warn("no healthy worker found, falling back to local execution",
+				"run_id", runID,
+				"assistant_id", runAgg.AssistantID(),
+			)
 		}
 	}
 

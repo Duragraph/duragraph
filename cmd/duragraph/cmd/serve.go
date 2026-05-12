@@ -3,7 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -83,10 +83,13 @@ func runServe(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	fmt.Println("🚀 DuraGraph Server - DDD Architecture")
-	fmt.Printf("📍 Server: %s\n", cfg.ServerAddr())
-	fmt.Printf("🗄️  Database: %s:%d/%s\n", cfg.Database.Host, cfg.Database.Port, cfg.Database.Database)
-	fmt.Printf("📨 NATS: %s\n", cfg.NATS.URL)
+	slog.Info("DuraGraph server starting",
+		"addr", cfg.ServerAddr(),
+		"db_host", cfg.Database.Host,
+		"db_port", cfg.Database.Port,
+		"db_name", cfg.Database.Database,
+		"nats_url", cfg.NATS.URL,
+	)
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	defer ctxCancel()
@@ -124,18 +127,24 @@ func runServe(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("embedded postgres construct: %w", err)
 		}
-		fmt.Printf("⏳ Starting embedded Postgres %s on 127.0.0.1:%d (data: %s) — first run downloads ~20MB binary\n",
-			cfg.Database.EmbeddedVersion, cfg.Database.EmbeddedPort, cfg.Database.EmbeddedDataDir)
+		slog.Info("starting embedded postgres",
+			"version", cfg.Database.EmbeddedVersion,
+			"port", cfg.Database.EmbeddedPort,
+			"data_dir", cfg.Database.EmbeddedDataDir,
+			"note", "first run downloads ~20MB binary",
+		)
 		if err := embedded.Start(ctx); err != nil {
 			return fmt.Errorf("embedded postgres start: %w", err)
 		}
 		defer func() {
 			if err := embedded.Stop(context.Background()); err != nil {
-				log.Printf("embedded postgres stop: %v", err)
+				slog.Error("embedded postgres stop failed", "err", err)
 			}
 		}()
-		fmt.Printf("✅ Embedded Postgres started on 127.0.0.1:%d (data: %s)\n",
-			cfg.Database.EmbeddedPort, cfg.Database.EmbeddedDataDir)
+		slog.Info("embedded postgres started",
+			"port", cfg.Database.EmbeddedPort,
+			"data_dir", cfg.Database.EmbeddedDataDir,
+		)
 	}
 
 	// Embedded NATS (binary-modes.yml § embedded_components.nats_jetstream).
@@ -175,28 +184,33 @@ func runServe(_ *cobra.Command, _ []string) error {
 		if cfg.NATS.EmbeddedMonitorPort > 0 {
 			monitorMsg = fmt.Sprintf("monitor port %d", cfg.NATS.EmbeddedMonitorPort)
 		}
-		fmt.Printf("⏳ Starting embedded NATS on 127.0.0.1:%d (data: %s, %s)\n",
-			cfg.NATS.EmbeddedPort, cfg.NATS.EmbeddedDataDir, monitorMsg)
+		slog.Info("starting embedded nats",
+			"port", cfg.NATS.EmbeddedPort,
+			"data_dir", cfg.NATS.EmbeddedDataDir,
+			"monitor", monitorMsg,
+		)
 		if err := embeddedNATS.Start(ctx); err != nil {
 			return fmt.Errorf("embedded nats start: %w", err)
 		}
 		defer func() {
 			if err := embeddedNATS.Stop(context.Background()); err != nil {
-				log.Printf("embedded nats stop: %v", err)
+				slog.Error("embedded nats stop failed", "err", err)
 			}
 		}()
-		fmt.Printf("✅ Embedded NATS started on 127.0.0.1:%d (data: %s)\n",
-			cfg.NATS.EmbeddedPort, cfg.NATS.EmbeddedDataDir)
+		slog.Info("embedded nats started",
+			"port", cfg.NATS.EmbeddedPort,
+			"data_dir", cfg.NATS.EmbeddedDataDir,
+		)
 	}
 
 	// Initialize OpenTelemetry tracing (opt-in via OTEL_ENABLED)
 	if os.Getenv("OTEL_ENABLED") == "true" {
 		shutdownTracer, err := tracing.Init(ctx, "duragraph-server", version)
 		if err != nil {
-			log.Printf("failed to initialize tracing: %v", err)
+			slog.Error("failed to initialize tracing", "err", err)
 		} else {
 			defer shutdownTracer(context.Background())
-			fmt.Println("✅ OpenTelemetry tracing enabled")
+			slog.Info("OpenTelemetry tracing enabled")
 		}
 	}
 
@@ -286,13 +300,13 @@ func runServe(_ *cobra.Command, _ []string) error {
 		if err := migrator.Bootstrap(ctx); err != nil {
 			return fmt.Errorf("migrator bootstrap failed: %w", err)
 		}
-		fmt.Println("✅ Platform DB bootstrapped")
+		slog.Info("Platform DB bootstrapped")
 	}
 
 	if err := migrator.MigrateMainDB(ctx, cfg.Database.Database); err != nil {
 		return fmt.Errorf("main DB migrations failed: %w", err)
 	}
-	fmt.Printf("✅ Main DB migrations applied (%s)\n", cfg.Database.Database)
+	slog.Info("main db migrations applied", "database", cfg.Database.Database)
 
 	// MigrateAllTenants is multi-tenant only — without per-tenant DBs to
 	// migrate, this is a no-op. Single-tenant auth-only deployments
@@ -305,7 +319,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 				failed++
 			}
 		}
-		fmt.Printf("✅ Tenant migrations dispatched (%d total, %d failed)\n", len(results), failed)
+		slog.Info("tenant migrations dispatched", "total", len(results), "failed", failed)
 	}
 
 	pools, err := postgres.NewPools(ctx, writeConfig, readConfig)
@@ -315,9 +329,9 @@ func runServe(_ *cobra.Command, _ []string) error {
 	defer postgres.ClosePools(pools)
 
 	if readConfig != nil {
-		fmt.Println("✅ Database connected (write + read replica)")
+		slog.Info("Database connected (write + read replica)")
 	} else {
-		fmt.Println("✅ Database connected (single instance)")
+		slog.Info("Database connected (single instance)")
 	}
 
 	// Initialize event bus
@@ -347,7 +361,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	}
 	defer publisher.Close()
 
-	fmt.Println("✅ NATS publisher connected")
+	slog.Info("NATS publisher connected")
 
 	// Initialize NATS subscriber (Watermill)
 	subscriber, err := nats.NewSubscriber(cfg.NATS.URL, "duragraph-server", logger)
@@ -356,7 +370,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	}
 	defer subscriber.Close()
 
-	fmt.Println("✅ NATS subscriber connected")
+	slog.Info("NATS subscriber connected")
 
 	// Initialize NATS task queue (raw nats.go for JetStream work queue)
 	taskQueue, err := nats.NewTaskQueue(cfg.NATS.URL)
@@ -365,17 +379,17 @@ func runServe(_ *cobra.Command, _ []string) error {
 	}
 	defer taskQueue.Close()
 
-	fmt.Println("✅ NATS task queue connected")
+	slog.Info("NATS task queue connected")
 
 	// Start outbox relay worker
 	outboxRelay := messaging.NewOutboxRelay(outbox, publisher, 1*time.Second, 10)
 	go func() {
 		if err := outboxRelay.Start(ctx); err != nil {
-			log.Printf("outbox relay error: %v", err)
+			slog.Error("outbox relay error", "err", err)
 		}
 	}()
 
-	fmt.Println("✅ Outbox relay worker started")
+	slog.Info("Outbox relay worker started")
 
 	// Platform-mode wiring: connect a separate pool to the platform DB
 	// (`duragraph_platform`) so the User/Tenant repositories can drive
@@ -455,7 +469,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		prometheus.MustRegister(readPoolCollector)
 	}
 
-	fmt.Println("✅ Prometheus metrics + DB pool collectors registered")
+	slog.Info("Prometheus metrics + DB pool collectors registered")
 
 	if platformEnabled {
 		platformConfig := postgres.Config{
@@ -471,7 +485,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 			return fmt.Errorf("failed to connect to platform DB: %w", err)
 		}
 		defer platformPool.Close()
-		fmt.Println("✅ Platform DB connected (duragraph_platform)")
+		slog.Info("Platform DB connected (duragraph_platform)")
 
 		userRepo := postgres.NewUserRepository(platformPool)
 		tenantRepo := postgres.NewTenantRepository(platformPool)
@@ -494,9 +508,9 @@ func runServe(_ *cobra.Command, _ []string) error {
 		var metricsBackend admin.MetricsBackend
 		if mimirURL := os.Getenv("MIMIR_URL"); mimirURL != "" {
 			metricsBackend = admin.NewMimirClient(mimirURL, os.Getenv("MIMIR_TENANT_HEADER"))
-			fmt.Printf("✅ Mimir metrics backend wired (%s)\n", mimirURL)
+			slog.Info("mimir metrics backend wired", "url", mimirURL)
 		} else {
-			fmt.Println("ℹ️  Mimir metrics backend not configured (MIMIR_URL empty); /api/admin/metrics will return 503")
+			slog.Info("Mimir metrics backend not configured (MIMIR_URL empty); /api/admin/metrics will return 503")
 		}
 
 		adminHandler = admin.NewHandler(
@@ -515,7 +529,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		// Lives in platformEnabled because it depends on userRepo +
 		// tenantRepo, both of which only exist in this block.
 		platformHandler = platformhandler.NewHandler(userRepo, tenantRepo)
-		fmt.Println("✅ /api/platform/me handler constructed")
+		slog.Info("/api/platform/me handler constructed")
 
 		// Password auth handler — only when AUTH_PASSWORD_ENABLED.
 		// Wires the register + login command handlers and shares the
@@ -551,7 +565,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 				return fmt.Errorf("failed to construct password handler: %w", err)
 			}
 			passwordHandler = ph
-			fmt.Println("✅ Password auth handler constructed (POST /api/auth/register, /api/auth/login)")
+			slog.Info("Password auth handler constructed (POST /api/auth/register, /api/auth/login)")
 		}
 
 		// OAuth handler wiring — only when AUTH_OAUTH_ENABLED.
@@ -626,7 +640,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 				return fmt.Errorf("failed to construct OAuth handler: %w", err)
 			}
 			oauthHandler = oh
-			fmt.Println("✅ OAuth handler constructed")
+			slog.Info("OAuth handler constructed")
 		}
 
 		// Tenant provisioner — only when MULTITENANT_ENABLED.
@@ -661,14 +675,14 @@ func runServe(_ *cobra.Command, _ []string) error {
 				tenantRepo,
 				migrator,
 				messaging.NoopNATSAccountProvisioner{}, // operator-JWT wiring is a follow-up PR
-				log.Default(),
+				slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo),
 			)
 			go func() {
 				if err := tenantProvisioner.Run(ctx); err != nil && ctx.Err() == nil {
-					log.Printf("tenant provisioner error: %v", err)
+					slog.Error("tenant provisioner error", "err", err)
 				}
 			}()
-			fmt.Println("✅ Tenant provisioner JetStream subscriber started (durable: tenant-provisioner)")
+			slog.Info("Tenant provisioner JetStream subscriber started (durable: tenant-provisioner)")
 
 			// Seed per-tenant assistants_total / threads_total gauges from
 			// the DB before the HTTP server starts. Otherwise those gauges
@@ -676,8 +690,8 @@ func runServe(_ *cobra.Command, _ []string) error {
 			// restart can produce a negative value. Per-tenant errors are
 			// logged + skipped so a single broken tenant DB doesn't block
 			// engine startup.
-			if err := bootstrapTenantMetrics(ctx, writeConfig, tenantRepo, metrics, log.Default()); err != nil {
-				log.Printf("metrics bootstrap returned error: %v (engine continues)", err)
+			if err := bootstrapTenantMetrics(ctx, writeConfig, tenantRepo, metrics, slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)); err != nil {
+				slog.Error("metrics bootstrap failed (engine continues)", "err", err)
 			}
 		}
 	}
@@ -686,17 +700,17 @@ func runServe(_ *cobra.Command, _ []string) error {
 	cleanupWorker := messaging.NewCleanupWorker(outbox, 1*time.Hour, 7)
 	go func() {
 		if err := cleanupWorker.Start(ctx); err != nil {
-			log.Printf("cleanup worker error: %v", err)
+			slog.Error("cleanup worker error", "err", err)
 		}
 	}()
 
-	fmt.Println("✅ Cleanup worker started")
+	slog.Info("Cleanup worker started")
 
 	// Initialize streaming bridge (connects eventBus to NATS for real-time streaming)
 	streamingBridge := streaming.NewStreamingBridge(eventBus, publisher)
 	streamingBridge.Start()
 
-	fmt.Println("✅ Streaming bridge started")
+	slog.Info("Streaming bridge started")
 
 	// Initialize worker service (persistent PostgreSQL + NATS)
 	healthThreshold := 90 * time.Second
@@ -714,7 +728,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		healthThreshold,
 	)
 
-	fmt.Println("✅ Worker service initialized (PostgreSQL + NATS)")
+	slog.Info("Worker service initialized (PostgreSQL + NATS)")
 
 	// Start lease monitor goroutine (uses advisory lock for single-instance execution)
 	go func() {
@@ -730,14 +744,14 @@ func runServe(_ *cobra.Command, _ []string) error {
 					continue
 				}
 				if monErr := workerService.MonitorExpiredLeases(ctx); monErr != nil {
-					log.Printf("lease monitor error: %v", monErr)
+					slog.Error("lease monitor error", "err", monErr)
 				}
 				pools.Write.Exec(ctx, `SELECT pg_advisory_unlock(42)`)
 			}
 		}
 	}()
 
-	fmt.Println("✅ Lease monitor started (30s interval)")
+	slog.Info("Lease monitor started (30s interval)")
 
 	// Start stale worker cleanup goroutine
 	go func() {
@@ -750,9 +764,9 @@ func runServe(_ *cobra.Command, _ []string) error {
 			case <-ticker.C:
 				removed, err := workerRepo.CleanupStale(ctx, 5*time.Minute)
 				if err != nil {
-					log.Printf("stale worker cleanup error: %v", err)
+					slog.Error("stale worker cleanup error", "err", err)
 				} else if removed > 0 {
-					log.Printf("cleaned up %d stale workers", removed)
+					slog.Info("cleaned up stale workers", "count", removed)
 				}
 			}
 		}
@@ -764,7 +778,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to register built-in tools: %w", err)
 	}
 
-	fmt.Println("✅ Tool registry initialized")
+	slog.Info("Tool registry initialized")
 
 	// Initialize LLM executor
 	llmExecutor := infra_exec.NewLLMExecutor(
@@ -840,7 +854,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	runService.SetWorkerService(workerService)
 	runService.SetTaskQueue(taskQueue)
 
-	fmt.Println("✅ Run service configured with worker dispatch + NATS events")
+	slog.Info("Run service configured with worker dispatch + NATS events")
 
 	// Initialize store repository
 	storeRepo := postgres.NewStoreRepositoryWithPools(pools.Write, pools.Read)
@@ -850,11 +864,11 @@ func runServe(_ *cobra.Command, _ []string) error {
 	cronScheduler := service.NewCronScheduler(cronRepo, 30*time.Second)
 	go func() {
 		if err := cronScheduler.Start(ctx); err != nil {
-			log.Printf("cron scheduler error: %v", err)
+			slog.Error("cron scheduler error", "err", err)
 		}
 	}()
 
-	fmt.Println("✅ Cron scheduler started (30s poll interval)")
+	slog.Info("Cron scheduler started (30s poll interval)")
 
 	// Initialize HTTP handlers
 	runHandler := handlers.NewRunHandler(
@@ -952,7 +966,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 			}
 		}
 		e.Use(middleware.SimpleRateLimit(rps, burst))
-		fmt.Printf("✅ Rate limiting enabled (%.0f req/s, burst %d)\n", rps, burst)
+		slog.Info("rate limiting enabled", "rps", rps, "burst", burst)
 	}
 
 	// Authentication.
@@ -991,7 +1005,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	// needs it for /api/auth/refresh.
 	authEnabled := os.Getenv("AUTH_ENABLED") == "true"
 	if authEnabled {
-		fmt.Println("✅ Authentication enabled (TenantMiddleware)")
+		slog.Info("Authentication enabled (TenantMiddleware)")
 	}
 
 	// Routes
@@ -1021,7 +1035,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		e.GET("/api/auth/:provider/callback", oauthHandler.Callback)
 		e.POST("/api/auth/logout", oauthHandler.Logout)
 		e.POST("/api/auth/refresh", oauthHandler.Refresh)
-		fmt.Println("✅ OAuth routes registered (/api/auth/{provider}/login,callback + /api/auth/logout,refresh)")
+		slog.Info("OAuth routes registered (/api/auth/{provider}/login,callback + /api/auth/logout,refresh)")
 	}
 
 	// Password auth routes — public by design (register issues a 201
@@ -1031,7 +1045,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	if passwordHandler != nil {
 		e.POST("/api/auth/register", passwordHandler.Register)
 		e.POST("/api/auth/login", passwordHandler.Login)
-		fmt.Println("✅ Password auth routes registered (POST /api/auth/register, /api/auth/login)")
+		slog.Info("Password auth routes registered (POST /api/auth/register, /api/auth/login)")
 	}
 
 	// API routes.
@@ -1145,7 +1159,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	e.GET("/mcp", mcpHandler.Get)
 	e.DELETE("/mcp", mcpHandler.Delete)
 
-	fmt.Println("✅ MCP endpoint enabled at /mcp")
+	slog.Info("MCP endpoint enabled at /mcp")
 
 	// Worker protocol routes
 	api.POST("/workers/register", workerHandler.Register)
@@ -1172,7 +1186,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 		)
 		if adminHandler != nil {
 			adminHandler.Register(adminGroup)
-			fmt.Println("✅ Admin HTTP handlers registered at /api/admin/*")
+			slog.Info("Admin HTTP handlers registered at /api/admin/*")
 		}
 	}
 
@@ -1196,7 +1210,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 			middleware.TenantMiddleware(verifier),
 		)
 		platformHandler.Register(platformGroup)
-		fmt.Println("✅ Platform handlers registered at /api/platform/*")
+		slog.Info("Platform handlers registered at /api/platform/*")
 	}
 
 	// Embedded React dashboard. Must be registered after API routes so Echo's
@@ -1204,14 +1218,14 @@ func runServe(_ *cobra.Command, _ []string) error {
 	if distFS, err := duragraph.DashboardFS(); err == nil {
 		dashboard.Register(e, distFS)
 	} else {
-		log.Printf("dashboard not available: %v", err)
+		slog.Warn("dashboard not available", "err", err)
 	}
 
 	// Start server
 	go func() {
-		fmt.Printf("🌐 Server listening on %s\n", cfg.ServerAddr())
+		slog.Info("server listening", "addr", cfg.ServerAddr())
 		if err := e.Start(cfg.ServerAddr()); err != nil {
-			log.Printf("server error: %v", err)
+			slog.Error("server error", "err", err)
 		}
 	}()
 
@@ -1220,7 +1234,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	fmt.Println("\n🛑 Shutting down gracefully...")
+	slog.Info("shutting down gracefully")
 
 	// Cancel context to stop background goroutines
 	ctxCancel()
@@ -1230,7 +1244,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	defer shutdownCancel()
 
 	if err := e.Shutdown(shutdownCtx); err != nil {
-		log.Printf("server shutdown error: %v", err)
+		slog.Error("server shutdown error", "err", err)
 	}
 
 	// Stop workers
@@ -1238,7 +1252,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	cleanupWorker.Stop()
 	cronScheduler.Stop()
 
-	fmt.Println("👋 Shutdown complete")
+	slog.Info("shutdown complete")
 
 	// Suppress unused variable warnings for optional components
 	_ = llmExecutor

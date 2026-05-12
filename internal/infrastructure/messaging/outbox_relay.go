@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
@@ -43,7 +44,7 @@ func (r *OutboxRelay) Start(ctx context.Context) error {
 		case <-ticker.C:
 			if err := r.processOutbox(ctx); err != nil {
 				// Log error but continue
-				fmt.Printf("outbox relay error: %v\n", err)
+				slog.Error("outbox relay error", "err", err)
 			}
 		}
 	}
@@ -154,9 +155,9 @@ func (w *CleanupWorker) Start(ctx context.Context) error {
 		case <-ticker.C:
 			deleted, err := w.outbox.Cleanup(ctx, w.retentionDays)
 			if err != nil {
-				fmt.Printf("cleanup error: %v\n", err)
+				slog.Error("outbox cleanup error", "err", err)
 			} else if deleted > 0 {
-				fmt.Printf("cleaned up %d old outbox messages\n", deleted)
+				slog.Info("cleaned up old outbox messages", "count", deleted)
 			}
 		}
 	}
