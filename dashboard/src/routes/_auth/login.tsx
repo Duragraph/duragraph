@@ -9,10 +9,10 @@ import { AuthError, loginUser, registerUser, toAuthUser } from "@/api/auth"
 import { setAuth } from "@/lib/auth"
 
 export const Route = createFileRoute("/_auth/login")({
-  component: LoginPage,
+  component: () => <LoginPage initialMode="login" />,
 })
 
-type Mode = "login" | "register"
+export type Mode = "login" | "register"
 
 interface FormState {
   email: string
@@ -43,9 +43,9 @@ function friendlyMessage(err: unknown): string {
   }
 }
 
-function LoginPage() {
+export function LoginPage({ initialMode = "login" }: { initialMode?: Mode }) {
   const navigate = useNavigate()
-  const [mode, setMode] = useState<Mode>("login")
+  const [mode, setMode] = useState<Mode>(initialMode)
   const [form, setForm] = useState<FormState>(blank)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
