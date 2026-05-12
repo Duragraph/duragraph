@@ -87,3 +87,47 @@ func TestSPAHandler_DoesNotInterceptAPIRoutes(t *testing.T) {
 		t.Fatalf("body = %q, want API response", got)
 	}
 }
+
+// Regression: unmatched /api/* requests must return a clean 404, NOT a 405
+// from the GET-only SPA fallback. Bug observed in v0.7.4: when password auth
+// was disabled (AUTH_PASSWORD_ENABLED not set), POST /api/auth/login fell
+// through to the catch-all GET wildcard and Echo returned 405 Method Not
+// Allowed, confusing users who just wanted to log in.
+func TestSPAHandler_UnmatchedAPIPathReturns404NotMethodNotAllowed(t *testing.T) {
+	e := echo.New()
+	Register(e, newTestFS())
+
+	// POST to an /api/* path that has NO handler registered. Before the fix
+	// this returned 405 (matched the catch-all GET wildcard with wrong method).
+	// After the fix it returns 404 (the API route legitimately does not exist).
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusMethodNotAllowed {
+		t.Fatalf("status = 405; SPA fallback absorbed /api/* POST (regression of the v0.7.4 login bug)")
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for unmatched /api/* path", rec.Code)
+	}
+}
+
+// Same shape but with GET — also must return 404, not the SPA index.
+// Without the /api/* guard, GET on an unmatched /api/* path would 200 with
+// the React SPA body, which is even more confusing (the dashboard mounting
+// at the API URL instead of an honest "not found").
+func TestSPAHandler_UnmatchedAPIPathGETReturns404NotIndexHTML(t *testing.T) {
+	e := echo.New()
+	Register(e, newTestFS())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/does/not/exist", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (api path should not fall through to SPA)", rec.Code)
+	}
+	if got := rec.Body.String(); got == "<html>root</html>" {
+		t.Fatalf("body served index.html for /api/* path; should 404 instead")
+	}
+}
