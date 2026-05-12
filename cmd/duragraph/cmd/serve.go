@@ -579,6 +579,29 @@ func runServe(_ *cobra.Command, _ []string) error {
 			}
 			passwordHandler = ph
 			slog.Info("Password auth handler constructed (POST /api/auth/register, /api/auth/login)")
+
+			// Loud, actionable startup hint for operators following the
+			// `duragraph dev` quickstart. The engine ships NO default
+			// credentials (deliberate — no widely-known-default-password
+			// CVE), so users need to know:
+			//   * there is no default to log in with
+			//   * the first user to register becomes the bootstrap admin
+			//   * which URL to open / endpoint to hit
+			// Without this hint, users with AUTH_PASSWORD_ENABLED=true hit
+			// a login page with no obvious next step.
+			//
+			// Display the host as "localhost" when bound to 0.0.0.0 so
+			// the printed URL is clickable rather than a non-routable
+			// network bind address.
+			displayHost := cfg.Server.Host
+			if displayHost == "0.0.0.0" || displayHost == "" {
+				displayHost = "localhost"
+			}
+			slog.Info("password auth enabled — register the first user; they become admin automatically",
+				"register_ui", fmt.Sprintf("http://%s:%d/register", displayHost, cfg.Server.Port),
+				"register_api", "POST /api/auth/register",
+				"note", "no default credentials — choose your own email + password",
+			)
 		}
 
 		// OAuth handler wiring — only when AUTH_OAUTH_ENABLED.
