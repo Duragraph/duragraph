@@ -1,79 +1,45 @@
+# DuraGraph on Render — single container, embedded Postgres + NATS.
+#
+# `duragraph dev` ships its own Postgres + NATS JetStream baked into
+# the binary, so this template does NOT provision a managed Render
+# Postgres or a separate NATS service. State lives on the attached
+# persistent disk at /data.
+
 services:
-  # API Server
   - type: web
-    name: duragraph-api
+    name: duragraph
     runtime: docker
     dockerfilePath: ./deploy/docker/Dockerfile.server
     dockerContext: .
     plan: starter
     region: oregon
+
+    # Render injects $PORT at runtime. Bind the engine to it.
+    dockerCommand: "./duragraph dev --port $PORT --data-dir /data"
+
     healthCheckPath: /health
+
+    disk:
+      name: duragraph-data
+      mountPath: /data
+      sizeGB: 5
+
     envVars:
-      - key: PORT
-        value: 8080
       - key: HOST
         value: 0.0.0.0
-      - key: DB_HOST
-        fromDatabase:
-          name: duragraph-db
-          property: host
-      - key: DB_PORT
-        fromDatabase:
-          name: duragraph-db
-          property: port
-      - key: DB_USER
-        fromDatabase:
-          name: duragraph-db
-          property: user
-      - key: DB_PASSWORD
-        fromDatabase:
-          name: duragraph-db
-          property: password
-      - key: DB_NAME
-        fromDatabase:
-          name: duragraph-db
-          property: database
-      - key: DB_SSLMODE
-        value: require
-      - key: NATS_URL
-        value: nats://duragraph-nats:4222
+
+      # Optional LLM provider keys — set via the Render dashboard if you
+      # want assistants backed by real models. Workers fall through to a
+      # rule-based mock when these are absent.
       - key: OPENAI_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: JWT_SECRET
-        generateValue: true
-      - key: AUTH_ENABLED
-        value: false
 
-  # NATS JetStream
-  - type: private-service
-    name: duragraph-nats
-    runtime: image
-    image:
-      url: nats:2.10-alpine
-    plan: starter
-    region: oregon
-    envVars:
-      - key: NATS_ARGS
-        value: "-js -sd /data -m 8222"
-    disk:
-      name: nats-data
-      mountPath: /data
-      sizeGB: 1
-
-  # Dashboard
-  - type: web
-    name: duragraph-dashboard
-    runtime: docker
-    dockerfilePath: ./deploy/docker/Dockerfile.dashboard
-    dockerContext: ./dashboard
-    plan: starter
-    region: oregon
-
-databases:
-  - name: duragraph-db
-    databaseName: duragraph
-    plan: starter
-    region: oregon
-    postgresMajorVersion: 15
+      # Three-flag auth split (the old single `AUTH_ENABLED` is gone).
+      # Set to "true" to require email+password login. First registered
+      # user is auto-promoted to admin (bootstrap admin pattern).
+      - key: AUTH_PASSWORD_ENABLED
+        value: "false"
+      - key: AUTH_OAUTH_ENABLED
+        value: "false"

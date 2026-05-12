@@ -1,22 +1,17 @@
+# DuraGraph on Railway — single container, embedded Postgres + NATS.
+#
+# `duragraph dev` ships its own data plane, so there's no second
+# Postgres or NATS service to provision. State lives on the volume
+# mounted at /data — attach it in the Railway dashboard.
+
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "deploy/docker/Dockerfile.server"
 
 [deploy]
-startCommand = "/app/server"
+# Railway injects $PORT at runtime.
+startCommand = "./duragraph dev --port $PORT --data-dir /data"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
-healthcheckPath = "/health"
-healthcheckTimeout = 100
-
-[[services]]
-name = "api"
-
-[[services]]
-name = "nats"
-
-[[services]]
-name = "postgres"
-
-[[services]]
-name = "dashboard"

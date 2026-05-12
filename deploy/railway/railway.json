@@ -5,7 +5,8 @@
     "dockerfilePath": "deploy/docker/Dockerfile.server"
   },
   "deploy": {
-    "startCommand": "/app/server",
+    "startCommand": "./duragraph dev --port $PORT --data-dir /data",
+    "healthcheckPath": "/health",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }

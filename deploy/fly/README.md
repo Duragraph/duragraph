@@ -1,91 +1,60 @@
 # Deploy DuraGraph on Fly.io
 
-Deploy DuraGraph to Fly.io with PostgreSQL and NATS.
+Single-container deploy: `duragraph dev` running with embedded PostgreSQL + NATS JetStream behind it. No managed-Postgres add-on, no separate NATS service.
 
 ## Prerequisites
 
 - [Fly CLI](https://fly.io/docs/hands-on/install-flyctl/) installed
 - Fly.io account
 
-## Quick Deploy
+## Deploy
 
 ```bash
-# Login to Fly.io
+# 1. Authenticate
 flyctl auth login
 
-# Create a new app
-flyctl launch --no-deploy
+# 2. Create the app (don't deploy yet — we need to create the volume first)
+flyctl launch --no-deploy --copy-config
 
-# Create PostgreSQL database
-flyctl postgres create --name duragraph-db --region iad
+# 3. Create a persistent volume for the embedded data plane
+flyctl volumes create duragraph_data --size 10 --region iad
 
-# Attach database to app
-flyctl postgres attach duragraph-db
+# 4. (Optional) Set LLM provider secrets
+flyctl secrets set OPENAI_API_KEY=sk-...
+flyctl secrets set ANTHROPIC_API_KEY=sk-...
 
-# Set secrets
-flyctl secrets set OPENAI_API_KEY=your-key-here
-flyctl secrets set ANTHROPIC_API_KEY=your-key-here
-flyctl secrets set JWT_SECRET=$(openssl rand -hex 32)
+# 5. (Optional) Turn on password auth — the first user to register
+#    becomes the bootstrap admin
+flyctl secrets set AUTH_PASSWORD_ENABLED=true
 
-# Deploy
+# 6. Deploy
 flyctl deploy
 ```
 
-## Architecture
+Then open the URL `flyctl status` prints; sign in with the bootstrap admin credentials shown in the engine logs on first boot (`flyctl logs`).
 
-On Fly.io, DuraGraph runs with:
+## What `fly.toml` configures
 
-- **App**: DuraGraph API server (Go)
-- **Database**: Fly Postgres (PostgreSQL 15)
-- **NATS**: Deployed as sidecar container
+- Single machine, single container, image built from `deploy/docker/Dockerfile.server`.
+- CMD overridden to `./duragraph dev --port 8080 --data-dir /data` — embedded Postgres + NATS, single-tenant.
+- Persistent volume `duragraph_data` mounted at `/data` — holds the embedded Postgres data directory and NATS JetStream streams. Survives machine restarts and image updates.
+- HTTP service on port 8080 with `/health` check (30 s grace, 30 s interval).
+- `auto_stop_machines = false` and `min_machines_running = 1` — embedded state means the machine should not be paused; restarting it cold loses no data but does cost recovery time on the embedded Postgres side.
 
-## Environment Variables
+## Scaling considerations
 
-Set these using `flyctl secrets set`:
+`duragraph dev` mode runs Postgres + NATS in-process, so horizontal scaling beyond one machine is not supported in this configuration. For multi-instance / HA deploys, switch to `duragraph serve` against external Postgres + NATS — outside the scope of this template.
 
-- `DB_HOST` - Auto-configured by Fly Postgres
-- `DB_PORT` - Auto-configured by Fly Postgres
-- `DB_USER` - Auto-configured by Fly Postgres
-- `DB_PASSWORD` - Auto-configured by Fly Postgres
-- `DB_NAME` - Auto-configured by Fly Postgres
-- `NATS_URL` - Set to `nats://localhost:4222` (sidecar)
-- `OPENAI_API_KEY` - Optional, for OpenAI integration
-- `ANTHROPIC_API_KEY` - Optional, for Anthropic integration
-- `JWT_SECRET` - Required if AUTH_ENABLED=true
-
-## Scaling
+## Update
 
 ```bash
-# Scale to multiple machines
-flyctl scale count 2
-
-# Scale machine size
-flyctl scale vm shared-cpu-2x --memory 2048
+flyctl deploy
 ```
 
-## Monitoring
+Rolls out a new image and re-attaches the existing volume. The embedded data plane survives.
 
-```bash
-# View logs
-flyctl logs
+## Troubleshooting
 
-# Check status
-flyctl status
+**Volume size too small** — embedded Postgres can grow with usage; bump with `flyctl volumes extend <id> --size <gb>`.
 
-# Open dashboard
-flyctl dashboard
-```
-
-## Custom Domain
-
-```bash
-flyctl certs add yourdomain.com
-```
-
-## Cost Estimate
-
-- **Free tier**: 3 shared-cpu-1x VMs (256MB RAM)
-- **Postgres**: ~$2/month for hobby tier
-- **Additional compute**: ~$0.0000008/second per machine
-
-[Fly.io Pricing](https://fly.io/docs/about/pricing/)
+**App not reachable** — check `flyctl logs` for the bootstrap admin credentials line, and confirm `/health` returns 200 via `curl https://<app>.fly.dev/health`.
