@@ -67,7 +67,7 @@ type Options struct {
 	DebounceWindow time.Duration
 
 	// SIGTERMGrace is how long a worker has to exit after SIGTERM
-	// before SIGKILL. Default 10s (per spec).
+	// before SIGKILL. Default 2s — see supervisor.go for the reasoning.
 	SIGTERMGrace time.Duration
 
 	// HealthURL is the engine's /health endpoint. The watcher polls
@@ -135,7 +135,7 @@ func New(opts Options) (*Watcher, error) {
 		opts.DebounceWindow = 200 * time.Millisecond
 	}
 	if opts.SIGTERMGrace == 0 {
-		opts.SIGTERMGrace = 10 * time.Second
+		opts.SIGTERMGrace = 2 * time.Second
 	}
 	if opts.HealthURL == "" {
 		opts.HealthURL = fmt.Sprintf("http://localhost:%d/health", opts.EnginePort)
