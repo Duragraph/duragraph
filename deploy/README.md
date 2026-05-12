@@ -61,7 +61,7 @@ docker run --rm -p 8080:8080 -v duragraph-data:/data duragraph:local \
   ./duragraph dev --port 8080 --data-dir /data
 ```
 
-Open `http://localhost:8080`, sign in with the bootstrap admin credentials printed on first boot.
+Open `http://localhost:8080` and visit `/register`. No default credentials ship with the binary — the first user you register is auto-promoted to admin.
 
 ## Verifying after deploy
 

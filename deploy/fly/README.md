@@ -31,7 +31,7 @@ flyctl secrets set AUTH_PASSWORD_ENABLED=true
 flyctl deploy
 ```
 
-Then open the URL `flyctl status` prints; sign in with the bootstrap admin credentials shown in the engine logs on first boot (`flyctl logs`).
+Then open the URL `flyctl status` prints and visit `/register`. The first user to register is auto-promoted to admin. No default credentials ship with the binary — choose your own email and password.
 
 ## What `fly.toml` configures
 

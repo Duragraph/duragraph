@@ -32,7 +32,7 @@ That's it. The binary boots an embedded PostgreSQL + NATS, starts the engine, an
 
 - **API** — `http://localhost:8081`
 - **Dashboard** — `http://localhost:8081` (same origin; SPA routing)
-- **Bootstrap admin** — credentials are printed on first start; sign in with those.
+- **Bootstrap admin** — the binary ships with no default credentials. With `AUTH_PASSWORD_ENABLED=true`, visit `/register` (or POST to `/api/auth/register`) and create the first user — they're auto-promoted to admin. Subsequent users register as pending until an admin approves them.
 
 ## 3. Run your first workflow
 
