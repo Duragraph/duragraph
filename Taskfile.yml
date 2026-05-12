@@ -211,3 +211,27 @@ tasks:
       - rm -rf dashboard/node_modules/
       - rm -rf python/.venv/
       - go clean -modcache
+
+  # Profiling shortcuts. Assume `duragraph dev` is running locally with
+  # its default pprof listener at 127.0.0.1:6060 (auto-enabled in dev
+  # mode). See docs/project/profiling for the full contributor workflow.
+  profile:heap:
+    desc: Take a heap snapshot from the running engine and open pprof
+    cmds:
+      - go tool pprof http://localhost:6060/debug/pprof/heap
+
+  profile:goroutines:
+    desc: Dump every goroutine's stack from the running engine
+    cmds:
+      - curl -s 'http://localhost:6060/debug/pprof/goroutine?debug=2'
+
+  profile:cpu:
+    desc: Capture a 30s CPU profile from the running engine and open pprof
+    cmds:
+      - go tool pprof 'http://localhost:6060/debug/pprof/profile?seconds=30'
+
+  profile:trace:
+    desc: Capture a 5s runtime execution trace and open in `go tool trace`
+    cmds:
+      - curl -o /tmp/duragraph-trace.out 'http://localhost:6060/debug/pprof/trace?seconds=5'
+      - go tool trace /tmp/duragraph-trace.out

@@ -34,6 +34,7 @@ import (
 	"github.com/duragraph/duragraph/internal/infrastructure/streaming"
 	"github.com/duragraph/duragraph/internal/infrastructure/tools"
 	"github.com/duragraph/duragraph/internal/infrastructure/tracing"
+	"github.com/duragraph/duragraph/internal/pkg/debug"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
@@ -93,6 +94,18 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	defer ctxCancel()
+
+	// pprof debug listener (optional, contributor-only). Enabled when
+	// DURAGRAPH_PPROF_ADDR is set — auto-set to 127.0.0.1:6060 by
+	// `duragraph dev`, off by default in `duragraph serve`. The debug
+	// package binds to a separate localhost listener and refuses
+	// public binds without an explicit override. See
+	// internal/pkg/debug/pprof.go for the contributor workflow.
+	if pprofAddr := os.Getenv("DURAGRAPH_PPROF_ADDR"); pprofAddr != "" {
+		if err := debug.StartPprof(ctx, pprofAddr); err != nil {
+			slog.Warn("pprof listener not started", "err", err)
+		}
+	}
 
 	// Embedded Postgres (binary-modes.yml § embedded_components.postgres).
 	//

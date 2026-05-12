@@ -1,0 +1,118 @@
+---
+title: Profiling
+description: How to use the built-in pprof debug listener to find memory leaks, goroutine leaks, and CPU hotspots in the DuraGraph engine.
+---
+
+DuraGraph ships a [`net/http/pprof`](https://pkg.go.dev/net/http/pprof) listener for contributor profiling. It exposes Go's standard profile surface — heap, goroutines, CPU, allocations, mutex contention, execution traces — on a separate localhost-bound port so it can't accidentally leak through the main API.
+
+## Enabling
+
+**`duragraph dev`** turns the listener on automatically at `127.0.0.1:6060` (see `cmd/duragraph/cmd/dev.go`'s `applyDevEnvDefaults`).
+
+**`duragraph serve`** leaves it off. Operators opt in with:
+
+```bash
+DURAGRAPH_PPROF_ADDR=127.0.0.1:6060 duragraph serve
+```
+
+Public binds (anything not on `127.0.0.1` / `localhost` / `::1`) are **refused by default** — pprof endpoints leak heap state and accept long-running profile requests that can DoS the engine. The guard can be bypassed with `DURAGRAPH_PPROF_ALLOW_PUBLIC=true` if you have a specific reason (e.g. profiling inside a private network), but it should never be set in a production deploy with public reach.
+
+## Finding a memory leak
+
+```bash
+# 1. Take a snapshot before the suspect path
+curl -o before.pprof http://localhost:6060/debug/pprof/heap
+
+# 2. Exercise the engine — replay the workflow, send a flurry of runs,
+#    whatever you think is leaking. Wait ~30 seconds after it settles
+#    so GC has a chance to reclaim anything not actually retained.
+
+# 3. Take an after snapshot
+curl -o after.pprof http://localhost:6060/debug/pprof/heap
+
+# 4. Diff
+go tool pprof -base=before.pprof after.pprof
+```
+
+Then in the pprof REPL:
+
+```
+(pprof) top10                  # biggest growth between snapshots
+(pprof) list someFunction      # source-level annotation
+(pprof) web                    # flamegraph in your browser
+```
+
+Anything that grew unboundedly between snapshots is your leak. Typical culprits: maps that never delete entries, goroutines that hold references to large structs, response bodies / connections not closed.
+
+## Finding a goroutine leak
+
+Goroutine leaks are more common than heap leaks in event-driven systems like DuraGraph — every long-running goroutine retains every variable it references, often a transitive heap-full of state. The engine spawns goroutines for:
+
+- HTTP request handlers
+- SSE stream subscribers
+- The outbox relay
+- The cron scheduler
+- The watch supervisor (in dev mode)
+- The lease monitor + stale-worker cleanup loops
+- Each subscribed NATS consumer
+
+Count goroutines over time:
+
+```bash
+# Baseline count
+curl -s 'http://localhost:6060/debug/pprof/goroutine?debug=2' | grep -c '^goroutine'
+
+# Exercise the suspect path
+
+# Re-count
+curl -s 'http://localhost:6060/debug/pprof/goroutine?debug=2' | grep -c '^goroutine'
+```
+
+A healthy engine settles at a steady-state goroutine count (~50–200 depending on consumers). If the count climbs without bound, dump the stacks to see what's stuck:
+
+```bash
+curl -s 'http://localhost:6060/debug/pprof/goroutine?debug=2' > goroutines.txt
+# Look for: many goroutines parked at the same line of the same function.
+# That's your stuck call. Usually a channel send/recv that has no receiver/sender.
+```
+
+## CPU profiling
+
+```bash
+# Profile for 30 seconds while the engine is under load
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+```
+
+REPL commands work the same as for heap profiles.
+
+## Execution traces (Go runtime trace)
+
+For visualising scheduler behaviour, GC pauses, or blocking syscalls:
+
+```bash
+curl -o trace.out 'http://localhost:6060/debug/pprof/trace?seconds=5'
+go tool trace trace.out
+```
+
+Opens an interactive HTML viewer.
+
+## Available endpoints
+
+| Endpoint                             | Purpose                                                    |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `GET /debug/pprof/`                  | HTML index of available profiles                           |
+| `GET /debug/pprof/heap`              | Current heap snapshot                                      |
+| `GET /debug/pprof/goroutine`         | Goroutine count + stack dumps (`?debug=2` for full stacks) |
+| `GET /debug/pprof/profile?seconds=N` | CPU profile (default 30 s)                                 |
+| `GET /debug/pprof/allocs`            | Cumulative alloc tracking (all allocations since start)    |
+| `GET /debug/pprof/mutex`             | Mutex contention profile                                   |
+| `GET /debug/pprof/block`             | Goroutine blocking events                                  |
+| `GET /debug/pprof/trace?seconds=N`   | Runtime execution trace                                    |
+| `GET /debug/pprof/cmdline`           | The engine's argv                                          |
+| `GET /debug/pprof/symbol`            | Symbol resolution helper (used by pprof itself)            |
+
+## Security recap
+
+- Never bind to `0.0.0.0` or a public interface in production. The default-deny guard catches accidents, but don't override it without a clear reason.
+- Anyone with network access to the pprof listener can read your heap (often contains tokens, credentials, intermediate LLM state) and DoS your engine.
+- The dev-mode default of `127.0.0.1:6060` is safe because loopback isn't routable.

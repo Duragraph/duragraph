@@ -177,4 +177,8 @@ func applyDevEnvDefaults(opts devOptions) {
 	setIfUnset("PORT", strconv.Itoa(opts.Port))
 	setIfUnset("DB_EMBEDDED_DATA_DIR", filepath.Join(opts.DataDir, "pg"))
 	setIfUnset("NATS_EMBEDDED_DATA_DIR", filepath.Join(opts.DataDir, "nats"))
+	// Auto-enable the pprof debug listener for contributor-friendly
+	// profiling. 127.0.0.1-bound so it's never reachable beyond the
+	// laptop; operators running `duragraph serve` opt in explicitly.
+	setIfUnset("DURAGRAPH_PPROF_ADDR", "127.0.0.1:6060")
 }
