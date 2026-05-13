@@ -3,56 +3,54 @@ package nats_test
 import (
 	"context"
 	"encoding/json"
-	"net"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/testcontainers/testcontainers-go"
+	tcnats "github.com/testcontainers/testcontainers-go/modules/nats"
 
 	dgNats "github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
 )
 
-// startEmbeddedNATS spins up an embedded NATS server on a random free
-// port for the lifetime of the test. Each test gets its own server
-// (fast — embedded NATS boots in ~50ms) so JetStream state doesn't
-// leak between tests, and so parallel-safe ports are guaranteed.
-func startEmbeddedNATS(t *testing.T) (url string) {
+// One NATS container per test binary, started lazily on first
+// setupNATS() call. The ryuk reaper terminates it at process exit.
+// We deliberately don't t.Cleanup a Terminate — tearing the container
+// down between tests caused "address already in use" port-allocation
+// races under rapid rebuild churn. JetStream state can carry across
+// tests, so tests use distinct stream subjects / durable names to
+// isolate themselves.
+var (
+	natsOnce sync.Once
+	natsURL  string
+	natsErr  error
+)
+
+func setupNATS(t *testing.T) string {
 	t.Helper()
-	port := freePort(t)
-
-	srv, err := dgNats.NewEmbedded(dgNats.EmbeddedConfig{
-		Port:    port,
-		DataDir: t.TempDir(),
+	natsOnce.Do(func() {
+		ctx := context.Background()
+		c, err := tcnats.Run(ctx,
+			"nats:2.10-alpine",
+			// --jetstream — required for stream + durable consumer
+			// tests. The module strips the leading "--" automatically.
+			testcontainers.WithCmdArgs("--jetstream"),
+		)
+		if err != nil {
+			natsErr = err
+			return
+		}
+		url, err := c.ConnectionString(ctx)
+		if err != nil {
+			natsErr = err
+			return
+		}
+		natsURL = url
 	})
-	if err != nil {
-		t.Fatalf("NewEmbedded: %v", err)
+	if natsErr != nil {
+		t.Fatalf("nats testcontainer: %v", natsErr)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	t.Cleanup(cancel)
-	if err := srv.Start(ctx); err != nil {
-		t.Fatalf("embedded NATS start: %v", err)
-	}
-	t.Cleanup(func() {
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stopCancel()
-		_ = srv.Stop(stopCtx)
-	})
-
-	return srv.ClientURL()
-}
-
-// freePort listens on :0 to grab a kernel-assigned free TCP port, then
-// closes the listener so the embedded NATS server can bind to it.
-// There's a TOCTOU window between close + re-bind but it's negligible
-// in practice for self-contained tests.
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen :0: %v", err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
+	return natsURL
 }
 
 // TestPublishSubscribe_Roundtrip publishes a JSON payload via the new
@@ -61,7 +59,7 @@ func freePort(t *testing.T) int {
 // header. JetStream-stored messages also fan out to plain core-NATS
 // subscribers, so this exercises both publish + subscribe.
 func TestPublishSubscribe_Roundtrip(t *testing.T) {
-	url := startEmbeddedNATS(t)
+	url := setupNATS(t)
 
 	pub, err := dgNats.NewPublisher(url)
 	if err != nil {
@@ -117,7 +115,7 @@ func TestPublishSubscribe_Roundtrip(t *testing.T) {
 // supplied stable ID in the `Nats-Msg-Id` header — the prerequisite
 // for JetStream's dedup window to actually deduplicate outbox retries.
 func TestPublishWithID_SetsHeader(t *testing.T) {
-	url := startEmbeddedNATS(t)
+	url := setupNATS(t)
 
 	pub, err := dgNats.NewPublisher(url)
 	if err != nil {
@@ -160,7 +158,7 @@ func TestPublishWithID_SetsHeader(t *testing.T) {
 // path against existing streams. Without the right idempotency, the
 // second engine startup would crash with "stream already exists".
 func TestEnsureStreams_Idempotent(t *testing.T) {
-	url := startEmbeddedNATS(t)
+	url := setupNATS(t)
 
 	pub1, err := dgNats.NewPublisher(url)
 	if err != nil {
@@ -184,7 +182,7 @@ func TestEnsureStreams_Idempotent(t *testing.T) {
 // has no dedup — the dedup is a JetStream stream-level feature, only
 // visible to consumers that read off the stream's stored messages.
 func TestPublishWithID_Dedup(t *testing.T) {
-	url := startEmbeddedNATS(t)
+	url := setupNATS(t)
 
 	pub, err := dgNats.NewPublisher(url)
 	if err != nil {
