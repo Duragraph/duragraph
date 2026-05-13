@@ -82,11 +82,14 @@ tasks:
   # === Building ===
   build:
     desc: Build everything (Go binary with embedded dashboard)
-    deps: ["build:dashboard", "build:duragraph"]
+    cmds:
+      - task: build:dashboard
+      - task: build:duragraph
 
   build:duragraph:
-    desc: Build the duragraph binary. Embeds dashboard/dist via go:embed,
-      so `build:dashboard` must run first when iterating on the UI.
+    desc: Build the duragraph binary. Depends on build:dashboard so the
+      Vite output is on disk before `go build` runs the //go:embed.
+    deps: ["build:dashboard"]
     cmds:
       - go build -o bin/duragraph ./cmd/duragraph
     generates:

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/_auth'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AuthRegisterRouteImport } from './routes/_auth/register'
 import { Route as AuthLoginRouteImport } from './routes/_auth/login'
 import { Route as AppTracesRouteImport } from './routes/_app/traces'
 import { Route as AppThreadsRouteImport } from './routes/_app/threads'
@@ -42,6 +43,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRoute,
+} as any)
+const AuthRegisterRoute = AuthRegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => AuthRoute,
 } as any)
 const AuthLoginRoute = AuthLoginRouteImport.update({
   id: '/login',
@@ -141,6 +147,7 @@ export interface FileRoutesByFullPath {
   '/threads': typeof AppThreadsRouteWithChildren
   '/traces': typeof AppTracesRouteWithChildren
   '/login': typeof AuthLoginRoute
+  '/register': typeof AuthRegisterRoute
   '/': typeof AppIndexRoute
   '/admin/metrics': typeof AppAdminMetricsRoute
   '/admin/users': typeof AppAdminUsersRoute
@@ -160,6 +167,7 @@ export interface FileRoutesByTo {
   '/threads': typeof AppThreadsRouteWithChildren
   '/traces': typeof AppTracesRouteWithChildren
   '/login': typeof AuthLoginRoute
+  '/register': typeof AuthRegisterRoute
   '/': typeof AppIndexRoute
   '/admin/metrics': typeof AppAdminMetricsRoute
   '/admin/users': typeof AppAdminUsersRoute
@@ -183,6 +191,7 @@ export interface FileRoutesById {
   '/_app/threads': typeof AppThreadsRouteWithChildren
   '/_app/traces': typeof AppTracesRouteWithChildren
   '/_auth/login': typeof AuthLoginRoute
+  '/_auth/register': typeof AuthRegisterRoute
   '/_app/': typeof AppIndexRoute
   '/_app/admin/metrics': typeof AppAdminMetricsRoute
   '/_app/admin/users': typeof AppAdminUsersRoute
@@ -205,6 +214,7 @@ export interface FileRouteTypes {
     | '/threads'
     | '/traces'
     | '/login'
+    | '/register'
     | '/'
     | '/admin/metrics'
     | '/admin/users'
@@ -224,6 +234,7 @@ export interface FileRouteTypes {
     | '/threads'
     | '/traces'
     | '/login'
+    | '/register'
     | '/'
     | '/admin/metrics'
     | '/admin/users'
@@ -246,6 +257,7 @@ export interface FileRouteTypes {
     | '/_app/threads'
     | '/_app/traces'
     | '/_auth/login'
+    | '/_auth/register'
     | '/_app/'
     | '/_app/admin/metrics'
     | '/_app/admin/users'
@@ -283,6 +295,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/_auth/register': {
+      id: '/_auth/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof AuthRegisterRouteImport
+      parentRoute: typeof AuthRoute
     }
     '/_auth/login': {
       id: '/_auth/login'
@@ -499,10 +518,12 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 interface AuthRouteChildren {
   AuthLoginRoute: typeof AuthLoginRoute
+  AuthRegisterRoute: typeof AuthRegisterRoute
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
   AuthLoginRoute: AuthLoginRoute,
+  AuthRegisterRoute: AuthRegisterRoute,
 }
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
