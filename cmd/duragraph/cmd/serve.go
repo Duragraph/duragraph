@@ -395,8 +395,24 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	slog.Info("NATS task queue connected")
 
-	// Start outbox relay worker
-	outboxRelay := messaging.NewOutboxRelay(outbox, publisher, 1*time.Second, 10)
+	// Start outbox relay worker. The relay holds ONE persistent
+	// pgx.Conn dedicated to `LISTEN outbox_new` — it must NOT go
+	// through PgBouncer in transaction-pooling mode (which would
+	// reclaim the conn between TXs and break the subscription).
+	// DB_RELAY_DSN overrides the listener DSN for production behind a
+	// pooler; when empty we fall back to the main DSN, which is fine
+	// in dev (embedded postgres, no pooler) and in deployments that
+	// don't use PgBouncer.
+	relayDSN := cfg.Database.RelayDSN
+	if relayDSN == "" {
+		relayDSN = fmt.Sprintf(
+			"postgres://%s:%s@%s:%d/%s?sslmode=%s",
+			cfg.Database.User, cfg.Database.Password,
+			cfg.Database.Host, cfg.Database.Port,
+			cfg.Database.Database, cfg.Database.SSLMode,
+		)
+	}
+	outboxRelay := messaging.NewOutboxRelay(outbox, publisher, relayDSN, 0, 10)
 	go func() {
 		if err := outboxRelay.Start(ctx); err != nil {
 			slog.Error("outbox relay error", "err", err)

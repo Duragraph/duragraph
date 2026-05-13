@@ -60,6 +60,21 @@ type DatabaseConfig struct {
 	// poor links — bumped via DB_EMBEDDED_START_TIMEOUT (Go duration
 	// syntax, e.g. "90s", "2m"). Defaults to 60s.
 	EmbeddedStartTimeout time.Duration
+
+	// RelayDSN is an alternate Postgres DSN used by the outbox relay
+	// for its persistent LISTEN/NOTIFY connection. Defaults to the
+	// main DSN derived from Host/Port/User/Password/Database when
+	// unset.
+	//
+	// Why a separate setting: in production behind PgBouncer the main
+	// pool runs in TRANSACTION pooling, which returns connections to
+	// the pool after each TX and breaks LISTEN. The relay connection
+	// must therefore bypass PgBouncer and go direct to Postgres. The
+	// operator sets DB_RELAY_DSN to the direct-Postgres URL (a single
+	// long-lived connection per engine, so the connection cost is
+	// negligible) while keeping DB_HOST/DB_PORT pointing at PgBouncer
+	// for the rest of the engine's traffic.
+	RelayDSN string
 }
 
 // NATSConfig holds NATS configuration.
@@ -175,6 +190,11 @@ func Load() (*Config, error) {
 		Password: getEnv("DB_PASSWORD", "apppass"),
 		Database: getEnv("DB_NAME", "appdb"),
 		SSLMode:  getEnv("DB_SSLMODE", "disable"),
+		// Empty means "use the main DSN derived from the fields
+		// above". Production behind PgBouncer sets this to the
+		// direct-Postgres URL so the outbox relay's LISTEN/NOTIFY
+		// connection bypasses the transaction-pooling proxy.
+		RelayDSN: getEnv("DB_RELAY_DSN", ""),
 	}
 
 	if mode == "embedded" {
