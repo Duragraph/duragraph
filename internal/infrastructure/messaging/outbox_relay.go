@@ -100,8 +100,9 @@ func (r *OutboxRelay) publishMessage(ctx context.Context, msg *postgres.OutboxMe
 		"timestamp":      msg.CreatedAt,
 	}
 
-	// Publish to NATS
-	if err := r.publisher.Publish(ctx, topic, envelope); err != nil {
+	// Publish to NATS with the outbox event ID as Nats-Msg-Id so
+	// JetStream deduplicates retries of the same row.
+	if err := r.publisher.PublishWithID(ctx, topic, msg.EventID, envelope); err != nil {
 		return fmt.Errorf("failed to publish to NATS: %w", err)
 	}
 
