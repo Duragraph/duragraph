@@ -61,8 +61,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/ThreeDotsLabs/watermill/message"
-
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/domain/tenant"
 	"github.com/duragraph/duragraph/internal/infrastructure/messaging/nats"
@@ -124,7 +122,7 @@ const JetStreamStreamName = "duragraph-events"
 // JetStreamSubscriber is configured for one stream+filter at
 // construction time.
 type MessageSubscriber interface {
-	SubscribeWithContext(ctx context.Context) (<-chan *message.Message, error)
+	SubscribeWithContext(ctx context.Context) (<-chan *nats.Message, error)
 }
 
 // TenantProvisioner is the NATS-driven worker that completes the
@@ -206,17 +204,18 @@ func (p *TenantProvisioner) Run(ctx context.Context) error {
 //     (DB connection blip, etc.). Nak — let JetStream redeliver.
 //   - nil: success or already-terminal (markFailed already persisted).
 //     Ack.
-func (p *TenantProvisioner) handleMessage(ctx context.Context, msg *message.Message) {
+func (p *TenantProvisioner) handleMessage(ctx context.Context, msg *nats.Message) {
 	err := p.processEvent(ctx, msg.Payload)
 	switch {
 	case err == nil:
-		msg.Ack()
+		_ = msg.Ack()
 	case errors.Is(err, errMalformedPayload), errors.Is(err, errTenantNotFound):
-		nats.TermMessage(msg) // best-effort; falls back to plain ack on non-JS subscribers
-		msg.Ack()
+		// Permanent — stop redelivering. Term implies "don't retry";
+		// no separate Ack needed.
+		_ = msg.Term()
 	default:
 		// Transient — let JetStream redeliver after AckWait.
-		msg.Nack()
+		_ = msg.Nack()
 	}
 }
 

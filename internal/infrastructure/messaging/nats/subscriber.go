@@ -2,64 +2,116 @@ package nats
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
-	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill-nats/v2/pkg/nats"
-	"github.com/ThreeDotsLabs/watermill/message"
+	natsgo "github.com/nats-io/nats.go"
 )
 
-// Subscriber wraps Watermill NATS subscriber
+// Subscriber tails core-NATS subjects with live-only delivery (no
+// JetStream durable state). Designed for the SSE bridge in the HTTP
+// handlers (run.go, stream.go) where the consumer is a per-request
+// stream that doesn't need server-side persistence.
+//
+// One *nats.Conn lives for the Subscriber's lifetime and is reused
+// across SubscribeWithContext calls — previously each call opened its
+// own watermill subscriber (= new connection) which leaked under
+// per-request subscription churn.
 type Subscriber struct {
-	natsURL string
-	logger  watermill.LoggerAdapter
+	conn *natsgo.Conn
 }
 
-// NewSubscriber creates a new NATS subscriber
-func NewSubscriber(natsURL, consumerGroup string, logger watermill.LoggerAdapter) (*Subscriber, error) {
-	return &Subscriber{
-		natsURL: natsURL,
-		logger:  logger,
-	}, nil
-}
-
-// Subscribe subscribes to a topic using a background context.
-// The subscription lives until Close() is called.
-// Deprecated: Use SubscribeWithContext for request-scoped subscriptions.
-func (s *Subscriber) Subscribe(topic string) (<-chan *message.Message, error) {
-	return s.SubscribeWithContext(context.Background(), topic)
-}
-
-// SubscribeWithContext subscribes to a topic with a cancellable context.
-// When ctx is canceled, the subscription's output channel is closed and
-// resources are released. Each call creates an independent Watermill
-// subscriber so that canceling one does not affect others.
-func (s *Subscriber) SubscribeWithContext(ctx context.Context, topic string) (<-chan *message.Message, error) {
-	sub, err := nats.NewSubscriber(
-		nats.SubscriberConfig{
-			URL:         s.natsURL,
-			Unmarshaler: nats.GobMarshaler{},
-		},
-		s.logger,
-	)
+// NewSubscriber connects to NATS and returns a Subscriber ready to
+// tail subjects. The connection is held for the lifetime of the
+// Subscriber.
+func NewSubscriber(natsURL string) (*Subscriber, error) {
+	if natsURL == "" {
+		return nil, errors.New("subscriber: natsURL is required")
+	}
+	conn, err := natsgo.Connect(natsURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("subscriber: connect: %w", err)
+	}
+	return &Subscriber{conn: conn}, nil
+}
+
+// SubscribeWithContext subscribes to topic until ctx is canceled. The
+// returned channel closes on cancel; messages flow until then.
+//
+// Core NATS has no ack — the returned *Message Ack/Nack/Term are no-ops.
+// Payload is the raw bytes published; UUID is the `Nats-Msg-Id` header
+// set by the producer; Metadata is the remaining headers.
+func (s *Subscriber) SubscribeWithContext(ctx context.Context, topic string) (<-chan *Message, error) {
+	if topic == "" {
+		return nil, errors.New("subscriber: topic is required")
+	}
+	if s.conn == nil {
+		return nil, errors.New("subscriber: closed")
 	}
 
-	ch, err := sub.Subscribe(ctx, topic)
+	// Buffered so a slow consumer doesn't block the NATS dispatcher
+	// goroutine for long under brief bursts. 64 is the conventional
+	// default for live-tail SSE bridges in this codebase.
+	out := make(chan *Message, 64)
+
+	sub, err := s.conn.Subscribe(topic, func(m *natsgo.Msg) {
+		msg := wireToMessage(ctx, m)
+		select {
+		case out <- msg:
+		case <-ctx.Done():
+		}
+	})
 	if err != nil {
-		sub.Close()
-		return nil, err
+		return nil, fmt.Errorf("subscriber: subscribe %q: %w", topic, err)
 	}
 
 	go func() {
 		<-ctx.Done()
-		sub.Close()
+		_ = sub.Unsubscribe()
+		close(out)
 	}()
 
-	return ch, nil
+	return out, nil
 }
 
-// Close is a no-op. Individual subscriptions are managed via their contexts.
+// Close drains the connection so in-flight messages flush before exit.
+// Safe to call multiple times.
 func (s *Subscriber) Close() error {
+	if s.conn == nil {
+		return nil
+	}
+	conn := s.conn
+	s.conn = nil
+	if err := conn.Drain(); err != nil {
+		return fmt.Errorf("subscriber: drain: %w", err)
+	}
 	return nil
+}
+
+// wireToMessage converts an incoming core-NATS message into our package
+// type. Extracts the Nats-Msg-Id header into UUID and copies the rest
+// of the headers into Metadata. Ack/Nack/Term remain nil (no-op).
+func wireToMessage(ctx context.Context, m *natsgo.Msg) *Message {
+	var (
+		uuid     string
+		metadata map[string]string
+	)
+	if m.Header != nil {
+		uuid = m.Header.Get(natsgo.MsgIdHdr)
+		for k, vs := range m.Header {
+			if k == natsgo.MsgIdHdr || len(vs) == 0 {
+				continue
+			}
+			if metadata == nil {
+				metadata = make(map[string]string, len(m.Header))
+			}
+			metadata[k] = vs[0]
+		}
+	}
+	return &Message{
+		UUID:     uuid,
+		Payload:  m.Data,
+		Metadata: metadata,
+		ctx:      ctx,
+	}
 }

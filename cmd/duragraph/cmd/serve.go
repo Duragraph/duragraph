@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ThreeDotsLabs/watermill"
 	duragraph "github.com/duragraph/duragraph"
 	"github.com/duragraph/duragraph/internal/application/command"
 	"github.com/duragraph/duragraph/internal/application/query"
@@ -366,9 +365,9 @@ func runServe(_ *cobra.Command, _ []string) error {
 	workerRepo := postgres.NewWorkerRepository(pools.Write)
 	taskRepo := postgres.NewTaskAssignmentRepository(pools.Write)
 
-	// Initialize NATS publisher (Watermill)
-	logger := watermill.NewStdLogger(false, false)
-	publisher, err := nats.NewPublisher(cfg.NATS.URL, logger)
+	// Initialize NATS publisher (direct JetStream — see
+	// internal/infrastructure/messaging/nats/publisher.go).
+	publisher, err := nats.NewPublisher(cfg.NATS.URL)
 	if err != nil {
 		return fmt.Errorf("failed to create NATS publisher: %w", err)
 	}
@@ -376,8 +375,10 @@ func runServe(_ *cobra.Command, _ []string) error {
 
 	slog.Info("NATS publisher connected")
 
-	// Initialize NATS subscriber (Watermill)
-	subscriber, err := nats.NewSubscriber(cfg.NATS.URL, "duragraph-server", logger)
+	// Initialize NATS subscriber for SSE bridges (live-only,
+	// core-NATS). Durable JetStream consumers live in their own
+	// NewJetStreamSubscriber instances.
+	subscriber, err := nats.NewSubscriber(cfg.NATS.URL)
 	if err != nil {
 		return fmt.Errorf("failed to create NATS subscriber: %w", err)
 	}

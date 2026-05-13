@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	wnats "github.com/ThreeDotsLabs/watermill-nats/v2/pkg/nats"
 	natsgo "github.com/nats-io/nats.go"
 )
 
@@ -72,11 +71,10 @@ func SubjectFor(aggregate string) (string, error) {
 // publishMessage). Fields use `any` for forward-compat — the CLI does
 // not depend on payload schema and just pretty-prints it.
 //
-// The wire format is gob-wrapped: outbox_relay marshals this struct as
-// JSON, hands it to Watermill which gob-encodes the message envelope
-// (UUID + payload + metadata), and the gob bytes ride NATS. So a
-// receiver must (1) gob-decode the watermill message, (2) JSON-decode
-// the resulting Payload back into this struct.
+// Wire format: raw JSON in the NATS message Data. The event's stable
+// ID (msg.EventID) also rides as the `Nats-Msg-Id` header for
+// JetStream dedup, but the CLI doesn't need that — `json.Unmarshal`
+// against msg.Data yields a fully-populated envelope.
 type EventEnvelope struct {
 	EventID       string         `json:"event_id"`
 	AggregateType string         `json:"aggregate_type"`
@@ -92,23 +90,15 @@ type EventEnvelope struct {
 // cancelled. Optional aggregateID filters messages client-side (since
 // thread/workflow IDs are not part of the NATS subject hierarchy).
 //
-// Implementation detail — gob unwrap:
+// Wire format: post-watermill, the publisher writes the EventEnvelope
+// as raw JSON in NATS msg.Data with `Nats-Msg-Id` (+ optional metadata)
+// in the headers. No gob envelope — `json.Unmarshal(m.Data, &env)` is
+// the whole decode path.
 //
-//	The publisher (internal/infrastructure/messaging/nats/publisher.go)
-//	uses watermill-nats v2's GobMarshaler. So the on-the-wire bytes
-//	are NOT raw JSON — they are a gob-encoded *watermill.Message
-//	whose .Payload field is the JSON-serialised EventEnvelope. We
-//	reuse wnats.GobMarshaler.Unmarshal here so the producer/consumer
-//	wire format stays single-sourced. The same pattern is used by
-//	internal/infrastructure/messaging/nats/jetstream_subscriber.go.
-//
-// Implementation detail — core NATS vs JetStream:
-//
-//	JetStream-published messages also fan out to plain core-NATS
-//	subscribers (it's just a stream layered on top of pub/sub). Using
-//	core nc.Subscribe avoids leaving durable consumer state on the
-//	broker every time someone runs `events tail` — the CLI is
-//	short-lived and best-effort, so live-only delivery is correct.
+// Core NATS vs JetStream: JetStream-published messages also fan out to
+// plain core-NATS subscribers (it's just a stream layered on top of
+// pub/sub). Using core nc.Subscribe avoids leaving durable consumer
+// state on the broker every time someone runs `events tail`.
 func SubscribeEvents(ctx context.Context, natsURL, subject, aggregateID string, fn func(EventEnvelope) error) error {
 	if natsURL == "" {
 		return errors.New("SubscribeEvents: natsURL is required")
@@ -123,26 +113,17 @@ func SubscribeEvents(ctx context.Context, natsURL, subject, aggregateID string, 
 	}
 	defer nc.Drain()
 
-	um := wnats.GobMarshaler{}
-
 	// Buffered errCh so a slow caller-side fn doesn't block the NATS
 	// dispatcher goroutine. The first error wins and unblocks the
 	// outer select.
 	errCh := make(chan error, 1)
 
 	sub, err := nc.Subscribe(subject, func(m *natsgo.Msg) {
-		// Step 1: gob → watermill.Message.
-		wmMsg, decodeErr := um.Unmarshal(m)
-		if decodeErr != nil {
-			// Not all messages on a wildcard subject are
-			// guaranteed to be watermill-encoded — be lenient and
-			// drop undecodable frames rather than aborting the
-			// whole tail.
-			return
-		}
-		// Step 2: JSON → EventEnvelope.
+		// JSON → EventEnvelope. Be lenient — wildcards on
+		// `duragraph.>` may catch non-envelope traffic that other
+		// engine subsystems publish; just drop undecodable frames.
 		var env EventEnvelope
-		if err := json.Unmarshal(wmMsg.Payload, &env); err != nil {
+		if err := json.Unmarshal(m.Data, &env); err != nil {
 			return
 		}
 		// Optional client-side aggregate-id filter.
