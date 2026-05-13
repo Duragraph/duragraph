@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { AuthError, loginUser, registerUser, toAuthUser } from "@/api/auth"
 import { setAuth } from "@/lib/auth"
+import { useCapabilities } from "@/hooks/useCapabilities"
 
 export const Route = createFileRoute("/_auth/login")({
   component: () => <LoginPage initialMode="login" />,
@@ -44,8 +45,40 @@ function friendlyMessage(err: unknown): string {
 }
 
 export function LoginPage({ initialMode = "login" }: { initialMode?: Mode }) {
+  const caps = useCapabilities()
   const navigate = useNavigate()
   const [mode, setMode] = useState<Mode>(initialMode)
+
+  // publicAuthGuard already ensured authEnabled=true. If password auth
+  // is off, the form here would just 404 on submit — render a clearer
+  // message instead. OAuth UI lives in a separate component once the
+  // OAuth flow is built; for now we just surface what's configured.
+  if (!caps.passwordAuthEnabled) {
+    return (
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle>Password sign-in disabled</CardTitle>
+          <CardDescription>
+            This deployment runs with <code>AUTH_PASSWORD_ENABLED=false</code>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {caps.oauthProviders.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Configured OAuth providers: {caps.oauthProviders.join(", ")}.
+              Ask your admin for the sign-in URL.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No auth methods are configured. Ask your admin to enable
+              either password or OAuth sign-in, or unset{" "}
+              <code>AUTH_ENABLED</code> for an open deployment.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
   const [form, setForm] = useState<FormState>(blank)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)

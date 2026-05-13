@@ -19,6 +19,7 @@ func TestInfo_Capabilities(t *testing.T) {
 		wantMode           EngineMode
 		wantPlatform       bool
 		wantAuth           bool
+		wantPasswordAuth   bool
 		wantOAuthProviders []string
 	}{
 		{
@@ -27,6 +28,7 @@ func TestInfo_Capabilities(t *testing.T) {
 			wantMode:           ModeServe,
 			wantPlatform:       false,
 			wantAuth:           false,
+			wantPasswordAuth:   false,
 			wantOAuthProviders: []string{},
 		},
 		{
@@ -47,6 +49,15 @@ func TestInfo_Capabilities(t *testing.T) {
 			wantMode:           ModeServe,
 			wantPlatform:       false,
 			wantAuth:           true,
+			wantOAuthProviders: []string{},
+		},
+		{
+			name: "password auth enabled toggle",
+			env: map[string]string{
+				"AUTH_PASSWORD_ENABLED": "true",
+			},
+			wantMode:           ModeServe,
+			wantPasswordAuth:   true,
 			wantOAuthProviders: []string{},
 		},
 		{
@@ -79,12 +90,14 @@ func TestInfo_Capabilities(t *testing.T) {
 			env: map[string]string{
 				"MIGRATOR_PLATFORM_ENABLED": "true",
 				"AUTH_ENABLED":              "true",
+				"AUTH_PASSWORD_ENABLED":     "true",
 				"OAUTH_GOOGLE_CLIENT_ID":    "g",
 				"OAUTH_GITHUB_CLIENT_ID":    "h",
 			},
 			wantMode:           ModeMultitenant,
 			wantPlatform:       true,
 			wantAuth:           true,
+			wantPasswordAuth:   true,
 			wantOAuthProviders: []string{"github", "google"},
 		},
 		{
@@ -106,6 +119,7 @@ func TestInfo_Capabilities(t *testing.T) {
 			for _, k := range []string{
 				"MIGRATOR_PLATFORM_ENABLED",
 				"AUTH_ENABLED",
+				"AUTH_PASSWORD_ENABLED",
 				"OAUTH_GOOGLE_CLIENT_ID",
 				"OAUTH_GITHUB_CLIENT_ID",
 			} {
@@ -142,6 +156,9 @@ func TestInfo_Capabilities(t *testing.T) {
 			}
 			if resp.AuthEnabled != tc.wantAuth {
 				t.Errorf("auth_enabled = %v, want %v", resp.AuthEnabled, tc.wantAuth)
+			}
+			if resp.PasswordAuthEnabled != tc.wantPasswordAuth {
+				t.Errorf("password_auth_enabled = %v, want %v", resp.PasswordAuthEnabled, tc.wantPasswordAuth)
 			}
 			if !slicesEqual(resp.OAuthProviders, tc.wantOAuthProviders) {
 				t.Errorf("oauth_providers = %v, want %v", resp.OAuthProviders, tc.wantOAuthProviders)
