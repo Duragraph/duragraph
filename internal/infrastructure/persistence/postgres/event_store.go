@@ -125,6 +125,19 @@ func (s *EventStore) saveEventsWithTx(ctx context.Context, tx pgx.Tx, streamID, 
 		}
 	}
 
+	// Wake up the outbox relay. The NOTIFY only becomes visible to
+	// LISTEN subscribers when the TX commits (Postgres semantics) — so
+	// a rollback drops both the outbox row AND its wake-up signal,
+	// preserving atomicity. Empty payload because the relay
+	// re-queries the outbox table on wake-up rather than trusting the
+	// notify payload; the only information that flows is "something
+	// changed". One notify per Save() regardless of event count keeps
+	// us well under pg_notify's 8000-byte payload limit (we send
+	// nothing).
+	if _, err := tx.Exec(ctx, `SELECT pg_notify('outbox_new', '')`); err != nil {
+		return errors.Internal("failed to notify outbox channel", err)
+	}
+
 	return nil
 }
 

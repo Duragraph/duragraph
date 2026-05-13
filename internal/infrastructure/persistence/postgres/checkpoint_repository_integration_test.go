@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/duragraph/duragraph/internal/domain/checkpoint"
 	"github.com/duragraph/duragraph/internal/infrastructure/persistence/postgres"
@@ -49,8 +50,14 @@ func TestCheckpointRepository_FindLatest(t *testing.T) {
 	repo := postgres.NewCheckpointRepository(testPool)
 	threadID := mustCreateThread(t, ctx)
 
-	cp1 := checkpoint.Reconstitute(pkguuid.New(), threadID, "ns", "cp1", "", nil, nil, nil, nil, timeNow())
-	cp2 := checkpoint.Reconstitute(pkguuid.New(), threadID, "ns", "cp2", "cp1", nil, nil, nil, nil, timeNow())
+	// Inject a deterministic 1ms gap. timeNow() is microsecond-
+	// truncated and two back-to-back calls can land in the same µs,
+	// which made FindLatest's `ORDER BY created_at DESC` flake under
+	// CI when the testcontainer happened to be fast.
+	t1 := timeNow()
+	t2 := t1.Add(time.Millisecond)
+	cp1 := checkpoint.Reconstitute(pkguuid.New(), threadID, "ns", "cp1", "", nil, nil, nil, nil, t1)
+	cp2 := checkpoint.Reconstitute(pkguuid.New(), threadID, "ns", "cp2", "cp1", nil, nil, nil, nil, t2)
 
 	repo.Save(ctx, cp1)
 	repo.Save(ctx, cp2)

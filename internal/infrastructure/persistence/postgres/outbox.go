@@ -140,12 +140,17 @@ func (o *Outbox) MarkAsFailed(ctx context.Context, id int64, errorMsg string) er
 	return nil
 }
 
-// Cleanup removes old published messages
+// Cleanup removes old published messages.
+//
+// Note on parameter substitution: a placeholder inside a string
+// literal (`INTERVAL '$1 days'`) is NOT substituted by pgx — Postgres
+// treats it as a literal `$1`. Use `make_interval(days => $1)` so the
+// retention value rides as a real bound parameter.
 func (o *Outbox) Cleanup(ctx context.Context, retentionDays int) (int64, error) {
 	result, err := o.pool.Exec(ctx, `
 		DELETE FROM outbox
 		WHERE published = TRUE
-		  AND published_at < NOW() - INTERVAL '$1 days'
+		  AND published_at < NOW() - make_interval(days => $1)
 	`, retentionDays)
 
 	if err != nil {
