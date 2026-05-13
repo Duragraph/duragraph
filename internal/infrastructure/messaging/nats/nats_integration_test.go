@@ -1,12 +1,9 @@
-//go:build integration
-
 package nats_test
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -14,15 +11,8 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 )
 
-func natsURL() string {
-	if u := os.Getenv("TEST_NATS_URL"); u != "" {
-		return u
-	}
-	return "nats://127.0.0.1:4223"
-}
-
 func TestTaskQueue_PublishAndSubscribe(t *testing.T) {
-	url := natsURL()
+	url := setupNATS(t)
 
 	queue, err := dgNats.NewTaskQueue(url)
 	if err != nil {
@@ -77,7 +67,7 @@ func TestTaskQueue_PublishAndSubscribe(t *testing.T) {
 }
 
 func TestTaskQueue_PublishRunEvent(t *testing.T) {
-	url := natsURL()
+	url := setupNATS(t)
 
 	queue, err := dgNats.NewTaskQueue(url)
 	if err != nil {
@@ -120,7 +110,7 @@ func TestTaskQueue_PublishRunEvent(t *testing.T) {
 }
 
 func TestTaskQueue_MultipleGraphSubscription(t *testing.T) {
-	url := natsURL()
+	url := setupNATS(t)
 
 	queue, err := dgNats.NewTaskQueue(url)
 	if err != nil {
@@ -161,7 +151,7 @@ func TestTaskQueue_MultipleGraphSubscription(t *testing.T) {
 }
 
 func TestNatsRawPubSub(t *testing.T) {
-	url := natsURL()
+	url := setupNATS(t)
 
 	nc, err := natsgo.Connect(url)
 	if err != nil {

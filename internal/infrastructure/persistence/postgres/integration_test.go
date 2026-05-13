@@ -1,99 +1,107 @@
-//go:build integration
-
 package postgres_test
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"testing"
 	"time"
 
-	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/testcontainers/testcontainers-go"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
+
+	pgmig "github.com/duragraph/duragraph/internal/infrastructure/persistence/postgres"
+	"github.com/duragraph/duragraph/internal/pkg/eventbus"
 )
 
+// testPool is the shared pool every integration test in this package
+// connects through. Populated by TestMain.
 var testPool *pgxpool.Pool
 
+// TestMain spins up a real postgres:15 via testcontainers, applies
+// BOTH platform + tenant migrations to a single DB (matching the
+// local-dev convention where everything lives in one DB), and exposes
+// a pgxpool against it.
+//
+// Container lifetime is package-scoped — one container per `go test
+// ./internal/infrastructure/persistence/postgres/` invocation. Tests
+// share the schema; each test should call cleanupAll(t) to truncate
+// stateful tables.
+//
+// First run downloads the postgres:15-alpine image (~80 MB). Subsequent
+// runs use the cached image and complete the boot+migration in ~5–8 s.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://duragraph_dev:3V55s0k8ksVZjD762m4i58nNiRlGJWg@127.0.0.1:5434/duragraph_dev?sslmode=disable"
-	}
+	const (
+		dbName = "duragraph_test"
+		dbUser = "duragraph_test"
+		dbPass = "duragraph_test"
+	)
 
-	var err error
-	testPool, err = pgxpool.New(ctx, dbURL)
+	pgContainer, err := tcpostgres.Run(ctx,
+		"postgres:15-alpine",
+		tcpostgres.WithDatabase(dbName),
+		tcpostgres.WithUsername(dbUser),
+		tcpostgres.WithPassword(dbPass),
+		testcontainers.WithWaitStrategy(
+			// Postgres restarts once during init; the "ready to accept
+			// connections" log fires twice. Waiting for the second
+			// occurrence avoids racing the init scripts.
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60*time.Second),
+		),
+	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create pool: %v\n", err)
+		fmt.Fprintf(os.Stderr, "postgres testcontainer: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := testcontainers.TerminateContainer(pgContainer); err != nil {
+			fmt.Fprintf(os.Stderr, "terminate postgres: %v\n", err)
+		}
+	}()
+
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "postgres conn string: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := testPool.Ping(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to ping database: %v\n", err)
+	// Apply tenant migrations only. External-package tests in this
+	// package (`postgres_test`) exclusively touch tenant tables (runs,
+	// outbox, events, ...) — never platform.users / platform.tenants.
+	// The 4 internal-package tests (migrator_test.go,
+	// pool_manager_test.go, tenant/user_repository_integration_test.go)
+	// own their own platform DB bootstrap via sharedContainer().
+	migrator, err := pgmig.NewMigrator(connStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build migrator: %v\n", err)
+		os.Exit(1)
+	}
+	if err := migrator.MigrateMainDB(ctx, dbName); err != nil {
+		fmt.Fprintf(os.Stderr, "MigrateMainDB: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := runMigrations(ctx, testPool); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to run migrations: %v\n", err)
+	testPool, err = pgxpool.New(ctx, connStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pgxpool: %v\n", err)
 		os.Exit(1)
 	}
 
 	code := m.Run()
-
 	testPool.Close()
 	os.Exit(code)
 }
 
-func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	sqlDir := filepath.Join("..", "..", "..", "..", "deploy", "sql")
-	entries, err := os.ReadDir(sqlDir)
-	if err != nil {
-		// PR #150 moved tenant migrations from deploy/sql/ into
-		// internal/infrastructure/persistence/postgres/migrations/tenant/
-		// (so they can be embed.FS'd by the runtime migrator) but did
-		// not update this TestMain. When the directory is gone, assume
-		// the production migrator has already applied schema to the
-		// dev DB (the standard `task up` flow does exactly that), and
-		// fall through. Existing repo-level integration tests connect
-		// to the same dev DB and assume schema is present.
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read sql dir: %w", err)
-	}
-
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".sql" {
-			files = append(files, filepath.Join(sqlDir, e.Name()))
-		}
-	}
-	sort.Strings(files)
-
-	for _, f := range files {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", f, err)
-		}
-		// Ignore errors: dev DB may already have schema applied.
-		// Migrations use CREATE TABLE IF NOT EXISTS but CREATE INDEX
-		// without IF NOT EXISTS, so re-running will error on indexes.
-		pool.Exec(ctx, string(data))
-	}
-
-	// Verify schema is usable by checking a core table
-	var exists bool
-	err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='runs')").Scan(&exists)
-	if err != nil || !exists {
-		return fmt.Errorf("schema verification failed: runs table not found")
-	}
-	return nil
-}
-
+// cleanupAll truncates every table that integration tests touch.
+// Cheap on an empty schema, idempotent — missing tables are ignored
+// (a few migrations are conditional on features that older test files
+// pre-date).
 func cleanupAll(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
@@ -108,7 +116,7 @@ func cleanupAll(t *testing.T) {
 	}
 	for _, tbl := range tables {
 		if _, err := testPool.Exec(ctx, fmt.Sprintf("DELETE FROM %s", tbl)); err != nil {
-			// table may not exist, ignore
+			// table may not exist on this schema yet; ignore
 		}
 	}
 }
@@ -163,7 +171,6 @@ func timeNow() time.Time {
 }
 
 func newUUID() string {
-	// Simple UUID v4 for test isolation
 	b := make([]byte, 16)
 	for i := range b {
 		b[i] = byte(time.Now().UnixNano()>>(i*4)) ^ byte(i*37+17)

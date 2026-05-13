@@ -14,7 +14,7 @@ import (
 // redelivering. Without redelivery the test can prove "Ack worked" by
 // observing no second delivery within an AckWait window.
 func TestJetStreamSubscriber_AckCommits(t *testing.T) {
-	url := startEmbeddedNATS(t)
+	url := setupNATS(t)
 
 	pub, err := dgNats.NewPublisher(url)
 	if err != nil {
@@ -73,7 +73,7 @@ func TestJetStreamSubscriber_AckCommits(t *testing.T) {
 // AckWait) for nak'd messages, so the second delivery should arrive
 // quickly.
 func TestJetStreamSubscriber_NackTriggersRedelivery(t *testing.T) {
-	url := startEmbeddedNATS(t)
+	url := setupNATS(t)
 
 	pub, err := dgNats.NewPublisher(url)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestJetStreamSubscriber_NackTriggersRedelivery(t *testing.T) {
 // redelivery even on transient-error semantics — the poison-message
 // escape hatch the tenant_provisioner uses for malformed payloads.
 func TestJetStreamSubscriber_TermPermanentlyDrops(t *testing.T) {
-	url := startEmbeddedNATS(t)
+	url := setupNATS(t)
 
 	pub, err := dgNats.NewPublisher(url)
 	if err != nil {
