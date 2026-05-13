@@ -7,6 +7,7 @@ import (
 
 	"github.com/duragraph/duragraph/internal/pkg/errors"
 	"github.com/duragraph/duragraph/internal/pkg/eventbus"
+	"github.com/duragraph/duragraph/internal/pkg/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -78,7 +79,10 @@ func (s *EventStore) saveEventsWithTx(ctx context.Context, tx pgx.Tx, streamID, 
 		return errors.Internal("failed to get current version", err)
 	}
 
-	// Save events
+	// Save events. event_id is generated in application code (was a DB
+	// default in v0.7.7 and earlier) so we can also write the outbox
+	// row in the same transaction with that same ID — see the outbox
+	// insert below.
 	for i, event := range events {
 		version := currentVersion + i + 1
 
@@ -93,13 +97,31 @@ func (s *EventStore) saveEventsWithTx(ctx context.Context, tx pgx.Tx, streamID, 
 		}
 		metadataJSON, _ := json.Marshal(metadata)
 
+		eventID := uuid.New()
+
 		_, err = tx.Exec(ctx, `
-			INSERT INTO events (stream_id, aggregate_type, aggregate_id, event_type, event_version, payload, metadata)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, existingStreamID, aggregateType, aggregateID, event.EventType(), version, payload, metadataJSON)
+			INSERT INTO events (event_id, stream_id, aggregate_type, aggregate_id, event_type, event_version, payload, metadata)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`, eventID, existingStreamID, aggregateType, aggregateID, event.EventType(), version, payload, metadataJSON)
 
 		if err != nil {
 			return errors.Internal("failed to save event", err)
+		}
+
+		// Transactional outbox write — same TX as the event so a
+		// rollback drops both. Replaces the auto_publish_to_outbox
+		// trigger dropped by migration 013. ON CONFLICT DO NOTHING is
+		// a safety net for the deploy window where an older engine
+		// instance might still have the trigger active and write the
+		// same row.
+		_, err = tx.Exec(ctx, `
+			INSERT INTO outbox (event_id, aggregate_type, aggregate_id, event_type, payload, metadata)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (event_id) DO NOTHING
+		`, eventID, aggregateType, aggregateID, event.EventType(), payload, metadataJSON)
+
+		if err != nil {
+			return errors.Internal("failed to save outbox row", err)
 		}
 	}
 
