@@ -59,6 +59,11 @@ type InfoResponse struct {
 	PlatformEnabled bool `json:"platform_enabled"`
 	// AuthEnabled mirrors the AUTH_ENABLED env toggle (JWT/auth gating).
 	AuthEnabled bool `json:"auth_enabled"`
+	// PasswordAuthEnabled mirrors the AUTH_PASSWORD_ENABLED env toggle —
+	// whether /api/auth/register and /api/auth/login routes are registered.
+	// The dashboard reads this to decide whether to render the password
+	// login form vs. fall through to OAuth-only or no-auth UX.
+	PasswordAuthEnabled bool `json:"password_auth_enabled"`
 	// OAuthProviders lists configured OAuth providers in alphabetical order.
 	// Always non-nil so the JSON shape is `[]` not `null`.
 	OAuthProviders []string `json:"oauth_providers"`
@@ -78,6 +83,7 @@ func (h *SystemHandler) Ok(c echo.Context) error {
 func (h *SystemHandler) Info(c echo.Context) error {
 	platformEnabled := os.Getenv("MIGRATOR_PLATFORM_ENABLED") == "true"
 	authEnabled := os.Getenv("AUTH_ENABLED") == "true"
+	passwordAuthEnabled := os.Getenv("AUTH_PASSWORD_ENABLED") == "true"
 
 	// alphabetical, stable for tests
 	oauthProviders := []string{}
@@ -114,9 +120,10 @@ func (h *SystemHandler) Info(c echo.Context) error {
 			Checkpointer: "postgres",
 			Store:        "postgres",
 		},
-		Mode:            mode,
-		PlatformEnabled: platformEnabled,
-		AuthEnabled:     authEnabled,
-		OAuthProviders:  oauthProviders,
+		Mode:                mode,
+		PlatformEnabled:     platformEnabled,
+		AuthEnabled:         authEnabled,
+		PasswordAuthEnabled: passwordAuthEnabled,
+		OAuthProviders:      oauthProviders,
 	})
 }

@@ -21,6 +21,7 @@ export interface Capabilities {
   mode: EngineMode
   platformEnabled: boolean
   authEnabled: boolean
+  passwordAuthEnabled: boolean
   oauthProviders: OAuthProvider[]
 }
 
@@ -33,6 +34,7 @@ interface InfoResponseWire {
   mode: EngineMode
   platform_enabled: boolean
   auth_enabled: boolean
+  password_auth_enabled: boolean
   oauth_providers: OAuthProvider[]
 }
 
@@ -53,6 +55,7 @@ export async function fetchInfo(): Promise<Capabilities> {
     mode: raw.mode,
     platformEnabled: raw.platform_enabled,
     authEnabled: raw.auth_enabled,
+    passwordAuthEnabled: raw.password_auth_enabled,
     oauthProviders: raw.oauth_providers ?? [],
   }
 }
