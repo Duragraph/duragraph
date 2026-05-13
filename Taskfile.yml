@@ -141,6 +141,14 @@ tasks:
     cmds:
       - pytest -v
 
+  test:smoke:
+    desc: Tier-2 smoke test — spawns a real duragraph serve subprocess
+      against testcontainers Postgres + NATS, exercises the public
+      REST + outbox→NATS pipeline end-to-end. Runs in standard CI
+      via `go test ./...` (no build tag); ~5s on a warm cache.
+    cmds:
+      - go test -v -count=1 ./tests/smoke/
+
   test:soak:
     desc: Load / soak tests
     dir: tests/soak
