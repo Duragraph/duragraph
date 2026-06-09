@@ -37,22 +37,36 @@ type group struct {
 }
 
 type endpoint struct {
-	Name   string   `yaml:"name"`
-	Method string   `yaml:"method"`
-	Path   string   `yaml:"path"`
-	Kind   string   `yaml:"kind"`
-	Outbox bool     `yaml:"outbox"`
-	Events []string `yaml:"events"`
-	Steps  []string `yaml:"steps"`
+	Name     string   `yaml:"name"`
+	Method   string   `yaml:"method"`
+	Path     string   `yaml:"path"`
+	Kind     string   `yaml:"kind"`
+	Outbox   bool     `yaml:"outbox"`
+	Events   []string `yaml:"events"`
+	Steps    []string `yaml:"steps"`
+	Request  string   `yaml:"request"`
+	Response string   `yaml:"response"`
+	Impl     *impl    `yaml:"impl"`
+}
+
+// impl is the real-body spec for an endpoint (absent ⇒ scaffold the handler).
+type impl struct {
+	Mode      string   `yaml:"mode"`       // write_returning | read_one
+	Aggregate string   `yaml:"aggregate"`  // event aggregate type
+	Row       string   `yaml:"row"`        // db row struct to scan into
+	Query     string   `yaml:"query"`      // SQL (raw, $1.. params)
+	Args      []string `yaml:"args"`       // Go expressions bound as query args
+	PathParam string   `yaml:"path_param"` // path param parsed as uuid (read_one)
 }
 
 // view types passed to the template (with computed fields).
 type groupView struct {
-	Name      string
-	Pascal    string
-	PoolExpr  string
-	NeedsTx   bool
-	Endpoints []endpointView
+	Name        string
+	Pascal      string
+	PoolExpr    string
+	NeedsTx     bool
+	NeedsErrors bool
+	Endpoints   []endpointView
 }
 
 type endpointView struct {
@@ -127,6 +141,7 @@ func main() {
 
 	tmpl := template.Must(template.New("group").Funcs(template.FuncMap{
 		"aggFor": aggFor,
+		"join":   strings.Join,
 	}).Parse(groupTmpl))
 
 	var generated, skipped []string
@@ -189,6 +204,12 @@ func toView(g group) groupView {
 		if ev.IsWrite && e.Outbox {
 			gv.NeedsTx = true
 			ev.ProjectionSteps = e.Steps
+		}
+		if e.Impl != nil {
+			gv.NeedsTx = true // impl bodies use pgx + uuid
+			if e.Impl.Mode == "read_one" {
+				gv.NeedsErrors = true
+			}
 		}
 		gv.Endpoints = append(gv.Endpoints, ev)
 	}

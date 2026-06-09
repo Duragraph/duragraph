@@ -4,6 +4,7 @@
 package endpoints
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -32,25 +33,30 @@ func (s *Server) RegisterAssistants(g *echo.Group) {
 func (s *Server) AssistantsCreate(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (AssistantsCreate request schema)
+	var req AssistantCreate
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
+	aggID := uuid.New()
+	payload := mustJSON(req)
 	events := []Event{
-		{AggregateType: "Assistant", AggregateID: aggID, EventType: "assistant.created"},
+		{AggregateType: "Assistant", AggregateID: aggID, EventType: "assistant.created", Payload: payload},
 	}
+	var row assistantRow
 	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   INSERT events: event_type='assistant.created', payload={name, graph_id, config, tools}
-		//   INSERT outbox (same event_id, same TX)
-		//   pg_notify('outbox_new','')
-		//   INSERT assistants projection (id, graph_id, name, model, tools, config)
-		return nil
+		rows, err := tx.Query(ctx, `INSERT INTO assistants (id, graph_id, name, description, config, metadata)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+`, aggID, req.GraphId, deref(req.Name), req.Description, mustJSON(req.Config), mustJSON(req.Metadata))
+		if err != nil {
+			return err
+		}
+		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[assistantRow])
+		return err
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
+	return c.JSON(http.StatusCreated, row.toAPI())
 }
 
 // AssistantsSearch — POST /assistants/search  (kind: read)
@@ -78,9 +84,24 @@ func (s *Server) AssistantsCount(c echo.Context) error {
 func (s *Server) AssistantsGet(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM assistants WHERE id = :id
-	return c.JSON(http.StatusOK, map[string]any{})
+	pathID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	rows, err := s.Tenant.Query(ctx, `SELECT id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+FROM assistants WHERE id = $1
+`, pathID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[assistantRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
 }
 
 // AssistantsUpdate — PUT /assistants/{id}  (kind: write)

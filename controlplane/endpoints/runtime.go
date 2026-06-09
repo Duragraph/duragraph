@@ -8,6 +8,7 @@ package endpoints
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -103,4 +104,25 @@ func jsonOrEmpty(b []byte) []byte {
 		return []byte("{}")
 	}
 	return b
+}
+
+// mustJSON marshals v to JSON for jsonb columns / event payloads. A nil or
+// unmarshalable value becomes an empty object rather than failing the write.
+func mustJSON(v any) []byte {
+	if v == nil {
+		return []byte("{}")
+	}
+	b, err := json.Marshal(v)
+	if err != nil || len(b) == 0 {
+		return []byte("{}")
+	}
+	return b
+}
+
+// deref returns the pointed-to string or "" if nil (for optional request fields).
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

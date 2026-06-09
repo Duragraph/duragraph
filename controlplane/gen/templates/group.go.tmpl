@@ -4,6 +4,9 @@
 package endpoints
 
 import (
+{{- if .NeedsErrors}}
+	"errors"
+{{- end}}
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -27,7 +30,51 @@ func (s *Server) Register{{.Pascal}}(g *echo.Group) {
 func (s *Server) {{.Handler}}(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-{{- if .IsWrite}}
+{{- if .Impl}}
+{{- if eq .Impl.Mode "write_returning"}}
+	var req {{.Request}}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	aggID := uuid.New()
+	payload := mustJSON(req)
+	{{- $agg := .Impl.Aggregate}}
+	events := []Event{
+{{- range .Events}}
+		{AggregateType: "{{$agg}}", AggregateID: aggID, EventType: "{{.}}", Payload: payload},
+{{- end}}
+	}
+	var row {{.Impl.Row}}
+	if err := s.writeTx(ctx, {{$.PoolExpr}}, events, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
+		if err != nil {
+			return err
+		}
+		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[{{.Impl.Row}}])
+		return err
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusCreated, row.toAPI())
+{{- else if eq .Impl.Mode "read_one"}}
+	pathID, err := uuid.Parse(c.Param("{{.Impl.PathParam}}"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam}}")
+	}
+	rows, err := {{$.PoolExpr}}.Query(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[{{.Impl.Row}}])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
+{{- end}}
+{{- else if .IsWrite}}
 	var req map[string]any // TODO: bind OpenAPI type ({{.Pascal}} request schema)
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
