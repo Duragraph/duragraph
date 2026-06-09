@@ -1,0 +1,91 @@
+// Code generated from controlplane/gen/endpoints.yaml — DO NOT EDIT.
+// Source of truth: spec/models/d2/endpoint-queries.d2 (via endpoints.yaml).
+// Regenerate: go run ./controlplane/gen
+package endpoints
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+{{- if .NeedsTx}}
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+{{- end}}
+)
+
+// Register{{.Pascal}} mounts the {{.Name}} endpoints on g (the /api/v1 group).
+func (s *Server) Register{{.Pascal}}(g *echo.Group) {
+{{- range .Endpoints}}
+	g.{{.EchoVerb}}("{{.EchoPath}}", s.{{.Handler}})
+{{- end}}
+}
+{{range .Endpoints}}
+// {{.Handler}} — {{.Method}} {{.Path}}  (kind: {{.Kind}})
+{{- range .Steps}}
+//   - {{.}}
+{{- end}}
+func (s *Server) {{.Handler}}(c echo.Context) error {
+	ctx := c.Request().Context()
+	_ = ctx
+{{- if .IsWrite}}
+	var req map[string]any // TODO: bind OpenAPI type ({{.Pascal}} request schema)
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+{{- if .Outbox}}
+	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
+	events := []Event{
+{{- range .Events}}
+		{AggregateType: "{{aggFor .}}", AggregateID: aggID, EventType: "{{.}}"},
+{{- end}}
+	}
+	if err := s.writeTx(ctx, {{$.PoolExpr}}, events, func(tx pgx.Tx) error {
+		// TODO projection write:
+{{- range .ProjectionSteps}}
+		//   {{.}}
+{{- end}}
+		return nil
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+{{- else}}
+	// projection-only write (not event-sourced — no outbox):
+{{- range .Steps}}
+	//   {{.}}
+{{- end}}
+{{- end}}
+	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
+{{- else if .IsRead}}
+	// TODO read query (no side effects):
+{{- range .Steps}}
+	//   {{.}}
+{{- end}}
+	return c.JSON(http.StatusOK, map[string]any{})
+{{- else if eq .Kind "delete"}}
+	// TODO hard delete:
+{{- range .Steps}}
+	//   {{.}}
+{{- end}}
+	return c.NoContent(http.StatusNoContent)
+{{- else if eq .Kind "sse"}}
+	// SSE: subscribe to NATS, stream frames to client. Bespoke — fill in.
+{{- range .Steps}}
+	//   {{.}}
+{{- end}}
+	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+	return echo.NewHTTPError(http.StatusNotImplemented, "sse handler not implemented")
+{{- else if eq .Kind "wait"}}
+	// WAIT: create/read then block on a terminal NATS event. Bespoke — fill in.
+{{- range .Steps}}
+	//   {{.}}
+{{- end}}
+	return echo.NewHTTPError(http.StatusNotImplemented, "wait handler not implemented")
+{{- else}}
+	// SPECIAL: bespoke (auth redirect / health / metrics). Fill in.
+{{- range .Steps}}
+	//   {{.}}
+{{- end}}
+	return echo.NewHTTPError(http.StatusNotImplemented, "handler not implemented")
+{{- end}}
+}
+{{end}}

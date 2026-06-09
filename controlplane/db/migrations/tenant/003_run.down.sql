@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS execution_history;
+DROP TABLE IF EXISTS interrupts;
+DROP TABLE IF EXISTS runs;
