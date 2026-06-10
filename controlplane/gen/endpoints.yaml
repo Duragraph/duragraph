@@ -57,12 +57,31 @@ groups:
         path: /assistants/search
         kind: read
         outbox: false
+        request: AssistantSearchRequest
+        response: Assistant
+        impl:
+          mode: read_list
+          row: assistantRow
+          query: |
+            SELECT id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+            FROM assistants
+            WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
+          args: ["jsonbOrNil(req.Metadata)", "intOr(req.Limit, 20)", "intOr(req.Offset, 0)"]
         steps: ["SELECT * FROM assistants WHERE metadata @> :filter ORDER BY created_at DESC LIMIT :limit OFFSET :offset"]
       - name: count
         method: POST
         path: /assistants/count
         kind: read
         outbox: false
+        request: AssistantCountRequest
+        impl:
+          mode: count
+          query: |
+            SELECT count(*) FROM assistants
+            WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+          args: ["jsonbOrNil(req.Metadata)"]
         steps: ["SELECT count(*) FROM assistants WHERE metadata @> :filter"]
       - name: get
         method: GET
@@ -80,12 +99,30 @@ groups:
           args: ["pathID"]
         steps: ["SELECT * FROM assistants WHERE id = :id"]
       - name: update
-        method: PUT
+        method: PATCH
         path: /assistants/{id}
         kind: write
         outbox: true
         events: [assistant.updated]
         nats: {subject: assistant.updated, stream: RUNS}
+        request: AssistantPatch
+        response: Assistant
+        impl:
+          mode: update
+          aggregate: Assistant
+          row: assistantRow
+          path_param: id
+          query: |
+            UPDATE assistants SET
+              graph_id = COALESCE($2, graph_id),
+              name = COALESCE($3, name),
+              description = COALESCE($4, description),
+              config = COALESCE($5, config),
+              context = COALESCE($6, context),
+              metadata = COALESCE($7, metadata)
+            WHERE id = $1
+            RETURNING id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+          args: ["pathID", "req.GraphId", "req.Name", "req.Description", "jsonbOrNil(req.Config)", "jsonbOrNil(req.Context)", "jsonbOrNil(req.Metadata)"]
         steps:
           - "INSERT events: event_type='assistant.updated', payload={changed fields}"
           - "INSERT outbox (same event_id, same TX)"
@@ -98,6 +135,12 @@ groups:
         outbox: true
         events: [assistant.deleted]
         nats: {subject: assistant.deleted, stream: RUNS}
+        impl:
+          mode: delete
+          aggregate: Assistant
+          path_param: id
+          query: "DELETE FROM assistants WHERE id = $1"
+          args: ["pathID"]
         steps:
           - "INSERT events: event_type='assistant.deleted'"
           - "INSERT outbox (same event_id, same TX)"

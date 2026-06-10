@@ -171,3 +171,96 @@ func TestAssistantsCreateGet(t *testing.T) {
 		t.Errorf("get missing: want 404, got %d", rec3.Code)
 	}
 }
+
+// TestAssistantsCRUD exercises the search/count/update/delete impl modes.
+func TestAssistantsCRUD(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, "TRUNCATE assistants, events, outbox, event_streams CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestServer()
+
+	create := func(graph string) Assistant {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/assistants",
+			strings.NewReader(fmt.Sprintf(`{"graph_id":%q,"name":"n"}`, graph)))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", graph, rec.Code, rec.Body.String())
+		}
+		var a Assistant
+		_ = json.Unmarshal(rec.Body.Bytes(), &a)
+		return a
+	}
+	a1 := create("g1")
+	_ = create("g2")
+
+	// --- count == 2 ---
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistants/count", strings.NewReader(`{}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+	var count int
+	_ = json.Unmarshal(rec.Body.Bytes(), &count)
+	if count != 2 {
+		t.Errorf("count: want 2, got %d (%s)", count, rec.Body.String())
+	}
+
+	// --- search returns 2 ---
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/assistants/search", strings.NewReader(`{"limit":10}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+	var list []Assistant
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("search decode: %v (%s)", err, rec.Body.String())
+	}
+	if len(list) != 2 {
+		t.Errorf("search: want 2, got %d", len(list))
+	}
+
+	// --- update a1's name ---
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/assistants/"+a1.AssistantId.String(),
+		strings.NewReader(`{"name":"Renamed"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: want 200, got %d %s", rec.Code, rec.Body.String())
+	}
+	var updated Assistant
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if updated.Name == nil || *updated.Name != "Renamed" {
+		t.Errorf("update name: want Renamed, got %v", updated.Name)
+	}
+	// graph_id preserved (COALESCE on omitted field)
+	if updated.GraphId != "g1" {
+		t.Errorf("update graph_id: want g1 preserved, got %q", updated.GraphId)
+	}
+
+	// --- delete a1 → then 404 ---
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/assistants/"+a1.AssistantId.String(), nil)
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("delete: want 200, got %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/assistants/"+a1.AssistantId.String(), nil)
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("get deleted: want 404, got %d", rec.Code)
+	}
+
+	// --- count == 1 ---
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/assistants/count", strings.NewReader(`{}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+	_ = json.Unmarshal(rec.Body.Bytes(), &count)
+	if count != 1 {
+		t.Errorf("count after delete: want 1, got %d", count)
+	}
+}

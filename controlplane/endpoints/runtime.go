@@ -126,3 +126,24 @@ func deref(s *string) string {
 	}
 	return *s
 }
+
+// intOr returns the pointed-to int or def if nil (for optional limit/offset).
+func intOr(p *int, def int) int {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+// jsonbOrNil marshals an optional map for a `metadata @> $n` filter, returning
+// nil (SQL NULL) when absent so the filter clause matches everything.
+func jsonbOrNil(m *map[string]interface{}) any {
+	if m == nil {
+		return nil
+	}
+	b, err := json.Marshal(*m)
+	if err != nil {
+		return nil
+	}
+	return b
+}

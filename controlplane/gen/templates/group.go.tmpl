@@ -73,6 +73,83 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, row.toAPI())
+{{- else if eq .Impl.Mode "update"}}
+	pathID, err := uuid.Parse(c.Param("{{.Impl.PathParam}}"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam}}")
+	}
+	var req {{.Request}}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	payload := mustJSON(req)
+	{{- $aggU := .Impl.Aggregate}}
+	events := []Event{
+{{- range .Events}}
+		{AggregateType: "{{$aggU}}", AggregateID: pathID, EventType: "{{.}}", Payload: payload},
+{{- end}}
+	}
+	var row {{.Impl.Row}}
+	if err := s.writeTx(ctx, {{$.PoolExpr}}, events, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
+		if err != nil {
+			return err
+		}
+		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[{{.Impl.Row}}])
+		return err
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
+{{- else if eq .Impl.Mode "delete"}}
+	pathID, err := uuid.Parse(c.Param("{{.Impl.PathParam}}"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam}}")
+	}
+	{{- $aggD := .Impl.Aggregate}}
+	events := []Event{
+{{- range .Events}}
+		{AggregateType: "{{$aggD}}", AggregateID: pathID, EventType: "{{.}}"},
+{{- end}}
+	}
+	if err := s.writeTx(ctx, {{$.PoolExpr}}, events, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
+		return err
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusOK)
+{{- else if eq .Impl.Mode "read_list"}}
+	var req {{.Request}}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	rows, err := {{$.PoolExpr}}.Query(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByName[{{.Impl.Row}}])
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	out := make([]{{.Response}}, len(list))
+	for i := range list {
+		out[i] = list[i].toAPI()
+	}
+	return c.JSON(http.StatusOK, out)
+{{- else if eq .Impl.Mode "count"}}
+	var req {{.Request}}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	var n int
+	if err := {{$.PoolExpr}}.QueryRow(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}}).Scan(&n); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, n)
 {{- end}}
 {{- else if .IsWrite}}
 	var req map[string]any // TODO: bind OpenAPI type ({{.Pascal}} request schema)
