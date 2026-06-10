@@ -12,6 +12,8 @@ CREATE TABLE assistants (
     instructions TEXT,
     tools        JSONB NOT NULL DEFAULT '[]'::jsonb,
     config       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    context      JSONB NOT NULL DEFAULT '{}'::jsonb,  -- LangGraph static context
+    version      INTEGER NOT NULL DEFAULT 1,          -- LangGraph assistant version
     metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -29,6 +31,10 @@ CREATE TRIGGER update_assistants_updated_at
 -- assistant link is per-run, not per-thread.
 CREATE TABLE threads (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    status     VARCHAR(20) NOT NULL DEFAULT 'idle'      -- LangGraph thread status
+                   CHECK (status IN ('idle', 'busy', 'interrupted', 'error')),
+    values     JSONB,                                   -- latest thread state values
+    config     JSONB NOT NULL DEFAULT '{}'::jsonb,      -- thread config
     metadata   JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

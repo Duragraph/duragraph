@@ -15,6 +15,9 @@ CREATE TABLE runs (
     output       JSONB,
     error        TEXT,
     metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    kwargs       JSONB NOT NULL DEFAULT '{}'::jsonb,   -- LangGraph run kwargs
+    multitask_strategy VARCHAR(20) NOT NULL DEFAULT 'reject'
+                     CHECK (multitask_strategy IN ('reject', 'rollback', 'interrupt', 'enqueue')),
     version      INTEGER NOT NULL DEFAULT 0,
     lease_epoch  INTEGER NOT NULL DEFAULT 0,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),

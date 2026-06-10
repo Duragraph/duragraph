@@ -34,10 +34,12 @@ CREATE TABLE crons (
     thread_id    UUID REFERENCES threads (id) ON DELETE CASCADE,
     assistant_id UUID NOT NULL REFERENCES assistants (id) ON DELETE CASCADE,
     schedule     VARCHAR(100) NOT NULL,
-    input        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    input        JSONB NOT NULL DEFAULT '{}'::jsonb,   -- API exposes as 'payload'
     config       JSONB NOT NULL DEFAULT '{}'::jsonb,
     metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
-    next_run_at  TIMESTAMPTZ,
+    end_time     TIMESTAMPTZ,                          -- LangGraph: stop after (nullable)
+    user_id      UUID,                                 -- LangGraph: owning user (nullable)
+    next_run_at  TIMESTAMPTZ,                          -- API exposes as 'next_run_date'
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
