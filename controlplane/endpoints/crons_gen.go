@@ -4,8 +4,11 @@
 package endpoints
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 )
 
@@ -24,13 +27,30 @@ func (s *Server) RegisterCrons(g *echo.Group) {
 func (s *Server) CronsCreate(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (CronsCreate request schema)
+	pathID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	var req CronCreate
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	// projection-only write (not event-sourced — no outbox):
-	//   INSERT crons (id, thread_id, assistant_id, schedule, input, config)  # cron def, not domain event
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
+	var row cronRow
+	rows, err := s.Tenant.Query(ctx, `INSERT INTO crons (thread_id, assistant_id, schedule, input, metadata)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+`, pathID, asUUID(req.AssistantId), req.Schedule, mustJSON(req.Input), mustJSON(req.Metadata))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[cronRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
 }
 
 // CronsList — GET /runs/crons  (kind: read)
@@ -38,9 +58,21 @@ func (s *Server) CronsCreate(c echo.Context) error {
 func (s *Server) CronsList(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM crons ORDER BY created_at DESC
-	return c.JSON(http.StatusOK, map[string]any{})
+	rows, err := s.Tenant.Query(ctx, `SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+FROM crons ORDER BY created_at DESC
+`)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByName[cronRow])
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	out := make([]Cron, len(list))
+	for i := range list {
+		out[i] = list[i].toAPI()
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // CronsSearch — POST /runs/crons/search  (kind: read)
@@ -48,9 +80,29 @@ func (s *Server) CronsList(c echo.Context) error {
 func (s *Server) CronsSearch(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM crons WHERE metadata @> :filter
-	return c.JSON(http.StatusOK, map[string]any{})
+	var req CronSearch
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	rows, err := s.Tenant.Query(ctx, `SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+FROM crons
+WHERE ($1::uuid IS NULL OR assistant_id = $1)
+  AND ($2::uuid IS NULL OR thread_id = $2)
+ORDER BY created_at DESC
+LIMIT $3 OFFSET $4
+`, req.AssistantId, req.ThreadId, intOr(req.Limit, 20), intOr(req.Offset, 0))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByName[cronRow])
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	out := make([]Cron, len(list))
+	for i := range list {
+		out[i] = list[i].toAPI()
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // CronsCount — POST /runs/crons/count  (kind: read)
@@ -58,9 +110,18 @@ func (s *Server) CronsSearch(c echo.Context) error {
 func (s *Server) CronsCount(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT count(*) FROM crons WHERE ...
-	return c.JSON(http.StatusOK, map[string]any{})
+	var req CronCountRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	var n int
+	if err := s.Tenant.QueryRow(ctx, `SELECT count(*) FROM crons
+WHERE ($1::uuid IS NULL OR assistant_id = $1)
+  AND ($2::uuid IS NULL OR thread_id = $2)
+`, req.AssistantId, req.ThreadId).Scan(&n); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, n)
 }
 
 // CronsGet — GET /runs/crons/{cron_id}  (kind: read)
@@ -68,9 +129,24 @@ func (s *Server) CronsCount(c echo.Context) error {
 func (s *Server) CronsGet(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM crons WHERE id = :cron_id
-	return c.JSON(http.StatusOK, map[string]any{})
+	pathID, err := uuid.Parse(c.Param("cron_id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid cron_id")
+	}
+	rows, err := s.Tenant.Query(ctx, `SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+FROM crons WHERE id = $1
+`, pathID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[cronRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
 }
 
 // CronsDelete — DELETE /runs/crons/{cron_id}  (kind: delete)
@@ -78,7 +154,16 @@ func (s *Server) CronsGet(c echo.Context) error {
 func (s *Server) CronsDelete(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO hard delete:
-	//   DELETE crons WHERE id = :cron_id
-	return c.NoContent(http.StatusNoContent)
+	pathID, err := uuid.Parse(c.Param("cron_id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid cron_id")
+	}
+	ct, err := s.Tenant.Exec(ctx, `DELETE FROM crons WHERE id = $1`, pathID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if ct.RowsAffected() == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "not found")
+	}
+	return c.NoContent(http.StatusOK)
 }

@@ -165,6 +165,55 @@ func translateRunStatus(dbStatus string) RunStatus {
 	}
 }
 
+// cronRow mirrors the crons table (postgres.d2 worker_ctx).
+type cronRow struct {
+	ID          uuid.UUID  `db:"id"`
+	ThreadID    *uuid.UUID `db:"thread_id"` // nullable for stateless crons
+	AssistantID uuid.UUID  `db:"assistant_id"`
+	Schedule    string     `db:"schedule"`
+	Input       []byte     `db:"input"`       // jsonb — API 'payload'
+	Config      []byte     `db:"config"`      // jsonb
+	Metadata    []byte     `db:"metadata"`    // jsonb
+	EndTime     *time.Time `db:"end_time"`    // nullable
+	UserID      *string    `db:"user_id"`     // nullable (LangGraph)
+	NextRunAt   *time.Time `db:"next_run_at"` // nullable — API 'next_run_date'
+	CreatedAt   time.Time  `db:"created_at"`
+	UpdatedAt   time.Time  `db:"updated_at"`
+}
+
+// toAPI maps a row to the OpenAPI Cron response type. The DB column 'input' is
+// exposed as API 'payload'; 'next_run_at' becomes 'next_run_date'. metadata
+// is best-effort unmarshalled into the optional map.
+func (r cronRow) toAPI() Cron {
+	c := Cron{
+		CronId:      r.ID,
+		AssistantId: &r.AssistantID,
+		Schedule:    r.Schedule,
+		Payload:     map[string]interface{}{},
+		NextRunDate: r.NextRunAt,
+		CreatedAt:   r.CreatedAt,
+		UpdatedAt:   r.UpdatedAt,
+	}
+	if r.EndTime != nil {
+		c.EndTime = *r.EndTime
+	}
+	if r.ThreadID != nil {
+		c.ThreadId = *r.ThreadID
+	}
+	if r.UserID != nil {
+		c.UserId = r.UserID
+	}
+	if len(r.Input) > 0 {
+		_ = json.Unmarshal(r.Input, &c.Payload)
+	}
+	if len(r.Metadata) > 0 {
+		var m map[string]interface{}
+		_ = json.Unmarshal(r.Metadata, &m)
+		c.Metadata = &m
+	}
+	return c
+}
+
 // DIVERGENCES (OpenAPI ↔ postgres.d2) — reconcile before tightening mappers:
 //   assistants: API has {config(structured), context, version}; DB has
 //     {tools, model, instructions, config(jsonb)}. version/context not in DB;
@@ -183,3 +232,8 @@ func translateRunStatus(dbStatus string) RunStatus {
 //     stream_resumable, stream_subgraphs, webhook, after_seconds} not yet
 //     honored by the create impl. Stateful create requires assistant_id as
 //     UUID but API types it as interface{} (UUID or graph name string).
+//   crons: API exposes DB 'input' as 'payload' and 'next_run_at' as
+//     'next_run_date'. CronCreate.{config, context, end_time, interrupt_*,
+//     metadata, multitask_strategy, webhook, assistant_id as graph-name} not
+//     yet honored by create impl. ThreadId is NOT NULL in the API Cron
+//     response but nullable in DB for stateless crons (zero UUID when null).

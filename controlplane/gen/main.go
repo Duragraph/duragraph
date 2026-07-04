@@ -65,7 +65,8 @@ type groupView struct {
 	Name        string
 	Pascal      string
 	PoolExpr    string
-	NeedsTx     bool
+	NeedsPgx    bool
+	NeedsUUID   bool
 	NeedsErrors bool
 	Endpoints   []endpointView
 }
@@ -203,12 +204,21 @@ func toView(g group) groupView {
 			IsRead:   e.Kind == "read",
 		}
 		if ev.IsWrite && e.Outbox {
-			gv.NeedsTx = true
+			gv.NeedsPgx = true
+			gv.NeedsUUID = true
 			ev.ProjectionSteps = e.Steps
 		}
 		if e.Impl != nil {
-			gv.NeedsTx = true // impl bodies use pgx + uuid
-			if e.Impl.Mode == "read_one" || e.Impl.Mode == "update" || e.Impl.Mode == "hard_delete" {
+			gv.NeedsPgx = true // all impl bodies use pgx (CollectOneRow/CollectRows)
+			switch e.Impl.Mode {
+			case "write_returning", "read_one", "update", "delete":
+				gv.NeedsUUID = true // uuid.New() or uuid.Parse()
+			case "hard_delete", "read_list", "count":
+				if e.Impl.PathParam != "" {
+					gv.NeedsUUID = true
+				}
+			}
+			if e.Impl.Mode == "read_one" || e.Impl.Mode == "update" || e.Impl.Mode == "hard_delete" || e.Impl.Mode == "write_plain_returning" {
 				gv.NeedsErrors = true
 			}
 		}

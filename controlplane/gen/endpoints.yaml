@@ -520,36 +520,91 @@ groups:
         path: /threads/{id}/runs/crons
         kind: write
         outbox: false
+        request: CronCreate
+        response: Cron
+        impl:
+          mode: write_plain_returning
+          aggregate: Cron
+          row: cronRow
+          path_param: id
+          query: |
+            INSERT INTO crons (thread_id, assistant_id, schedule, input, metadata)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+          args: ["pathID", "asUUID(req.AssistantId)", "req.Schedule", "mustJSON(req.Input)", "mustJSON(req.Metadata)"]
         steps: ["INSERT crons (id, thread_id, assistant_id, schedule, input, config)  # cron def, not domain event"]
       - name: list
         method: GET
         path: /runs/crons
         kind: read
         outbox: false
+        response: Cron
+        impl:
+          mode: read_list
+          row: cronRow
+          query: |
+            SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+            FROM crons ORDER BY created_at DESC
+          args: []
         steps: ["SELECT * FROM crons ORDER BY created_at DESC"]
       - name: search
         method: POST
         path: /runs/crons/search
         kind: read
         outbox: false
+        request: CronSearch
+        response: Cron
+        impl:
+          mode: read_list
+          row: cronRow
+          query: |
+            SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+            FROM crons
+            WHERE ($1::uuid IS NULL OR assistant_id = $1)
+              AND ($2::uuid IS NULL OR thread_id = $2)
+            ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
+          args: ["req.AssistantId", "req.ThreadId", "intOr(req.Limit, 20)", "intOr(req.Offset, 0)"]
         steps: ["SELECT * FROM crons WHERE metadata @> :filter"]
       - name: count
         method: POST
         path: /runs/crons/count
         kind: read
         outbox: false
+        request: CronCountRequest
+        impl:
+          mode: count
+          query: |
+            SELECT count(*) FROM crons
+            WHERE ($1::uuid IS NULL OR assistant_id = $1)
+              AND ($2::uuid IS NULL OR thread_id = $2)
+          args: ["req.AssistantId", "req.ThreadId"]
         steps: ["SELECT count(*) FROM crons WHERE ..."]
       - name: get
         method: GET
         path: /runs/crons/{cron_id}
         kind: read
         outbox: false
+        response: Cron
+        impl:
+          mode: read_one
+          row: cronRow
+          path_param: cron_id
+          query: |
+            SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+            FROM crons WHERE id = $1
+          args: ["pathID"]
         steps: ["SELECT * FROM crons WHERE id = :cron_id"]
       - name: delete
         method: DELETE
         path: /runs/crons/{cron_id}
         kind: delete
         outbox: false
+        impl:
+          mode: hard_delete
+          path_param: cron_id
+          query: "DELETE FROM crons WHERE id = $1"
+          args: ["pathID"]
         steps: ["DELETE crons WHERE id = :cron_id"]
 
   # ============================================================== STORE (KV)

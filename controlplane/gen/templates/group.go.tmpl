@@ -10,9 +10,11 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
-{{- if .NeedsTx}}
-	"github.com/google/uuid"
+{{- if .NeedsPgx}}
 	"github.com/jackc/pgx/v5"
+{{- end}}
+{{- if .NeedsUUID}}
+	"github.com/google/uuid"
 {{- end}}
 )
 
@@ -62,6 +64,32 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusCreated, row.toAPI())
+{{- else if eq .Impl.Mode "write_plain_returning"}}
+{{- if .Impl.PathParam}}
+	pathID, err := uuid.Parse(c.Param("{{.Impl.PathParam}}"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam}}")
+	}
+{{- end}}
+{{- if .Request}}
+	var req {{.Request}}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+{{- end}}
+	var row {{.Impl.Row}}
+	rows, err := {{$.PoolExpr}}.Query(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[{{.Impl.Row}}])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
 {{- else if eq .Impl.Mode "read_one"}}
 	pathID, err := uuid.Parse(c.Param("{{.Impl.PathParam}}"))
 	if err != nil {
@@ -152,10 +180,12 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 	}
 	return c.NoContent(http.StatusOK)
 {{- else if eq .Impl.Mode "read_list"}}
+{{- if .Request}}
 	var req {{.Request}}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+{{- end}}
 	rows, err := {{$.PoolExpr}}.Query(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
