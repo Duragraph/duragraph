@@ -4,6 +4,7 @@
 package endpoints
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -34,25 +35,30 @@ func (s *Server) RegisterThreads(g *echo.Group) {
 func (s *Server) ThreadsCreate(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (ThreadsCreate request schema)
+	var req ThreadCreate
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
+	aggID := uuid.New()
+	payload := mustJSON(req)
 	events := []Event{
-		{AggregateType: "Thread", AggregateID: aggID, EventType: "thread.created"},
+		{AggregateType: "Thread", AggregateID: aggID, EventType: "thread.created", Payload: payload},
 	}
+	var row threadRow
 	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   INSERT events: event_type='thread.created', payload={metadata}
-		//   INSERT outbox (same event_id, same TX)
-		//   pg_notify('outbox_new','')
-		//   INSERT threads projection (id, metadata)
-		return nil
+		rows, err := tx.Query(ctx, `INSERT INTO threads (id, metadata)
+VALUES ($1, $2)
+RETURNING id, status, values, config, metadata, created_at, updated_at
+`, aggID, mustJSON(req.Metadata))
+		if err != nil {
+			return err
+		}
+		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[threadRow])
+		return err
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
+	return c.JSON(http.StatusCreated, row.toAPI())
 }
 
 // ThreadsSearch — POST /threads/search  (kind: read)
@@ -60,9 +66,28 @@ func (s *Server) ThreadsCreate(c echo.Context) error {
 func (s *Server) ThreadsSearch(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM threads WHERE metadata @> :filter ORDER BY created_at DESC LIMIT :limit
-	return c.JSON(http.StatusOK, map[string]any{})
+	var req ThreadSearchRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	rows, err := s.Tenant.Query(ctx, `SELECT id, status, values, config, metadata, created_at, updated_at
+FROM threads
+WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`, jsonbOrNil(req.Metadata), intOr(req.Limit, 20), intOr(req.Offset, 0))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByName[threadRow])
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	out := make([]Thread, len(list))
+	for i := range list {
+		out[i] = list[i].toAPI()
+	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // ThreadsCount — POST /threads/count  (kind: read)
@@ -70,9 +95,17 @@ func (s *Server) ThreadsSearch(c echo.Context) error {
 func (s *Server) ThreadsCount(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT count(*) FROM threads WHERE metadata @> :filter
-	return c.JSON(http.StatusOK, map[string]any{})
+	var req ThreadCountRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	var n int
+	if err := s.Tenant.QueryRow(ctx, `SELECT count(*) FROM threads
+WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+`, jsonbOrNil(req.Metadata)).Scan(&n); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, n)
 }
 
 // ThreadsGet — GET /threads/{id}  (kind: read)
@@ -80,9 +113,24 @@ func (s *Server) ThreadsCount(c echo.Context) error {
 func (s *Server) ThreadsGet(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM threads WHERE id = :id
-	return c.JSON(http.StatusOK, map[string]any{})
+	pathID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	rows, err := s.Tenant.Query(ctx, `SELECT id, status, values, config, metadata, created_at, updated_at
+FROM threads WHERE id = $1
+`, pathID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[threadRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
 }
 
 // ThreadsUpdate — PUT /threads/{id}  (kind: write)
@@ -93,25 +141,37 @@ func (s *Server) ThreadsGet(c echo.Context) error {
 func (s *Server) ThreadsUpdate(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (ThreadsUpdate request schema)
+	pathID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	var req ThreadPatch
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
+	payload := mustJSON(req)
 	events := []Event{
-		{AggregateType: "Thread", AggregateID: aggID, EventType: "thread.updated"},
+		{AggregateType: "Thread", AggregateID: pathID, EventType: "thread.updated", Payload: payload},
 	}
+	var row threadRow
 	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   INSERT events: event_type='thread.updated', payload={metadata}
-		//   INSERT outbox (same event_id, same TX)
-		//   pg_notify('outbox_new','')
-		//   UPDATE threads SET metadata = :metadata WHERE id = :id
-		return nil
+		rows, err := tx.Query(ctx, `UPDATE threads SET
+  metadata = COALESCE($2, metadata)
+WHERE id = $1
+RETURNING id, status, values, config, metadata, created_at, updated_at
+`, pathID, jsonbOrNil(req.Metadata))
+		if err != nil {
+			return err
+		}
+		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[threadRow])
+		return err
 	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
+	return c.JSON(http.StatusOK, row.toAPI())
 }
 
 // ThreadsDelete — DELETE /threads/{id}  (kind: delete)
@@ -119,9 +179,18 @@ func (s *Server) ThreadsUpdate(c echo.Context) error {
 func (s *Server) ThreadsDelete(c echo.Context) error {
 	ctx := c.Request().Context()
 	_ = ctx
-	// TODO hard delete:
-	//   DELETE threads WHERE id = :id (CASCADE → messages, runs)  # hard delete, no event sourcing
-	return c.NoContent(http.StatusNoContent)
+	pathID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	ct, err := s.Tenant.Exec(ctx, `DELETE FROM threads WHERE id = $1`, pathID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if ct.RowsAffected() == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "not found")
+	}
+	return c.NoContent(http.StatusOK)
 }
 
 // ThreadsGetState — GET /threads/{id}/state  (kind: read)

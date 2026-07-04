@@ -104,6 +104,19 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, row.toAPI())
+{{- else if eq .Impl.Mode "hard_delete"}}
+	pathID, err := uuid.Parse(c.Param("{{.Impl.PathParam}}"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam}}")
+	}
+	ct, err := {{$.PoolExpr}}.Exec(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if ct.RowsAffected() == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "not found")
+	}
+	return c.NoContent(http.StatusOK)
 {{- else if eq .Impl.Mode "delete"}}
 	pathID, err := uuid.Parse(c.Param("{{.Impl.PathParam}}"))
 	if err != nil {

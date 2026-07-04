@@ -207,7 +207,7 @@ func toView(g group) groupView {
 		}
 		if e.Impl != nil {
 			gv.NeedsTx = true // impl bodies use pgx + uuid
-			if e.Impl.Mode == "read_one" || e.Impl.Mode == "update" {
+			if e.Impl.Mode == "read_one" || e.Impl.Mode == "update" || e.Impl.Mode == "hard_delete" {
 				gv.NeedsErrors = true
 			}
 		}

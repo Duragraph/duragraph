@@ -182,6 +182,17 @@ groups:
         outbox: true
         events: [thread.created]
         nats: {subject: thread.created, stream: RUNS}
+        request: ThreadCreate
+        response: Thread
+        impl:
+          mode: write_returning
+          aggregate: Thread
+          row: threadRow
+          query: |
+            INSERT INTO threads (id, metadata)
+            VALUES ($1, $2)
+            RETURNING id, status, values, config, metadata, created_at, updated_at
+          args: ["aggID", "mustJSON(req.Metadata)"]
         steps:
           - "INSERT events: event_type='thread.created', payload={metadata}"
           - "INSERT outbox (same event_id, same TX)"
@@ -192,18 +203,46 @@ groups:
         path: /threads/search
         kind: read
         outbox: false
+        request: ThreadSearchRequest
+        response: Thread
+        impl:
+          mode: read_list
+          row: threadRow
+          query: |
+            SELECT id, status, values, config, metadata, created_at, updated_at
+            FROM threads
+            WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
+          args: ["jsonbOrNil(req.Metadata)", "intOr(req.Limit, 20)", "intOr(req.Offset, 0)"]
         steps: ["SELECT * FROM threads WHERE metadata @> :filter ORDER BY created_at DESC LIMIT :limit"]
       - name: count
         method: POST
         path: /threads/count
         kind: read
         outbox: false
+        request: ThreadCountRequest
+        impl:
+          mode: count
+          query: |
+            SELECT count(*) FROM threads
+            WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+          args: ["jsonbOrNil(req.Metadata)"]
         steps: ["SELECT count(*) FROM threads WHERE metadata @> :filter"]
       - name: get
         method: GET
         path: /threads/{id}
         kind: read
         outbox: false
+        response: Thread
+        impl:
+          mode: read_one
+          row: threadRow
+          path_param: id
+          query: |
+            SELECT id, status, values, config, metadata, created_at, updated_at
+            FROM threads WHERE id = $1
+          args: ["pathID"]
         steps: ["SELECT * FROM threads WHERE id = :id"]
       - name: update
         method: PUT
@@ -212,6 +251,19 @@ groups:
         outbox: true
         events: [thread.updated]
         nats: {subject: thread.updated, stream: RUNS}
+        request: ThreadPatch
+        response: Thread
+        impl:
+          mode: update
+          aggregate: Thread
+          row: threadRow
+          path_param: id
+          query: |
+            UPDATE threads SET
+              metadata = COALESCE($2, metadata)
+            WHERE id = $1
+            RETURNING id, status, values, config, metadata, created_at, updated_at
+          args: ["pathID", "jsonbOrNil(req.Metadata)"]
         steps:
           - "INSERT events: event_type='thread.updated', payload={metadata}"
           - "INSERT outbox (same event_id, same TX)"
@@ -222,6 +274,11 @@ groups:
         path: /threads/{id}
         kind: delete
         outbox: false
+        impl:
+          mode: hard_delete
+          path_param: id
+          query: "DELETE FROM threads WHERE id = $1"
+          args: ["pathID"]
         steps: ["DELETE threads WHERE id = :id (CASCADE → messages, runs)  # hard delete, no event sourcing"]
       - name: get_state
         method: GET
