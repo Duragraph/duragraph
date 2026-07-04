@@ -32,6 +32,12 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 	_ = ctx
 {{- if .Impl}}
 {{- if eq .Impl.Mode "write_returning"}}
+{{- if .Impl.PathParam}}
+	pathID, err := uuid.Parse(c.Param("{{.Impl.PathParam}}"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam}}")
+	}
+{{- end}}
 	var req {{.Request}}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -61,6 +67,12 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam}}")
 	}
+{{- if .Impl.PathParam2}}
+	pathID2, err := uuid.Parse(c.Param("{{.Impl.PathParam2}}"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam2}}")
+	}
+{{- end}}
 	rows, err := {{$.PoolExpr}}.Query(ctx, `{{.Impl.Query}}`, {{join .Impl.Args ", "}})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -78,11 +90,15 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid {{.Impl.PathParam}}")
 	}
+{{- if .Request}}
 	var req {{.Request}}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	payload := mustJSON(req)
+{{- else}}
+	var payload []byte
+{{- end}}
 	{{- $aggU := .Impl.Aggregate}}
 	events := []Event{
 {{- range .Events}}

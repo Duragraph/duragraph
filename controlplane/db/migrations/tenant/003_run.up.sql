@@ -6,7 +6,7 @@
 -- concurrency token; lease_epoch = fencing token for worker assignment.
 CREATE TABLE runs (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    thread_id    UUID NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
+    thread_id    UUID REFERENCES threads (id) ON DELETE CASCADE,  -- nullable: stateless runs have no thread
     assistant_id UUID NOT NULL REFERENCES assistants (id) ON DELETE RESTRICT,
     status       VARCHAR(20) NOT NULL DEFAULT 'queued'
                      CHECK (status IN ('queued', 'in_progress', 'requires_action',

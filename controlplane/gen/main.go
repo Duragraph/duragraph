@@ -51,12 +51,13 @@ type endpoint struct {
 
 // impl is the real-body spec for an endpoint (absent ⇒ scaffold the handler).
 type impl struct {
-	Mode      string   `yaml:"mode"`       // write_returning | read_one
-	Aggregate string   `yaml:"aggregate"`  // event aggregate type
-	Row       string   `yaml:"row"`        // db row struct to scan into
-	Query     string   `yaml:"query"`      // SQL (raw, $1.. params)
-	Args      []string `yaml:"args"`       // Go expressions bound as query args
-	PathParam string   `yaml:"path_param"` // path param parsed as uuid (read_one)
+	Mode       string   `yaml:"mode"`        // write_returning | read_one | update | delete | read_list | count | hard_delete
+	Aggregate  string   `yaml:"aggregate"`   // event aggregate type
+	Row        string   `yaml:"row"`         // db row struct to scan into
+	Query      string   `yaml:"query"`       // SQL (raw, $1.. params)
+	Args       []string `yaml:"args"`        // Go expressions bound as query args
+	PathParam  string   `yaml:"path_param"`  // path param parsed as uuid into pathID
+	PathParam2 string   `yaml:"path_param2"` // second path param parsed as uuid into pathID2
 }
 
 // view types passed to the template (with computed fields).

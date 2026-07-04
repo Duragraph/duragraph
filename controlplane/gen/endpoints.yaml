@@ -331,6 +331,18 @@ groups:
         outbox: true
         events: [run.created]
         nats: {subject: run.created, stream: RUNS}
+        request: RunCreateStateful
+        response: Run
+        impl:
+          mode: write_returning
+          aggregate: Run
+          row: runRow
+          path_param: id
+          query: |
+            INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata)
+            VALUES ($1, $2, $3, 'queued', $4, $5)
+            RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+          args: ["aggID", "pathID", "asUUID(req.AssistantId)", "mustJSON(req.Input)", "mustJSON(req.Metadata)"]
         steps:
           - "INSERT event_streams (stream_id, aggregate_type='Run', aggregate_id)"
           - "INSERT events: event_type='run.created', payload={thread_id, assistant_id, input}"
@@ -344,6 +356,17 @@ groups:
         outbox: true
         events: [run.created]
         nats: {subject: run.created, stream: RUNS}
+        request: RunCreateStateless
+        response: Run
+        impl:
+          mode: write_returning
+          aggregate: Run
+          row: runRow
+          query: |
+            INSERT INTO runs (id, assistant_id, status, input, metadata)
+            VALUES ($1, $2, 'queued', $3, $4)
+            RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+          args: ["aggID", "asUUID(req.AssistantId)", "mustJSON(req.Input)", "mustJSON(req.Metadata)"]
         steps:
           - "INSERT event_streams (stream_id, aggregate_type='Run', aggregate_id)"
           - "INSERT events: event_type='run.created', payload={assistant_id, input}"
@@ -365,6 +388,16 @@ groups:
         path: /threads/{id}/runs/{rid}
         kind: read
         outbox: false
+        response: Run
+        impl:
+          mode: read_one
+          row: runRow
+          path_param: rid
+          path_param2: id
+          query: |
+            SELECT id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+            FROM runs WHERE id = $1 AND thread_id = $2
+          args: ["pathID", "pathID2"]
         steps: ["SELECT * FROM runs WHERE id = :rid AND thread_id = :id"]
       - name: cancel
         method: POST
@@ -373,6 +406,17 @@ groups:
         outbox: true
         events: [run.cancelled]
         nats: {subject: run.cancelled, stream: RUNS}
+        response: Run
+        impl:
+          mode: update
+          aggregate: Run
+          row: runRow
+          path_param: rid
+          query: |
+            UPDATE runs SET status='cancelled', version=version+1, updated_at=now()
+            WHERE id = $1 AND status IN ('queued', 'in_progress', 'requires_action')
+            RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+          args: ["pathID"]
         steps:
           - "SELECT version FROM runs WHERE id = :rid (optimistic concurrency)"
           - "INSERT events: event_type='run.cancelled', payload={reason}"

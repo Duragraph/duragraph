@@ -147,3 +147,18 @@ func jsonbOrNil(m *map[string]interface{}) any {
 	}
 	return b
 }
+
+// asUUID coerces an OpenAPI interface{} assistant_id (UUID string or graph
+// name) to a uuid.UUID. A string that parses as a UUID is returned; everything
+// else yields the zero UUID (the DB FK constraint will reject it). Graph-name
+// resolution to a UUID is not yet implemented (see DIVERGENCES in rows.go).
+func asUUID(v interface{}) uuid.UUID {
+	switch t := v.(type) {
+	case string:
+		u, _ := uuid.Parse(t)
+		return u
+	case uuid.UUID:
+		return t
+	}
+	return uuid.UUID{}
+}
