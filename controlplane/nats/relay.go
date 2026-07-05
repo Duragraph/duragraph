@@ -28,6 +28,11 @@ const (
 	initialReconnectBackoff = 1 * time.Second
 	maxReconnectBackoff     = 30 * time.Second
 	defaultBatchSize        = 100
+
+	// Exported aliases for callers (server composition) that want
+	// the same constants without hardcoding them.
+	DefaultSafetyNet = defaultSafetyNet
+	DefaultBatchSize = defaultBatchSize
 )
 
 // Relay implements the six-step outbox relay from relay.d2:
