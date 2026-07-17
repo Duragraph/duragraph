@@ -214,6 +214,33 @@ func (r cronRow) toAPI() Cron {
 	return c
 }
 
+// storeItemRow mirrors the store_items table (postgres.d2 store_ctx). namespace
+// is TEXT[] (a hierarchical path), value is jsonb. Not event-sourced.
+type storeItemRow struct {
+	ID        int64     `db:"id"`
+	Namespace []string  `db:"namespace"`
+	Key       string    `db:"key"`
+	Value     []byte    `db:"value"` // jsonb
+	CreatedAt time.Time `db:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"`
+}
+
+// toAPI maps a store_items row to the OpenAPI Item response type. value is
+// jsonb, best-effort unmarshalled into the document map (empty map when null).
+func (r storeItemRow) toAPI() Item {
+	it := Item{
+		Namespace: r.Namespace,
+		Key:       r.Key,
+		Value:     map[string]interface{}{},
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
+	}
+	if len(r.Value) > 0 {
+		_ = json.Unmarshal(r.Value, &it.Value)
+	}
+	return it
+}
+
 // DIVERGENCES (OpenAPI ↔ postgres.d2) — reconcile before tightening mappers:
 //   assistants: API has {config(structured), context, version}; DB has
 //     {tools, model, instructions, config(jsonb)}. version/context not in DB;
@@ -237,3 +264,9 @@ func (r cronRow) toAPI() Cron {
 //     metadata, multitask_strategy, webhook, assistant_id as graph-name} not
 //     yet honored by create impl. ThreadId is NOT NULL in the API Cron
 //     response but nullable in DB for stateless crons (zero UUID when null).
+//   store: namespace is TEXT[] (postgres.d2) / []string (OpenAPI Item.Namespace)
+//     — the endpoint-queries.d2 `namespace LIKE :prefix` SQL is stale and
+//     discarded in favor of array ops. StoreSearchRequest.query (vector/semantic
+//     search) is not honored — no vector index in the new control plane yet;
+//     filter + namespace_prefix only. StoreListNamespacesRequest.max_depth and
+//     .suffix are best-effort (prefix + limit/offset honored).
