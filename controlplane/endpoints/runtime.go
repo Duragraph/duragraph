@@ -162,3 +162,13 @@ func asUUID(v interface{}) uuid.UUID {
 	}
 	return uuid.UUID{}
 }
+
+// nilIfEmpty returns nil (SQL NULL) for an empty/absent string slice so a
+// `$n::text[] IS NULL OR ...` guard clause matches everything. A non-empty
+// slice is returned as-is for a TEXT[] bind.
+func nilIfEmpty(s []string) any {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
+}

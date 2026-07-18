@@ -617,30 +617,35 @@ groups:
         kind: write
         outbox: false
         steps: ["INSERT store_items ON CONFLICT (namespace, key) DO UPDATE SET value=:value, updated_at=now()  # not event-sourced"]
+        custom: true
       - name: get
         method: GET
         path: /store/items
         kind: read
         outbox: false
         steps: ["SELECT value FROM store_items WHERE namespace = :namespace AND key = :key"]
+        custom: true
       - name: delete
         method: DELETE
         path: /store/items
         kind: delete
         outbox: false
         steps: ["DELETE store_items WHERE namespace = :namespace AND key = :key"]
+        custom: true
       - name: search
         method: POST
         path: /store/items/search
         kind: read
         outbox: false
         steps: ["SELECT * FROM store_items WHERE namespace LIKE :prefix || '%' AND value @> :filter LIMIT :limit OFFSET :offset"]
+        custom: true
       - name: list_namespaces
         method: POST
         path: /store/namespaces
         kind: read
         outbox: false
         steps: ["SELECT DISTINCT namespace FROM store_items WHERE namespace LIKE :prefix || '%'"]
+        custom: true
 
   # ============================================================== WORKERS
   - name: workers

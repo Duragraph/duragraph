@@ -7,7 +7,9 @@ import (
 {{- if .NeedsErrors}}
 	"errors"
 {{- end}}
+{{- if .NeedsHTTP}}
 	"net/http"
+{{- end}}
 
 	"github.com/labstack/echo/v4"
 {{- if .NeedsPgx}}
@@ -25,6 +27,9 @@ func (s *Server) Register{{.Pascal}}(g *echo.Group) {
 {{- end}}
 }
 {{range .Endpoints}}
+{{- if .Custom}}
+// {{.Handler}} — {{.Method}} {{.Path}}  (kind: {{.Kind}}) — hand-written in {{$.Name}}.go
+{{- else}}
 // {{.Handler}} — {{.Method}} {{.Path}}  (kind: {{.Kind}})
 {{- range .Steps}}
 //   - {{.}}
@@ -271,4 +276,5 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 	return echo.NewHTTPError(http.StatusNotImplemented, "handler not implemented")
 {{- end}}
 }
+{{- end}}
 {{end}}

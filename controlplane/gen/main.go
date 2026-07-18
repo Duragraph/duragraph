@@ -46,6 +46,7 @@ type endpoint struct {
 	Steps    []string `yaml:"steps"`
 	Request  string   `yaml:"request"`
 	Response string   `yaml:"response"`
+	Custom   bool     `yaml:"custom"` // hand-written body in <group>.go; generate route only
 	Impl     *impl    `yaml:"impl"`
 }
 
@@ -68,6 +69,7 @@ type groupView struct {
 	NeedsPgx    bool
 	NeedsUUID   bool
 	NeedsErrors bool
+	NeedsHTTP   bool
 	Endpoints   []endpointView
 }
 
@@ -202,6 +204,9 @@ func toView(g group) groupView {
 			EchoPath: echoPath(e.Path),
 			IsWrite:  e.Kind == "write",
 			IsRead:   e.Kind == "read",
+		}
+		if !e.Custom {
+			gv.NeedsHTTP = true // generated body uses http.Status*
 		}
 		if ev.IsWrite && e.Outbox {
 			gv.NeedsPgx = true
