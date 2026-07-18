@@ -222,7 +222,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	ep.RegisterAuth(g)
 	ep.RegisterPlatform(g)
 	ep.RegisterAdmin(g)
-	ep.RegisterSystem(g)
+	ep.RegisterSystem(e) // root-level: /ok, /info, /metrics
 
 	return s, nil
 }

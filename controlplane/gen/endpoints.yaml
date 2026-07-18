@@ -865,29 +865,6 @@ groups:
         backend: mimir
         steps: ["Query Mimir PromQL: rate(runs_total{tenant_id=...}[window])"]
 
-  # ============================================================== SYSTEM
-  - name: system
-    db: none
-    endpoints:
-      - name: health
-        method: GET
-        path: /ok
-        kind: special
-        outbox: false
-        steps: ["Check DB (SELECT 1 / pg_isready)", "Check NATS connection alive"]
-      - name: info
-        method: GET
-        path: /info
-        kind: special
-        outbox: false
-        steps: ["Return version, git_sha, uptime (in-memory)"]
-      - name: metrics
-        method: GET
-        path: /metrics
-        kind: special
-        outbox: false
-        steps: ["Prometheus scrape handler (in-memory counters/histograms)"]
-
 # RESOLVED 2026-06-09 — these tables/columns were added to postgres.d2
 # (worker_ctx) and migration tenant/005_worker_scheduling:
 #   crons(id, thread_id, assistant_id, schedule, input, config, metadata,
