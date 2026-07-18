@@ -99,6 +99,77 @@ func TestStoreCRUD(t *testing.T) {
 		t.Errorf("namespaces: want 2 distinct, got %d: %v", len(ns), ns)
 	}
 
+	// decoy: seed an item under a different top-level namespace. Proves the
+	// array-prefix match (namespace[1:cardinality($1)] = $1) is exact-array,
+	// not a substring/partial match.
+	_ = doJSON(t, e, http.MethodPut, "/api/v1/store/items",
+		`{"namespace":["orders","7"],"key":"summary","value":{"status":"shipped"}}`)
+
+	// search: prefix ["users"] must exclude the "orders" decoy entirely.
+	rec = doJSON(t, e, http.MethodPost, "/api/v1/store/items/search", `{"namespace_prefix":["users"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search prefix users: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sr); err != nil {
+		t.Fatalf("search prefix users decode: %v", err)
+	}
+	if len(sr.Items) != 2 {
+		t.Errorf("search prefix users: want 2 items, got %d: %+v", len(sr.Items), sr.Items)
+	}
+	for _, it := range sr.Items {
+		if len(it.Namespace) == 0 || it.Namespace[0] != "users" {
+			t.Errorf("search prefix users: decoy leaked into results: %+v", it)
+		}
+	}
+
+	// search: no namespace_prefix field -> exercises the SQL nil-guard
+	// ($1::text[] IS NULL OR ...) and must match across ALL namespaces.
+	rec = doJSON(t, e, http.MethodPost, "/api/v1/store/items/search", `{}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search no prefix: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sr); err != nil {
+		t.Fatalf("search no prefix decode: %v", err)
+	}
+	var sawUsers, sawOrders bool
+	for _, it := range sr.Items {
+		if len(it.Namespace) == 0 {
+			continue
+		}
+		switch it.Namespace[0] {
+		case "users":
+			sawUsers = true
+		case "orders":
+			sawOrders = true
+		}
+	}
+	if !sawUsers || !sawOrders {
+		t.Errorf("search no prefix: want items from both users and orders namespaces, got %+v", sr.Items)
+	}
+
+	// list_namespaces: no prefix field -> same nil-guard, must return
+	// distinct namespaces across ALL items, including the decoy's.
+	rec = doJSON(t, e, http.MethodPost, "/api/v1/store/namespaces", `{}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("namespaces no prefix: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var nsAll ListNamespaceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &nsAll); err != nil {
+		t.Fatalf("namespaces no prefix decode: %v", err)
+	}
+	if len(nsAll) != 3 {
+		t.Errorf("namespaces no prefix: want 3 distinct namespaces, got %d: %v", len(nsAll), nsAll)
+	}
+	var hasOrders bool
+	for _, n := range nsAll {
+		if len(n) > 0 && n[0] == "orders" {
+			hasOrders = true
+		}
+	}
+	if !hasOrders {
+		t.Errorf("namespaces no prefix: decoy namespace missing from result: %v", nsAll)
+	}
+
 	// delete -> 204, then get 404
 	if rec := doJSON(t, e, http.MethodDelete, "/api/v1/store/items",
 		`{"namespace":["users","42"],"key":"profile"}`); rec.Code != http.StatusNoContent {
