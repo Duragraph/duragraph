@@ -74,11 +74,11 @@ run-processor consumer (RUNS, filter run.created)
 worker: durable pull consumer (graph-executor, ack_wait=5m, AckExplicit)
   on delivery:
     read latest checkpoint for run_id (snapshots, version DESC)
-    POST events run.started        → lease run (in_progress, worker_id, lease_epoch++)
+    POST events run.started        → re-lease run (in_progress, worker_id, lease_epoch++); returns epoch
     for each node not yet checkpointed:
         execute node
-        POST /threads/{tid}/checkpoints   (snapshot state after node)
-        POST events node_completed         (guarded by lease_epoch)
+        POST /threads/{tid}/checkpoints   (snapshot state after node; epoch-fenced)
+        POST events node_completed         (carries lease_epoch; 409 if stale)
     POST events run.completed        → 200 → msg.Ack()
   failure handling:
     transient (DB/HTTP 5xx, crash, panic) → Nak / no-ack → ack_wait redelivers
@@ -109,26 +109,42 @@ worker: durable pull consumer (graph-executor, ack_wait=5m, AckExplicit)
   requeue its in-flight runs (`UPDATE runs SET status='queued', worker_id=NULL
   WHERE worker_id=$id AND status='in_progress'`). → 204.
 - `POST /workers/{id}/runs/{rid}/events` — the single worker→server state
-  channel. Accepts a batch; each event applies its projection + outbox via
-  `writeTx`, **guarded by `lease_epoch`**:
-  - `run.started`: lease the run — `UPDATE runs SET status='in_progress',
-    worker_id=$id, lease_epoch=lease_epoch+1, started_at=now() WHERE id=$rid AND
-    (status='queued' OR lease_expires_at < now())`; emit `run.started`. Returns
-    the new `lease_epoch` to the worker. If no row updated (already leased by a
-    live worker) → 409.
+  channel. **`run.started` is a discrete call** (it establishes the lease and
+  returns the epoch); `node_*` and terminal events are separate calls (batchable
+  among themselves) that **carry** that epoch. Each event applies its projection +
+  outbox via `writeTx`:
+  - `run.started`: re-lease the run — `UPDATE runs SET status='in_progress',
+    worker_id=$id, lease_epoch=lease_epoch+1, started_at=COALESCE(started_at,now())
+    WHERE id=$rid AND status IN ('queued','in_progress')`; emit `run.started`.
+    Returns the new `lease_epoch`. If the run is already terminal
+    (`completed`/`failed`) no row updates → **409** (worker acks; nothing to do).
+    **There is no `runs.lease_expires_at`** — redelivery itself is the "prior
+    worker presumed dead" signal, and the epoch bump fences the prior worker out.
   - `node_started` / `node_completed`: `INSERT execution_history(...)` + emit
     `execution.node_*`; reject if `body.lease_epoch != runs.lease_epoch` → 409.
-  - `run.completed` / `run.failed`: `UPDATE runs SET status, completed_at`; emit
-    the event; epoch-guarded.
-- `POST /threads/{tid}/checkpoints` (write_checkpoint) → `INSERT snapshots
-  (stream_id, aggregate_type='Run', aggregate_id=run_id, version, state)`. No
-  outbox (checkpoint is infrastructure, not a domain event). `version` = the
-  node index just completed. → 200 `{checkpoint_id}`.
+  - `run.completed` / `run.failed`: `UPDATE runs SET status='completed'|'failed',
+    completed_at=now() WHERE id=$rid AND lease_epoch=$epoch`; emit the event;
+    epoch-guarded (0 rows → 409).
+- `POST /threads/{tid}/checkpoints` (write_checkpoint) — **epoch-fenced** like the
+  events endpoint (`body.lease_epoch` must match `runs.lease_epoch`, else 409, so
+  a dead worker cannot poison resume state). Resolves `stream_id` from the run's
+  stream (`SELECT stream_id FROM event_streams WHERE aggregate_type='Run' AND
+  aggregate_id=$rid` — guaranteed to exist because `run.started` created it via
+  `writeTx`'s EnsureStream; ordering dependency). Then **upsert**
+  `INSERT snapshots(stream_id, aggregate_type='Run', aggregate_id=$rid, version,
+  state) ON CONFLICT (stream_id, version) DO UPDATE SET state=EXCLUDED.state`
+  (requires the new unique constraint, migration `006`). No outbox. `version` =
+  index of the node just completed. → 200 `{checkpoint_id}`.
 - `GET /threads/{tid}/checkpoints/{ckpt}` (read_checkpoint) → `SELECT * FROM
   snapshots WHERE id=$ckpt AND aggregate_id IN (SELECT id FROM runs WHERE
-  thread_id=$tid)`. → 200 `Checkpoint` / 404. (Latest-for-run lookup — `SELECT
-  ... WHERE aggregate_id=$rid ORDER BY version DESC LIMIT 1` — is what the worker
-  uses on resume; exposed as a query variant.)
+  thread_id=$tid)`. → 200 `Checkpoint` / 404. The worker's **resume lookup** is a
+  distinct latest-for-run query (`SELECT ... WHERE aggregate_id=$rid ORDER BY
+  version DESC LIMIT 1`); with the `(stream_id, version)` unique constraint it is
+  unambiguous.
+
+**Migration `006_worker_checkpoint.up.sql`** — `ALTER TABLE snapshots ADD
+CONSTRAINT uq_snapshots_stream_version UNIQUE (stream_id, version)` (forward-only;
+required for checkpoint upsert idempotency under redelivery).
 
 **3. Worker binary** (`cmd/worker/main.go` + `controlplane/worker/` package)
 - `controlplane/worker/` holds: the NATS `graph-executor` pull consumer + ack
@@ -144,14 +160,20 @@ worker: durable pull consumer (graph-executor, ack_wait=5m, AckExplicit)
 
 ### The lease_epoch idempotency mechanic
 
-`runs.lease_epoch` + `lease_expires_at` (migration `005`) are the redelivery
-guard:
-- A fresh or expired-lease `run.started` increments `lease_epoch` and stamps
-  `worker_id`. The worker carries that epoch on every subsequent event/checkpoint.
+`runs.lease_epoch` (migration `003`, a fencing token) is the redelivery guard.
+Note: there is **no** `lease_expires_at` on `runs` — that column exists only on
+`workers`. The run has no timestamp lease; JetStream's `ack_wait` redelivery is
+the sole "prior worker is gone" trigger, and `lease_epoch` is the fence.
+- Every non-terminal `run.started` increments `lease_epoch` and stamps
+  `worker_id`, and returns the new epoch. The worker carries that epoch on every
+  subsequent event **and checkpoint** write.
 - A resurrected or duplicate worker holding a *stale* epoch is rejected (409) on
-  its next write — its lease was superseded.
+  its next write (event or checkpoint) — its lease was superseded.
 - A redelivered command re-leases (epoch++), so the new worker owns the run and
   resumes from the latest checkpoint; the dead worker's late writes bounce.
+- `run.started` on an already-terminal run → 409 (the worker acks; the run is
+  done). This is the redelivery-after-completion case (worker died between the DB
+  write and the ack).
 
 ## Spec-first change (precedes implementation)
 
@@ -203,6 +225,9 @@ Green tests are the done-criteria; test 3 is the one that proves the whole point
 
 ## Files (anticipated)
 
+- `controlplane/db/migrations/tenant/006_worker_checkpoint.up.sql` /
+  `.down.sql` — `UNIQUE (stream_id, version)` on `snapshots` (checkpoint upsert
+  idempotency).
 - `controlplane/gen/endpoints.yaml` — mark workers endpoints `custom`; scope to the
   6 in this cycle.
 - `controlplane/endpoints/workers.go` — hand-written handlers (custom).
@@ -225,3 +250,10 @@ Green tests are the done-criteria; test 3 is the one that proves the whole point
 counter; `llm`/`tool` worker command families; interrupts/HITL; SDK extraction;
 worker `commands` (drain/shutdown/update_config) beyond an empty list;
 multi-worker load/fairness.
+
+**Threaded runs only this slice.** `runs.thread_id` is nullable (stateless runs
+are valid), but the checkpoint endpoints are thread-scoped
+(`POST /threads/{tid}/checkpoints`), so a stateless run cannot checkpoint through
+them. The counter-graph test uses a threaded run. Checkpointing stateless runs
+(a run-scoped checkpoint path, or synthesizing a thread) is deferred and recorded
+here so it is not silently assumed to work.
