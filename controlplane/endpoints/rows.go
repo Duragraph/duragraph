@@ -241,6 +241,52 @@ func (r storeItemRow) toAPI() Item {
 	return it
 }
 
+// workerRow mirrors the workers table (postgres.d2 worker_ctx, migration 005).
+type workerRow struct {
+	WorkerID        uuid.UUID  `db:"worker_id"`
+	Graphs          []string   `db:"graphs"`
+	Capacity        int        `db:"capacity"`
+	ActiveRuns      int        `db:"active_runs"`
+	Status          string     `db:"status"`
+	LeaseExpiresAt  *time.Time `db:"lease_expires_at"`
+	LastHeartbeatAt *time.Time `db:"last_heartbeat_at"`
+	CreatedAt       time.Time  `db:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at"`
+}
+
+func (r workerRow) toAPI() WorkerRegisterResponse {
+	return WorkerRegisterResponse{WorkerID: r.WorkerID, Status: r.Status}
+}
+
+// snapshotRow mirrors the snapshots table (postgres.d2 event_sourcing_ctx).
+type snapshotRow struct {
+	ID          int64     `db:"id"`
+	StreamID    uuid.UUID `db:"stream_id"`
+	AggregateID uuid.UUID `db:"aggregate_id"`
+	Version     int       `db:"version"`
+	State       []byte    `db:"state"` // jsonb
+	CreatedAt   time.Time `db:"created_at"`
+}
+
+func (r snapshotRow) toAPI() CheckpointResponse {
+	return CheckpointResponse{
+		CheckpointID: r.ID,
+		RunID:        r.AggregateID,
+		Version:      r.Version,
+		State:        json.RawMessage(r.State),
+	}
+}
+
+// execHistoryRow mirrors execution_history (postgres.d2 run_ctx). Not returned
+// over the API in this slice; used by tests to assert node execution.
+type execHistoryRow struct {
+	ID       int64     `db:"id"`
+	RunID    uuid.UUID `db:"run_id"`
+	NodeID   string    `db:"node_id"`
+	NodeType string    `db:"node_type"`
+	Status   string    `db:"status"`
+}
+
 // DIVERGENCES (OpenAPI ↔ postgres.d2) — reconcile before tightening mappers:
 //   assistants: API has {config(structured), context, version}; DB has
 //     {tools, model, instructions, config(jsonb)}. version/context not in DB;
