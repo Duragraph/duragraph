@@ -1,0 +1,9 @@
+# oapi-codegen config — generates Go request/response models from the OpenAPI
+# contract (spec/api/duragraph-latest.yaml). Models only; routing + handler
+# bodies are produced by the controlplane endpoint generator, not here.
+package: endpoints
+generate:
+  models: true
+output: ../endpoints/types_gen.go
+output-options:
+  skip-prune: true

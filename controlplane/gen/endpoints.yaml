@@ -1,0 +1,875 @@
+# Endpoint manifest — transcribed from spec/models/d2/endpoint-queries.d2.
+# This is the machine-readable form of that diagram; the Go template generator
+# (controlplane/gen) reads it to emit one handler per endpoint. The d2 stays
+# the human source of truth — regenerate this when the d2 changes.
+#
+# kind:    write  = events + outbox + pg_notify + projection (transactional)
+#          read   = SELECT only, no side effects
+#          delete = hard delete (may or may not be event-sourced)
+#          sse    = subscribe to NATS, stream to client
+#          wait   = create/read then block on a terminal NATS event
+#          special= no Postgres/NATS in the hot path (auth redirects, health)
+# db:      which database the handler targets (tenant | platform | none)
+# outbox:  true if the handler writes the events+outbox+pg_notify triple
+#
+# SCHEMA: crons + workers tables and runs.worker_id/priority/graph_id were
+# added to postgres.d2 (worker_ctx) + migration tenant/005_worker_scheduling on
+# 2026-06-09, so all 10 groups now generate. snapshots double as LangGraph
+# checkpoints (parent_checkpoint_id, channel_*) — carried in their state jsonb.
+
+streams:
+  RUNS: run.* events → worker dispatch + SSE
+  EXECUTION: execution.node_* events → SSE
+  INTERRUPTS: interrupt.* events
+  PLATFORM_USERS: user.* events (platform/system account)
+  PLATFORM_TENANTS: tenant.* events (platform/system account)
+
+groups:
+  # ============================================================== ASSISTANTS
+  - name: assistants
+    db: tenant
+    endpoints:
+      - name: create
+        method: POST
+        path: /assistants
+        kind: write
+        outbox: true
+        events: [assistant.created]
+        nats: {subject: assistant.created, stream: RUNS}
+        request: AssistantCreate
+        response: Assistant
+        impl:
+          mode: write_returning
+          aggregate: Assistant
+          row: assistantRow
+          query: |
+            INSERT INTO assistants (id, graph_id, name, description, config, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+          args: ["aggID", "req.GraphId", "deref(req.Name)", "req.Description", "mustJSON(req.Config)", "mustJSON(req.Metadata)"]
+        steps:
+          - "INSERT events: event_type='assistant.created', payload={name, graph_id, config, tools}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "INSERT assistants projection (id, graph_id, name, model, tools, config)"
+      - name: search
+        method: POST
+        path: /assistants/search
+        kind: read
+        outbox: false
+        request: AssistantSearchRequest
+        response: Assistant
+        impl:
+          mode: read_list
+          row: assistantRow
+          query: |
+            SELECT id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+            FROM assistants
+            WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
+          args: ["jsonbOrNil(req.Metadata)", "intOr(req.Limit, 20)", "intOr(req.Offset, 0)"]
+        steps: ["SELECT * FROM assistants WHERE metadata @> :filter ORDER BY created_at DESC LIMIT :limit OFFSET :offset"]
+      - name: count
+        method: POST
+        path: /assistants/count
+        kind: read
+        outbox: false
+        request: AssistantCountRequest
+        impl:
+          mode: count
+          query: |
+            SELECT count(*) FROM assistants
+            WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+          args: ["jsonbOrNil(req.Metadata)"]
+        steps: ["SELECT count(*) FROM assistants WHERE metadata @> :filter"]
+      - name: get
+        method: GET
+        path: /assistants/{id}
+        kind: read
+        outbox: false
+        response: Assistant
+        impl:
+          mode: read_one
+          row: assistantRow
+          path_param: id
+          query: |
+            SELECT id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+            FROM assistants WHERE id = $1
+          args: ["pathID"]
+        steps: ["SELECT * FROM assistants WHERE id = :id"]
+      - name: update
+        method: PATCH
+        path: /assistants/{id}
+        kind: write
+        outbox: true
+        events: [assistant.updated]
+        nats: {subject: assistant.updated, stream: RUNS}
+        request: AssistantPatch
+        response: Assistant
+        impl:
+          mode: update
+          aggregate: Assistant
+          row: assistantRow
+          path_param: id
+          query: |
+            UPDATE assistants SET
+              graph_id = COALESCE($2, graph_id),
+              name = COALESCE($3, name),
+              description = COALESCE($4, description),
+              config = COALESCE($5, config),
+              context = COALESCE($6, context),
+              metadata = COALESCE($7, metadata)
+            WHERE id = $1
+            RETURNING id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+          args: ["pathID", "req.GraphId", "req.Name", "req.Description", "jsonbOrNil(req.Config)", "jsonbOrNil(req.Context)", "jsonbOrNil(req.Metadata)"]
+        steps:
+          - "INSERT events: event_type='assistant.updated', payload={changed fields}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "UPDATE assistants SET name=:name, model=:model, ... WHERE id=:id"
+      - name: delete
+        method: DELETE
+        path: /assistants/{id}
+        kind: write
+        outbox: true
+        events: [assistant.deleted]
+        nats: {subject: assistant.deleted, stream: RUNS}
+        impl:
+          mode: delete
+          aggregate: Assistant
+          path_param: id
+          query: "DELETE FROM assistants WHERE id = $1"
+          args: ["pathID"]
+        steps:
+          - "INSERT events: event_type='assistant.deleted'"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "DELETE assistants WHERE id = :id (CASCADE → graphs)"
+      - name: get_graph
+        method: GET
+        path: /assistants/{id}/graph
+        kind: read
+        outbox: false
+        steps: ["SELECT * FROM graphs WHERE assistant_id = :id AND version = (SELECT max version)"]
+      - name: get_versions
+        method: GET
+        path: /assistants/{id}/versions
+        kind: read
+        outbox: false
+        steps: ["SELECT * FROM graphs WHERE assistant_id = :id ORDER BY version DESC"]
+      - name: set_latest
+        method: POST
+        path: /assistants/{id}/latest
+        kind: write
+        outbox: true
+        events: [graph.updated]
+        nats: {subject: graph.updated, stream: RUNS}
+        steps:
+          - "INSERT events: event_type='graph.updated', payload={graph_id, version}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "UPDATE graphs SET assistant_id=:id WHERE name=:graph_id AND version=:v"
+
+  # ============================================================== THREADS
+  - name: threads
+    db: tenant
+    endpoints:
+      - name: create
+        method: POST
+        path: /threads
+        kind: write
+        outbox: true
+        events: [thread.created]
+        nats: {subject: thread.created, stream: RUNS}
+        request: ThreadCreate
+        response: Thread
+        impl:
+          mode: write_returning
+          aggregate: Thread
+          row: threadRow
+          query: |
+            INSERT INTO threads (id, metadata)
+            VALUES ($1, $2)
+            RETURNING id, status, values, config, metadata, created_at, updated_at
+          args: ["aggID", "mustJSON(req.Metadata)"]
+        steps:
+          - "INSERT events: event_type='thread.created', payload={metadata}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "INSERT threads projection (id, metadata)"
+      - name: search
+        method: POST
+        path: /threads/search
+        kind: read
+        outbox: false
+        request: ThreadSearchRequest
+        response: Thread
+        impl:
+          mode: read_list
+          row: threadRow
+          query: |
+            SELECT id, status, values, config, metadata, created_at, updated_at
+            FROM threads
+            WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
+          args: ["jsonbOrNil(req.Metadata)", "intOr(req.Limit, 20)", "intOr(req.Offset, 0)"]
+        steps: ["SELECT * FROM threads WHERE metadata @> :filter ORDER BY created_at DESC LIMIT :limit"]
+      - name: count
+        method: POST
+        path: /threads/count
+        kind: read
+        outbox: false
+        request: ThreadCountRequest
+        impl:
+          mode: count
+          query: |
+            SELECT count(*) FROM threads
+            WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
+          args: ["jsonbOrNil(req.Metadata)"]
+        steps: ["SELECT count(*) FROM threads WHERE metadata @> :filter"]
+      - name: get
+        method: GET
+        path: /threads/{id}
+        kind: read
+        outbox: false
+        response: Thread
+        impl:
+          mode: read_one
+          row: threadRow
+          path_param: id
+          query: |
+            SELECT id, status, values, config, metadata, created_at, updated_at
+            FROM threads WHERE id = $1
+          args: ["pathID"]
+        steps: ["SELECT * FROM threads WHERE id = :id"]
+      - name: update
+        method: PUT
+        path: /threads/{id}
+        kind: write
+        outbox: true
+        events: [thread.updated]
+        nats: {subject: thread.updated, stream: RUNS}
+        request: ThreadPatch
+        response: Thread
+        impl:
+          mode: update
+          aggregate: Thread
+          row: threadRow
+          path_param: id
+          query: |
+            UPDATE threads SET
+              metadata = COALESCE($2, metadata)
+            WHERE id = $1
+            RETURNING id, status, values, config, metadata, created_at, updated_at
+          args: ["pathID", "jsonbOrNil(req.Metadata)"]
+        steps:
+          - "INSERT events: event_type='thread.updated', payload={metadata}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "UPDATE threads SET metadata = :metadata WHERE id = :id"
+      - name: delete
+        method: DELETE
+        path: /threads/{id}
+        kind: delete
+        outbox: false
+        impl:
+          mode: hard_delete
+          path_param: id
+          query: "DELETE FROM threads WHERE id = $1"
+          args: ["pathID"]
+        steps: ["DELETE threads WHERE id = :id (CASCADE → messages, runs)  # hard delete, no event sourcing"]
+      - name: get_state
+        method: GET
+        path: /threads/{id}/state
+        kind: read
+        outbox: false
+        steps:
+          - "SELECT * FROM messages WHERE thread_id = :id ORDER BY created_at"
+          - "SELECT * FROM runs WHERE thread_id = :id AND status='completed' ORDER BY completed_at DESC LIMIT 1"
+      - name: get_checkpoint_state
+        method: GET
+        path: /threads/{id}/state/{checkpoint_id}
+        kind: read
+        outbox: false
+        steps: ["SELECT * FROM snapshots WHERE stream_id = :checkpoint_id"]
+      - name: create_checkpoint
+        method: POST
+        path: /threads/{id}/state/checkpoint
+        kind: write
+        outbox: false
+        steps: ["INSERT snapshots (stream_id, aggregate_type, aggregate_id, version, state)  # infra, not domain event"]
+      - name: get_history
+        method: GET
+        path: /threads/{id}/history
+        kind: read
+        outbox: false
+        steps: ["SELECT * FROM events WHERE aggregate_id IN (SELECT id FROM runs WHERE thread_id=:id) ORDER BY occurred_at"]
+      - name: copy
+        method: POST
+        path: /threads/{id}/copy
+        kind: write
+        outbox: true
+        events: [thread.created]
+        nats: {subject: thread.created, stream: RUNS}
+        steps:
+          - "INSERT threads (new id, copy metadata)"
+          - "INSERT messages (copy all with new thread_id)"
+          - "INSERT events: event_type='thread.created' for the new thread"
+          - "INSERT outbox (same TX)"
+          - "pg_notify('outbox_new','')"
+
+  # ============================================================== RUNS
+  - name: runs
+    db: tenant
+    endpoints:
+      - name: create_on_thread
+        method: POST
+        path: /threads/{id}/runs
+        kind: write
+        outbox: true
+        events: [run.created]
+        nats: {subject: run.created, stream: RUNS}
+        request: RunCreateStateful
+        response: Run
+        impl:
+          mode: write_returning
+          aggregate: Run
+          row: runRow
+          path_param: id
+          query: |
+            INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata)
+            VALUES ($1, $2, $3, 'queued', $4, $5)
+            RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+          args: ["aggID", "pathID", "asUUID(req.AssistantId)", "mustJSON(req.Input)", "mustJSON(req.Metadata)"]
+        steps:
+          - "INSERT event_streams (stream_id, aggregate_type='Run', aggregate_id)"
+          - "INSERT events: event_type='run.created', payload={thread_id, assistant_id, input}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "INSERT runs projection (status='queued', thread_id, assistant_id, input)"
+      - name: create_stateless
+        method: POST
+        path: /runs
+        kind: write
+        outbox: true
+        events: [run.created]
+        nats: {subject: run.created, stream: RUNS}
+        request: RunCreateStateless
+        response: Run
+        impl:
+          mode: write_returning
+          aggregate: Run
+          row: runRow
+          query: |
+            INSERT INTO runs (id, assistant_id, status, input, metadata)
+            VALUES ($1, $2, 'queued', $3, $4)
+            RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+          args: ["aggID", "asUUID(req.AssistantId)", "mustJSON(req.Input)", "mustJSON(req.Metadata)"]
+        steps:
+          - "INSERT event_streams (stream_id, aggregate_type='Run', aggregate_id)"
+          - "INSERT events: event_type='run.created', payload={assistant_id, input}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "INSERT runs projection (status='queued', no thread_id)"
+      - name: batch_create
+        method: POST
+        path: /runs/batch
+        kind: write
+        outbox: true
+        events: [run.created]
+        nats: {subject: run.created, stream: RUNS}
+        steps:
+          - "FOR EACH run in batch: event_streams + events + outbox + projection"
+          - "pg_notify('outbox_new','') once at end of TX"
+      - name: get
+        method: GET
+        path: /threads/{id}/runs/{rid}
+        kind: read
+        outbox: false
+        response: Run
+        impl:
+          mode: read_one
+          row: runRow
+          path_param: rid
+          path_param2: id
+          query: |
+            SELECT id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+            FROM runs WHERE id = $1 AND thread_id = $2
+          args: ["pathID", "pathID2"]
+        steps: ["SELECT * FROM runs WHERE id = :rid AND thread_id = :id"]
+      - name: cancel
+        method: POST
+        path: /threads/{id}/runs/{rid}/cancel
+        kind: write
+        outbox: true
+        events: [run.cancelled]
+        nats: {subject: run.cancelled, stream: RUNS}
+        response: Run
+        impl:
+          mode: update
+          aggregate: Run
+          row: runRow
+          path_param: rid
+          query: |
+            UPDATE runs SET status='cancelled', version=version+1, updated_at=now()
+            WHERE id = $1 AND status IN ('queued', 'in_progress', 'requires_action')
+            RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+          args: ["pathID"]
+        steps:
+          - "SELECT version FROM runs WHERE id = :rid (optimistic concurrency)"
+          - "INSERT events: event_type='run.cancelled', payload={reason}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "UPDATE runs SET status='cancelled', version=version+1 WHERE id=:rid AND version=:expected"
+      - name: join
+        method: POST
+        path: /threads/{id}/runs/{rid}/join
+        kind: wait
+        outbox: false
+        steps:
+          - "SELECT status FROM runs WHERE id = :rid"
+          - "IF not terminal: subscribe NATS run.completed/run.failed for run_id, block"
+      - name: stream_per_run
+        method: GET
+        path: /threads/{id}/runs/{rid}/stream
+        kind: sse
+        outbox: false
+        nats: {subscribe: "run.* + execution.* for this run"}
+        steps:
+          - "SELECT status FROM runs WHERE id = :rid (validate exists)"
+          - "Subscribe NATS JetStream consumer filtered to run_id subjects"
+          - "Loop: receive → SSE data frame → flush"
+          - "Cleanup: unsubscribe on client disconnect"
+      - name: stream_thread
+        method: GET
+        path: /threads/{id}/stream
+        kind: sse
+        outbox: false
+        nats: {subscribe: "all active runs on thread"}
+        steps:
+          - "SELECT id FROM runs WHERE thread_id = :id AND status IN ('queued','in_progress')"
+          - "Subscribe NATS for all active runs on thread"
+          - "Loop: receive → SSE → flush"
+      - name: create_and_stream
+        method: POST
+        path: /threads/{id}/runs/stream
+        kind: sse
+        outbox: true
+        events: [run.created]
+        nats: {subject: run.created, stream: RUNS, subscribe: "run.* + execution.* for new run"}
+        steps:
+          - "CREATE RUN (same as POST /threads/{id}/runs)"
+          - "Subscribe NATS immediately to new run's subjects"
+          - "Loop: SSE stream until terminal"
+      - name: stateless_stream
+        method: POST
+        path: /runs/stream
+        kind: sse
+        outbox: true
+        events: [run.created]
+        nats: {subject: run.created, stream: RUNS, subscribe: "run.* + execution.* for new run"}
+        steps:
+          - "CREATE RUN (same as POST /runs)"
+          - "Subscribe NATS immediately to new run's subjects"
+          - "Loop: SSE stream until terminal"
+      - name: stateless_wait
+        method: POST
+        path: /runs/wait
+        kind: wait
+        outbox: true
+        events: [run.created]
+        nats: {subject: run.created, stream: RUNS, subscribe: "blocks until terminal"}
+        steps:
+          - "CREATE RUN (same as POST /runs)"
+          - "Subscribe NATS, wait for run.completed or run.failed"
+          - "Return final run state as JSON"
+      - name: cancel_stateless
+        method: POST
+        path: /runs/cancel
+        kind: write
+        outbox: true
+        events: [run.cancelled]
+        nats: {subject: run.cancelled, stream: RUNS}
+        steps: ["same as POST /threads/{id}/runs/{rid}/cancel"]
+      - name: resume
+        method: POST
+        path: /threads/{id}/runs/{rid}/resume
+        kind: write
+        outbox: true
+        events: [run.resumed]
+        nats: {subject: run.resumed, stream: RUNS}
+        steps:
+          - "SELECT runs WHERE id=:rid AND status='requires_action' (validate)"
+          - "SELECT interrupts WHERE run_id=:rid AND resolved=false"
+          - "UPDATE interrupts SET resolved=true, resolved_at=now()"
+          - "IF command.update: merge state updates into run input"
+          - "INSERT events: event_type='run.resumed', payload={interrupt_id, tool_outputs, command}"
+          - "INSERT outbox (same event_id, same TX)"
+          - "pg_notify('outbox_new','')"
+          - "UPDATE runs SET status='in_progress', input=merged_input, version=version+1"
+          - "Re-dispatch: ExecuteRun() — worker claims with checkpoint_id"
+
+  # ============================================================== CRONS
+  - name: crons
+    db: tenant
+    endpoints:
+      - name: create
+        method: POST
+        path: /threads/{id}/runs/crons
+        kind: write
+        outbox: false
+        request: CronCreate
+        response: Cron
+        impl:
+          mode: write_plain_returning
+          aggregate: Cron
+          row: cronRow
+          path_param: id
+          query: |
+            INSERT INTO crons (thread_id, assistant_id, schedule, input, metadata)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+          args: ["pathID", "asUUID(req.AssistantId)", "req.Schedule", "mustJSON(req.Input)", "mustJSON(req.Metadata)"]
+        steps: ["INSERT crons (id, thread_id, assistant_id, schedule, input, config)  # cron def, not domain event"]
+      - name: list
+        method: GET
+        path: /runs/crons
+        kind: read
+        outbox: false
+        response: Cron
+        impl:
+          mode: read_list
+          row: cronRow
+          query: |
+            SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+            FROM crons ORDER BY created_at DESC
+          args: []
+        steps: ["SELECT * FROM crons ORDER BY created_at DESC"]
+      - name: search
+        method: POST
+        path: /runs/crons/search
+        kind: read
+        outbox: false
+        request: CronSearch
+        response: Cron
+        impl:
+          mode: read_list
+          row: cronRow
+          query: |
+            SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+            FROM crons
+            WHERE ($1::uuid IS NULL OR assistant_id = $1)
+              AND ($2::uuid IS NULL OR thread_id = $2)
+            ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
+          args: ["req.AssistantId", "req.ThreadId", "intOr(req.Limit, 20)", "intOr(req.Offset, 0)"]
+        steps: ["SELECT * FROM crons WHERE metadata @> :filter"]
+      - name: count
+        method: POST
+        path: /runs/crons/count
+        kind: read
+        outbox: false
+        request: CronCountRequest
+        impl:
+          mode: count
+          query: |
+            SELECT count(*) FROM crons
+            WHERE ($1::uuid IS NULL OR assistant_id = $1)
+              AND ($2::uuid IS NULL OR thread_id = $2)
+          args: ["req.AssistantId", "req.ThreadId"]
+        steps: ["SELECT count(*) FROM crons WHERE ..."]
+      - name: get
+        method: GET
+        path: /runs/crons/{cron_id}
+        kind: read
+        outbox: false
+        response: Cron
+        impl:
+          mode: read_one
+          row: cronRow
+          path_param: cron_id
+          query: |
+            SELECT id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
+            FROM crons WHERE id = $1
+          args: ["pathID"]
+        steps: ["SELECT * FROM crons WHERE id = :cron_id"]
+      - name: delete
+        method: DELETE
+        path: /runs/crons/{cron_id}
+        kind: delete
+        outbox: false
+        impl:
+          mode: hard_delete
+          path_param: cron_id
+          query: "DELETE FROM crons WHERE id = $1"
+          args: ["pathID"]
+        steps: ["DELETE crons WHERE id = :cron_id"]
+
+  # ============================================================== STORE (KV)
+  - name: store
+    db: tenant
+    endpoints:
+      - name: put
+        method: PUT
+        path: /store/items
+        kind: write
+        outbox: false
+        steps: ["INSERT store_items ON CONFLICT (namespace, key) DO UPDATE SET value=:value, updated_at=now()  # not event-sourced"]
+        custom: true
+      - name: get
+        method: GET
+        path: /store/items
+        kind: read
+        outbox: false
+        steps: ["SELECT value FROM store_items WHERE namespace = :namespace AND key = :key"]
+        custom: true
+      - name: delete
+        method: DELETE
+        path: /store/items
+        kind: delete
+        outbox: false
+        steps: ["DELETE store_items WHERE namespace = :namespace AND key = :key"]
+        custom: true
+      - name: search
+        method: POST
+        path: /store/items/search
+        kind: read
+        outbox: false
+        steps: ["SELECT * FROM store_items WHERE namespace LIKE :prefix || '%' AND value @> :filter LIMIT :limit OFFSET :offset"]
+        custom: true
+      - name: list_namespaces
+        method: POST
+        path: /store/namespaces
+        kind: read
+        outbox: false
+        steps: ["SELECT DISTINCT namespace FROM store_items WHERE namespace LIKE :prefix || '%'"]
+        custom: true
+
+  # ============================================================== WORKERS
+  - name: workers
+    db: tenant
+    endpoints:
+      - name: register
+        method: POST
+        path: /workers/register
+        kind: write
+        outbox: false
+        steps:
+          - "INSERT workers (worker_id, graphs, capacity, status='online', lease_expires_at)"
+          - "FOR EACH graph: INSERT INTO graphs ON CONFLICT DO NOTHING"
+      - name: heartbeat
+        method: POST
+        path: /workers/{id}/heartbeat
+        kind: write
+        outbox: false
+        returns: "commands: drain | shutdown | update_config (if pending)"
+        steps: ["UPDATE workers SET status=:status, lease_expires_at=now()+60s, active_runs=:n WHERE id=:id AND lease_expires_at > now()"]
+      - name: deregister
+        method: POST
+        path: /workers/{id}/deregister
+        kind: write
+        outbox: false
+        steps:
+          - "UPDATE workers SET status='offline' WHERE id = :id"
+          - "UPDATE runs SET status='queued' WHERE worker_id=:id AND status='in_progress' (requeue)"
+      - name: claim
+        method: POST
+        path: /workers/{id}/runs/claim
+        kind: write
+        outbox: true
+        events: [run.started]
+        nats: {subject: run.started, stream: RUNS}
+        returns: "run + checkpoint_id (null if fresh, set if resuming)"
+        steps:
+          - "SELECT runs WHERE status='queued' AND graph_id IN (worker graphs) ORDER BY priority DESC, created_at FOR UPDATE SKIP LOCKED LIMIT :max_runs"
+          - "SELECT snapshots: latest checkpoint_id per run (if resuming)"
+          - "UPDATE runs SET status='in_progress', worker_id=:id, lease_epoch=lease_epoch+1, started_at=now(), version=version+1"
+          - "INSERT events: event_type='run.started' for each claimed run"
+          - "INSERT outbox (same TX)"
+          - "pg_notify('outbox_new','')"
+      - name: stream_events
+        method: POST
+        path: /workers/{id}/runs/{rid}/events
+        kind: write
+        outbox: true
+        events: [execution.node_started, execution.node_completed, execution.node_failed]
+        nats: {subject: "execution.node_*", stream: EXECUTION}
+        steps:
+          - "Validate worker_id owns run_id, lease not expired"
+          - "INSERT execution_history per node event (node_id, node_type, status, input, output, duration_ms)"
+          - "INSERT events: execution.node_started / node_completed / node_failed"
+          - "INSERT outbox (same TX)"
+          - "pg_notify('outbox_new','')"
+      - name: write_checkpoint
+        method: POST
+        path: /threads/{tid}/checkpoints
+        kind: write
+        outbox: false
+        steps:
+          - "INSERT snapshots (stream_id, aggregate_type='Run', aggregate_id=run_id, version, state=channel_values)"
+          - "Metadata: parent_checkpoint_id, node, channel_versions, pending_sends"
+      - name: read_checkpoint
+        method: GET
+        path: /threads/{tid}/checkpoints/{ckpt}
+        kind: read
+        outbox: false
+        returns: "channel_values, channel_versions, pending_sends, node"
+        steps: ["SELECT * FROM snapshots WHERE id = :ckpt AND aggregate_id IN (SELECT id FROM runs WHERE thread_id = :tid)"]
+
+  # ============================================================== AUTH
+  - name: auth
+    db: platform
+    endpoints:
+      - name: login
+        method: GET
+        path: /api/auth/{provider}/login
+        kind: special
+        outbox: false
+        steps: ["Set goth CSRF state cookie", "302 redirect to provider authorization URL"]
+      - name: callback
+        method: GET
+        path: /api/auth/{provider}/callback
+        kind: write
+        outbox: true
+        events: [user.signed_up, user.promoted_to_admin, user.approved, tenant.pending, tenant.provisioning]
+        nats: {subject: "user.* + tenant.*", stream: "PLATFORM_USERS + PLATFORM_TENANTS"}
+        branches:
+          bootstrap: "INSERT users (role='admin', status='approved') + tenants + events(user.signed_up, user.promoted_to_admin, user.approved, tenant.pending, tenant.provisioning) + outbox + pg_notify"
+          new_user: "INSERT users (status='pending') + tenants (status='pending') + events(user.signed_up, tenant.pending) + outbox + pg_notify"
+          existing: "mint JWT only (no writes)"
+        steps:
+          - "Validate goth session state cookie"
+          - "Exchange code (provider token exchange)"
+          - "Fetch userinfo (email, oauth_id)"
+          - "UPSERT users ON CONFLICT (oauth_provider, oauth_id) DO UPDATE SET email"
+          - "branch: bootstrap | new_user | existing (see branches)"
+          - "Set cookie duragraph_session = JWT"
+          - "302 redirect to dashboard / awaiting-approval / suspended"
+      - name: logout
+        method: POST
+        path: /api/auth/logout
+        kind: special
+        outbox: false
+        steps: ["Clear cookie: Set-Cookie duragraph_session=; Max-Age=0"]
+      - name: refresh
+        method: POST
+        path: /api/auth/refresh
+        kind: special
+        outbox: false
+        steps: ["Validate current JWT (signature + expiry)", "Mint new JWT (same claims, new exp)"]
+
+  # ============================================================== PLATFORM
+  - name: platform
+    db: platform
+    endpoints:
+      - name: me
+        method: GET
+        path: /api/platform/me
+        kind: read
+        outbox: false
+        steps:
+          - "Read JWT claims (user_id, email, role, status, tenant_id)"
+          - "SELECT users WHERE id = :user_id (fresh status)"
+
+  # ============================================================== ADMIN
+  - name: admin
+    db: platform
+    endpoints:
+      - name: list_users
+        method: GET
+        path: /api/admin/users
+        kind: read
+        outbox: false
+        steps:
+          - "SELECT * FROM users WHERE status = :filter ORDER BY created_at LIMIT :limit OFFSET :offset"
+          - "SELECT count(*) FROM users WHERE status = :filter"
+      - name: approve
+        method: POST
+        path: /api/admin/users/{id}/approve
+        kind: write
+        outbox: true
+        events: [user.approved, tenant.provisioning]
+        nats: {subject: "user.approved + tenant.provisioning", stream: "PLATFORM_USERS + PLATFORM_TENANTS"}
+        side_effect: "platform-provisioner consumer picks up tenant.provisioning → CREATE DB + migrate + NATS Account"
+        steps:
+          - "SELECT users WHERE id=:id AND status='pending' (validate)"
+          - "UPDATE users SET status='approved'"
+          - "UPDATE tenants SET status='provisioning' WHERE user_id=:id"
+          - "INSERT events: user.approved + tenant.provisioning"
+          - "INSERT outbox (both events, same TX)"
+          - "pg_notify('outbox_new','')"
+      - name: reject
+        method: POST
+        path: /api/admin/users/{id}/reject
+        kind: write
+        outbox: true
+        events: [user.rejected]
+        nats: {subject: user.rejected, stream: PLATFORM_USERS}
+        steps:
+          - "SELECT users WHERE id=:id AND status='pending'"
+          - "UPDATE users SET status='suspended'"
+          - "INSERT events: user.rejected"
+          - "INSERT outbox (same TX)"
+          - "pg_notify('outbox_new','')"
+      - name: suspend
+        method: POST
+        path: /api/admin/users/{id}/suspend
+        kind: write
+        outbox: true
+        events: [user.suspended, tenant.suspended]
+        nats: {subject: "user.suspended + tenant.suspended", stream: "PLATFORM_USERS + PLATFORM_TENANTS"}
+        steps:
+          - "SELECT users WHERE id=:id AND status='approved'"
+          - "UPDATE users SET status='suspended'"
+          - "UPDATE tenants SET status='suspended' WHERE user_id=:id"
+          - "INSERT events: user.suspended + tenant.suspended"
+          - "INSERT outbox (same TX)"
+          - "pg_notify('outbox_new','')"
+      - name: resume
+        method: POST
+        path: /api/admin/users/{id}/resume
+        kind: write
+        outbox: false
+        steps:
+          - "SELECT users WHERE id=:id AND status='suspended'"
+          - "UPDATE users SET status='approved'"
+          - "UPDATE tenants SET status='approved' WHERE user_id=:id"
+          - "# optional user.resumed event — not yet in spec"
+      - name: retry_migration
+        method: POST
+        path: /api/admin/tenants/{id}/retry-migration
+        kind: write
+        outbox: true
+        events: [tenant.provisioning]
+        nats: {subject: tenant.provisioning, stream: PLATFORM_TENANTS}
+        steps:
+          - "SELECT tenants WHERE id=:id AND status='provisioning_failed'"
+          - "UPDATE tenants SET status='provisioning', failure_reason=NULL"
+          - "INSERT events: tenant.provisioning"
+          - "INSERT outbox (same TX)"
+          - "pg_notify('outbox_new','')"
+      - name: metrics
+        method: GET
+        path: /api/admin/metrics
+        kind: read
+        outbox: false
+        backend: mimir
+        steps: ["Query Mimir PromQL: sum by (tenant_id) rate(runs_total[window])"]
+      - name: metrics_tenant
+        method: GET
+        path: /api/admin/metrics/{tenant_id}
+        kind: read
+        outbox: false
+        backend: mimir
+        steps: ["Query Mimir PromQL: rate(runs_total{tenant_id=...}[window])"]
+
+# RESOLVED 2026-06-09 — these tables/columns were added to postgres.d2
+# (worker_ctx) and migration tenant/005_worker_scheduling:
+#   crons(id, thread_id, assistant_id, schedule, input, config, metadata,
+#         next_run_at, created_at, updated_at)
+#   workers(worker_id, graphs, capacity, active_runs, status, lease_expires_at,
+#           last_heartbeat_at, created_at, updated_at)
+#   runs += worker_id, priority, graph_id
+schema_gaps: {}
