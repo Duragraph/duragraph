@@ -22,51 +22,11 @@ func (s *Server) RegisterWorkers(g *echo.Group) {
 	g.GET("/threads/:tid/checkpoints/:ckpt", s.WorkersReadCheckpoint)
 }
 
-// WorkersRegister — POST /workers/register  (kind: write)
-//   - INSERT workers (worker_id, graphs, capacity, status='online', lease_expires_at)
-//   - FOR EACH graph: INSERT INTO graphs ON CONFLICT DO NOTHING
-func (s *Server) WorkersRegister(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (WorkersRegister request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	// projection-only write (not event-sourced — no outbox):
-	//   INSERT workers (worker_id, graphs, capacity, status='online', lease_expires_at)
-	//   FOR EACH graph: INSERT INTO graphs ON CONFLICT DO NOTHING
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// WorkersRegister — POST /workers/register  (kind: write) — hand-written in workers.go
 
-// WorkersHeartbeat — POST /workers/{id}/heartbeat  (kind: write)
-//   - UPDATE workers SET status=:status, lease_expires_at=now()+60s, active_runs=:n WHERE id=:id AND lease_expires_at > now()
-func (s *Server) WorkersHeartbeat(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (WorkersHeartbeat request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	// projection-only write (not event-sourced — no outbox):
-	//   UPDATE workers SET status=:status, lease_expires_at=now()+60s, active_runs=:n WHERE id=:id AND lease_expires_at > now()
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// WorkersHeartbeat — POST /workers/{id}/heartbeat  (kind: write) — hand-written in workers.go
 
-// WorkersDeregister — POST /workers/{id}/deregister  (kind: write)
-//   - UPDATE workers SET status='offline' WHERE id = :id
-//   - UPDATE runs SET status='queued' WHERE worker_id=:id AND status='in_progress' (requeue)
-func (s *Server) WorkersDeregister(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (WorkersDeregister request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	// projection-only write (not event-sourced — no outbox):
-	//   UPDATE workers SET status='offline' WHERE id = :id
-	//   UPDATE runs SET status='queued' WHERE worker_id=:id AND status='in_progress' (requeue)
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// WorkersDeregister — POST /workers/{id}/deregister  (kind: write) — hand-written in workers.go
 
 // WorkersClaim — POST /workers/{id}/runs/claim  (kind: write)
 //   - SELECT runs WHERE status='queued' AND graph_id IN (worker graphs) ORDER BY priority DESC, created_at FOR UPDATE SKIP LOCKED LIMIT :max_runs

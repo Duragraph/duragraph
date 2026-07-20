@@ -659,6 +659,7 @@ groups:
         steps:
           - "INSERT workers (worker_id, graphs, capacity, status='online', lease_expires_at)"
           - "FOR EACH graph: INSERT INTO graphs ON CONFLICT DO NOTHING"
+        custom: true
       - name: heartbeat
         method: POST
         path: /workers/{id}/heartbeat
@@ -666,6 +667,7 @@ groups:
         outbox: false
         returns: "commands: drain | shutdown | update_config (if pending)"
         steps: ["UPDATE workers SET status=:status, lease_expires_at=now()+60s, active_runs=:n WHERE id=:id AND lease_expires_at > now()"]
+        custom: true
       - name: deregister
         method: POST
         path: /workers/{id}/deregister
@@ -674,6 +676,7 @@ groups:
         steps:
           - "UPDATE workers SET status='offline' WHERE id = :id"
           - "UPDATE runs SET status='queued' WHERE worker_id=:id AND status='in_progress' (requeue)"
+        custom: true
       - name: claim
         method: POST
         path: /workers/{id}/runs/claim
