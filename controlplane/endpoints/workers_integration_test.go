@@ -83,3 +83,81 @@ func seedInProgressRun(t *testing.T, ctx context.Context, wid string) string {
 	}
 	return rid
 }
+
+func TestWorkerEventsLifecycle(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, "TRUNCATE workers, runs, execution_history, events, outbox, event_streams, assistants CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestServerWithWorkers()
+	wid := uuid.NewString()
+	var aid, rid string
+	// The events endpoint's run.started sets runs.worker_id, which FKs to
+	// workers(worker_id) (migration 005) — in the real protocol the worker
+	// already exists via /workers/register before it ever calls this
+	// endpoint, so seed that row directly here.
+	_, _ = testPool.Exec(ctx, `INSERT INTO workers (worker_id) VALUES ($1)`, wid)
+	_ = testPool.QueryRow(ctx, `INSERT INTO assistants (name) VALUES ('a') RETURNING id`).Scan(&aid)
+	_ = testPool.QueryRow(ctx, `INSERT INTO runs (assistant_id, status) VALUES ($1,'queued') RETURNING id`, aid).Scan(&rid)
+
+	base := "/api/v1/workers/" + wid + "/runs/" + rid + "/events"
+
+	// run.started leases the run and returns epoch 1
+	rec := doJSON(t, e, http.MethodPost, base, `{"events":[{"type":"run.started"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.started: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var rs RunStartedResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &rs)
+	if rs.LeaseEpoch != 1 {
+		t.Fatalf("run.started epoch: want 1, got %d", rs.LeaseEpoch)
+	}
+	var st string
+	var le int
+	_ = testPool.QueryRow(ctx, `SELECT status, lease_epoch FROM runs WHERE id=$1`, rid).Scan(&st, &le)
+	if st != "in_progress" || le != 1 {
+		t.Errorf("after start: want in_progress/epoch1, got %s/%d", st, le)
+	}
+
+	// node_completed with correct epoch -> execution_history row + 200
+	rec = doJSON(t, e, http.MethodPost, base,
+		`{"events":[{"type":"execution.node_completed","lease_epoch":1,"node_id":"A","node_type":"tool","node_status":"completed"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("node event: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var n int
+	_ = testPool.QueryRow(ctx, `SELECT count(*) FROM execution_history WHERE run_id=$1`, rid).Scan(&n)
+	if n != 1 {
+		t.Errorf("execution_history: want 1, got %d", n)
+	}
+
+	// stale epoch -> 409
+	rec = doJSON(t, e, http.MethodPost, base,
+		`{"events":[{"type":"execution.node_completed","lease_epoch":0,"node_id":"A","node_type":"tool","node_status":"completed"}]}`)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("stale epoch: want 409, got %d", rec.Code)
+	}
+
+	// run.completed -> completed
+	rec = doJSON(t, e, http.MethodPost, base, `{"events":[{"type":"run.completed","lease_epoch":1}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.completed: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	_ = testPool.QueryRow(ctx, `SELECT status FROM runs WHERE id=$1`, rid).Scan(&st)
+	if st != "completed" {
+		t.Errorf("after complete: want completed, got %s", st)
+	}
+
+	// run.started on a terminal run -> 409
+	rec = doJSON(t, e, http.MethodPost, base, `{"events":[{"type":"run.started"}]}`)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("start on terminal: want 409, got %d", rec.Code)
+	}
+
+	// outbox carries run.started + node_completed + run.completed
+	var oc int
+	_ = testPool.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE aggregate_id=$1`, rid).Scan(&oc)
+	if oc < 3 {
+		t.Errorf("outbox events: want >=3, got %d", oc)
+	}
+}

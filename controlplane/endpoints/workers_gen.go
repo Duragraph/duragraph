@@ -61,38 +61,7 @@ func (s *Server) WorkersClaim(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
 }
 
-// WorkersStreamEvents — POST /workers/{id}/runs/{rid}/events  (kind: write)
-//   - Validate worker_id owns run_id, lease not expired
-//   - INSERT execution_history per node event (node_id, node_type, status, input, output, duration_ms)
-//   - INSERT events: execution.node_started / node_completed / node_failed
-//   - INSERT outbox (same TX)
-//   - pg_notify('outbox_new',”)
-func (s *Server) WorkersStreamEvents(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (WorkersStreamEvents request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
-	events := []Event{
-		{AggregateType: "Run", AggregateID: aggID, EventType: "execution.node_started"},
-		{AggregateType: "Run", AggregateID: aggID, EventType: "execution.node_completed"},
-		{AggregateType: "Run", AggregateID: aggID, EventType: "execution.node_failed"},
-	}
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   Validate worker_id owns run_id, lease not expired
-		//   INSERT execution_history per node event (node_id, node_type, status, input, output, duration_ms)
-		//   INSERT events: execution.node_started / node_completed / node_failed
-		//   INSERT outbox (same TX)
-		//   pg_notify('outbox_new','')
-		return nil
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// WorkersStreamEvents — POST /workers/{id}/runs/{rid}/events  (kind: write) — hand-written in workers.go
 
 // WorkersWriteCheckpoint — POST /threads/{tid}/checkpoints  (kind: write)
 //   - INSERT snapshots (stream_id, aggregate_type='Run', aggregate_id=run_id, version, state=channel_values)

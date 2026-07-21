@@ -705,6 +705,7 @@ groups:
           - "INSERT events: execution.node_started / node_completed / node_failed"
           - "INSERT outbox (same TX)"
           - "pg_notify('outbox_new','')"
+        custom: true
       - name: write_checkpoint
         method: POST
         path: /threads/{tid}/checkpoints
