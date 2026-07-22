@@ -20,6 +20,7 @@ func (s *Server) RegisterWorkers(g *echo.Group) {
 	g.POST("/workers/:id/runs/:rid/events", s.WorkersStreamEvents)
 	g.POST("/threads/:tid/checkpoints", s.WorkersWriteCheckpoint)
 	g.GET("/threads/:tid/checkpoints/:ckpt", s.WorkersReadCheckpoint)
+	g.GET("/threads/:tid/checkpoints/latest", s.WorkersLatestCheckpoint)
 }
 
 // WorkersRegister — POST /workers/register  (kind: write) — hand-written in workers.go
@@ -63,28 +64,8 @@ func (s *Server) WorkersClaim(c echo.Context) error {
 
 // WorkersStreamEvents — POST /workers/{id}/runs/{rid}/events  (kind: write) — hand-written in workers.go
 
-// WorkersWriteCheckpoint — POST /threads/{tid}/checkpoints  (kind: write)
-//   - INSERT snapshots (stream_id, aggregate_type='Run', aggregate_id=run_id, version, state=channel_values)
-//   - Metadata: parent_checkpoint_id, node, channel_versions, pending_sends
-func (s *Server) WorkersWriteCheckpoint(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (WorkersWriteCheckpoint request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	// projection-only write (not event-sourced — no outbox):
-	//   INSERT snapshots (stream_id, aggregate_type='Run', aggregate_id=run_id, version, state=channel_values)
-	//   Metadata: parent_checkpoint_id, node, channel_versions, pending_sends
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// WorkersWriteCheckpoint — POST /threads/{tid}/checkpoints  (kind: write) — hand-written in workers.go
 
-// WorkersReadCheckpoint — GET /threads/{tid}/checkpoints/{ckpt}  (kind: read)
-//   - SELECT * FROM snapshots WHERE id = :ckpt AND aggregate_id IN (SELECT id FROM runs WHERE thread_id = :tid)
-func (s *Server) WorkersReadCheckpoint(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM snapshots WHERE id = :ckpt AND aggregate_id IN (SELECT id FROM runs WHERE thread_id = :tid)
-	return c.JSON(http.StatusOK, map[string]any{})
-}
+// WorkersReadCheckpoint — GET /threads/{tid}/checkpoints/{ckpt}  (kind: read) — hand-written in workers.go
+
+// WorkersLatestCheckpoint — GET /threads/{tid}/checkpoints/latest  (kind: read) — hand-written in workers.go

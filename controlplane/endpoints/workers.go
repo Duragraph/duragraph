@@ -199,3 +199,87 @@ func (s *Server) writeTxOrHTTP(ctx context.Context, rid, eventType string, ev Wo
 	}
 	return nil
 }
+
+// WorkersWriteCheckpoint upserts a run snapshot, epoch-fenced.
+// POST /threads/{tid}/checkpoints -> 200 {checkpoint_id}.
+func (s *Server) WorkersWriteCheckpoint(c echo.Context) error {
+	ctx := c.Request().Context()
+	var req CheckpointWriteRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	rid := req.RunID.String()
+	// Resolve the run's event stream (created by run.started's writeTx).
+	var streamID string
+	if err := s.Tenant.QueryRow(ctx,
+		`SELECT stream_id FROM event_streams WHERE aggregate_type='Run' AND aggregate_id=$1`, rid).Scan(&streamID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusConflict, "run stream not initialized (post run.started first)")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	// Atomic epoch guard: the INSERT..SELECT only fires when the run's current
+	// lease_epoch matches; a stale worker inserts nothing → 0 rows → 409.
+	var id int64
+	err := s.Tenant.QueryRow(ctx, `
+		INSERT INTO snapshots (stream_id, aggregate_type, aggregate_id, version, state)
+		SELECT $1, 'Run', $2, $3, $4
+		WHERE EXISTS (SELECT 1 FROM runs WHERE id=$2 AND lease_epoch=$5)
+		ON CONFLICT (stream_id, version) DO UPDATE SET state=EXCLUDED.state
+		RETURNING id`,
+		streamID, rid, req.Version, jsonOrEmpty(req.State), req.LeaseEpoch).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusConflict, "stale lease_epoch")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, CheckpointWriteResponse{CheckpointID: id})
+}
+
+// WorkersReadCheckpoint returns one snapshot by id, scoped to the thread's runs.
+// GET /threads/{tid}/checkpoints/{ckpt} -> 200 / 404.
+func (s *Server) WorkersReadCheckpoint(c echo.Context) error {
+	ctx := c.Request().Context()
+	tid := c.Param("tid")
+	ckpt := c.Param("ckpt")
+	rows, err := s.Tenant.Query(ctx, `
+		SELECT id, stream_id, aggregate_id, version, state, created_at
+		FROM snapshots
+		WHERE id=$1 AND aggregate_id IN (SELECT id FROM runs WHERE thread_id=$2)`, ckpt, tid)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[snapshotRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
+}
+
+// WorkersLatestCheckpoint returns the highest-version snapshot for a run, for
+// worker resume. GET /threads/{tid}/checkpoints/latest?run_id=... -> 200 / 404.
+func (s *Server) WorkersLatestCheckpoint(c echo.Context) error {
+	ctx := c.Request().Context()
+	rid := c.QueryParam("run_id")
+	if rid == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "run_id is required")
+	}
+	rows, err := s.Tenant.Query(ctx, `
+		SELECT id, stream_id, aggregate_id, version, state, created_at
+		FROM snapshots WHERE aggregate_id=$1 ORDER BY version DESC LIMIT 1`, rid)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[snapshotRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "no checkpoint")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
+}

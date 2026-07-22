@@ -714,6 +714,7 @@ groups:
         steps:
           - "INSERT snapshots (stream_id, aggregate_type='Run', aggregate_id=run_id, version, state=channel_values)"
           - "Metadata: parent_checkpoint_id, node, channel_versions, pending_sends"
+        custom: true
       - name: read_checkpoint
         method: GET
         path: /threads/{tid}/checkpoints/{ckpt}
@@ -721,6 +722,13 @@ groups:
         outbox: false
         returns: "channel_values, channel_versions, pending_sends, node"
         steps: ["SELECT * FROM snapshots WHERE id = :ckpt AND aggregate_id IN (SELECT id FROM runs WHERE thread_id = :tid)"]
+        custom: true
+      - name: latest_checkpoint
+        method: GET
+        path: /threads/{tid}/checkpoints/latest
+        kind: read
+        outbox: false
+        custom: true
 
   # ============================================================== AUTH
   - name: auth

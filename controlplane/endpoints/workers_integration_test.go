@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -159,5 +160,82 @@ func TestWorkerEventsLifecycle(t *testing.T) {
 	_ = testPool.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE aggregate_id=$1`, rid).Scan(&oc)
 	if oc < 3 {
 		t.Errorf("outbox events: want >=3, got %d", oc)
+	}
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestWorkerCheckpoints(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, "TRUNCATE workers, runs, snapshots, events, outbox, event_streams, assistants, threads CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestServerWithWorkers()
+	wid := uuid.NewString()
+	var tid, aid, rid string
+	_ = testPool.QueryRow(ctx, `INSERT INTO threads DEFAULT VALUES RETURNING id`).Scan(&tid)
+	_ = testPool.QueryRow(ctx, `INSERT INTO assistants (name) VALUES ('a') RETURNING id`).Scan(&aid)
+	_ = testPool.QueryRow(ctx, `INSERT INTO runs (thread_id, assistant_id, status) VALUES ($1,$2,'queued') RETURNING id`, tid, aid).Scan(&rid)
+	// runs.worker_id FKs workers(worker_id) (migration 005) — in the real
+	// protocol the worker already exists via /workers/register before it ever
+	// calls the events endpoint, so seed it directly here (see TestWorkerEventsLifecycle).
+	_, _ = testPool.Exec(ctx, `INSERT INTO workers (worker_id) VALUES ($1)`, wid)
+
+	// lease the run first (creates the event_stream that snapshots FK-references)
+	started := doJSON(t, e, http.MethodPost, "/api/v1/workers/"+wid+"/runs/"+rid+"/events", `{"events":[{"type":"run.started"}]}`)
+	var rs RunStartedResponse
+	_ = json.Unmarshal(started.Body.Bytes(), &rs)
+
+	cp := "/api/v1/threads/" + tid + "/checkpoints"
+	body := func(v int, st string) string {
+		return `{"run_id":"` + rid + `","lease_epoch":` + itoa(rs.LeaseEpoch) + `,"version":` + itoa(v) + `,"state":` + st + `}`
+	}
+
+	// write checkpoint v1
+	if rec := doJSON(t, e, http.MethodPost, cp, body(1, `{"count":1}`)); rec.Code != http.StatusOK {
+		t.Fatalf("write v1: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// upsert v1 (same version) is idempotent -> still 200, still one row
+	if rec := doJSON(t, e, http.MethodPost, cp, body(1, `{"count":1}`)); rec.Code != http.StatusOK {
+		t.Fatalf("upsert v1: want 200, got %d", rec.Code)
+	}
+	var cnt int
+	_ = testPool.QueryRow(ctx, `SELECT count(*) FROM snapshots WHERE aggregate_id=$1`, rid).Scan(&cnt)
+	if cnt != 1 {
+		t.Errorf("after upsert: want 1 snapshot, got %d", cnt)
+	}
+	// write v2
+	v2rec := doJSON(t, e, http.MethodPost, cp, body(2, `{"count":2}`))
+	var v2resp CheckpointWriteResponse
+	_ = json.Unmarshal(v2rec.Body.Bytes(), &v2resp)
+
+	// read v2 by id -> proves /checkpoints/{ckpt} (param route) still resolves
+	// correctly now that /checkpoints/latest (static route) is also registered.
+	readRec := doJSON(t, e, http.MethodGet, cp+"/"+itoa64(v2resp.CheckpointID), "")
+	if readRec.Code != http.StatusOK {
+		t.Fatalf("read by id: want 200, got %d: %s", readRec.Code, readRec.Body.String())
+	}
+	var readGot CheckpointResponse
+	_ = json.Unmarshal(readRec.Body.Bytes(), &readGot)
+	if readGot.Version != 2 {
+		t.Errorf("read by id version: want 2, got %d", readGot.Version)
+	}
+
+	// stale epoch -> 409
+	if rec := doJSON(t, e, http.MethodPost, cp, `{"run_id":"`+rid+`","lease_epoch":999,"version":3,"state":{}}`); rec.Code != http.StatusConflict {
+		t.Errorf("stale checkpoint: want 409, got %d", rec.Code)
+	}
+
+	// resume lookup: latest checkpoint for run -> version 2
+	rec := doJSON(t, e, http.MethodGet, cp+"/latest?run_id="+rid, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("latest: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got CheckpointResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got.Version != 2 {
+		t.Errorf("latest version: want 2, got %d", got.Version)
 	}
 }
