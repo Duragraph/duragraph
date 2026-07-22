@@ -8,6 +8,7 @@ import mermaid from 'astro-mermaid';
 // https://astro.build/config
 export default defineConfig({
   redirects: {
+    '/': '/docs/introduction/',
     '/docs': '/docs/introduction/',
   },
   vite: {
@@ -42,7 +43,6 @@ export default defineConfig({
         { icon: 'github', label: 'GitHub', href: 'https://github.com/duragraph/duragraph' },
       ],
       customCss: ['./src/styles/custom.css'],
-      // Disable Starlight's default index page so we can use our landing page
       disable404Route: false,
       sidebar: [
         {
