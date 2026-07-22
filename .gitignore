@@ -147,3 +147,6 @@ tasks/
 # Old standalone studio app — folded into dashboard/ as of #190.
 # Ignored so leftover working-tree files don't show up in git status.
 studio/
+docs/superpowers
+data
+.wrangler
