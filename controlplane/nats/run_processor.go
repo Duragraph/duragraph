@@ -9,18 +9,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"strings"
 
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// RunProcessor's Stop() safety mirrors Relay/CleanupWorker in this
+// package: the stop channel is allocated in the constructor (not in
+// Start), so Stop can be called safely from any goroutine at any time
+// — including before Start runs — with no data race and no silent
+// no-op.
 type RunProcessor struct {
-	js   jetstream.JetStream
-	pub  *Publisher
-	stop context.CancelFunc
+	js     jetstream.JetStream
+	pub    *Publisher
+	stopCh chan struct{}
 }
 
 func NewRunProcessor(js jetstream.JetStream, pub *Publisher) *RunProcessor {
-	return &RunProcessor{js: js, pub: pub}
+	return &RunProcessor{js: js, pub: pub, stopCh: make(chan struct{})}
 }
 
 // runCreatedPayload is the subset of the run.created event the dispatcher needs.
@@ -33,15 +40,17 @@ type runCreatedPayload struct {
 }
 
 // Start binds the durable run-processor consumer and blocks, dispatching each
-// run.created as a worker.graph.execute command until ctx is cancelled.
+// run.created as a worker.graph.execute command until ctx is cancelled or
+// Stop is called.
 func (rp *RunProcessor) Start(ctx context.Context) error {
-	ctx, rp.stop = context.WithCancel(ctx)
 	cons, err := rp.js.Consumer(ctx, "RUNS", "run-processor")
 	if err != nil {
 		return fmt.Errorf("run-processor: bind consumer: %w", err)
 	}
 	cc, err := cons.Consume(func(msg jetstream.Msg) {
 		if err := rp.dispatch(ctx, msg); err != nil {
+			slog.Warn("run-processor: dispatch failed, nak for redelivery",
+				"subject", msg.Subject(), "err", err)
 			_ = msg.Nak() // transient: let it redeliver
 			return
 		}
@@ -51,20 +60,27 @@ func (rp *RunProcessor) Start(ctx context.Context) error {
 		return fmt.Errorf("run-processor: consume: %w", err)
 	}
 	defer cc.Stop()
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+	case <-rp.stopCh:
+	}
 	return nil
 }
 
 func (rp *RunProcessor) dispatch(ctx context.Context, msg jetstream.Msg) error {
 	// Only run.created triggers dispatch; ignore other run.* subjects on RUNS.
-	if !hasSuffix(msg.Subject(), "run.created") {
+	if !strings.HasSuffix(msg.Subject(), "run.created") {
 		return nil
 	}
 	var p runCreatedPayload
 	if err := json.Unmarshal(msg.Data(), &p); err != nil {
+		slog.Warn("run-processor: malformed run.created payload, dropping",
+			"subject", msg.Subject(), "err", err)
 		return nil // malformed → drop (ack); nothing to retry
 	}
 	if p.RunID == "" {
+		slog.Warn("run-processor: run.created missing run_id, dropping",
+			"subject", msg.Subject())
 		return nil
 	}
 	cmd := map[string]any{
@@ -75,12 +91,12 @@ func (rp *RunProcessor) dispatch(ctx context.Context, msg jetstream.Msg) error {
 	return rp.pub.PublishWithID(ctx, SubjectFor("worker.graph.execute"), p.RunID, cmd)
 }
 
+// Stop signals Start to exit. Safe to call from any goroutine at any
+// time, including before Start runs. Idempotent.
 func (rp *RunProcessor) Stop() {
-	if rp.stop != nil {
-		rp.stop()
+	select {
+	case <-rp.stopCh:
+	default:
+		close(rp.stopCh)
 	}
-}
-
-func hasSuffix(s, suf string) bool {
-	return len(s) >= len(suf) && s[len(s)-len(suf):] == suf
 }

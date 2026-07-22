@@ -21,6 +21,17 @@ func TestRunProcessorDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Purge RUNS so the dedup assertion below is self-contained: prior
+	// tests in this package share the same embedded NATS server and its
+	// streams carry residual messages (see TestRelayDedup, same fix).
+	runStream, err := js.Stream(ctx, "RUNS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runStream.Purge(ctx); err != nil {
+		t.Fatal(err)
+	}
+
 	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js))
 	go func() { _ = rp.Start(ctx) }()
 	defer rp.Stop()
