@@ -3,6 +3,8 @@ package worker_test
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,21 +12,33 @@ import (
 	"testing"
 	"time"
 
+	"github.com/duragraph/duragraph/controlplane/endpoints"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/labstack/echo/v4"
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // testPool connects to a real Postgres (testcontainers) with the tenant
-// migrations applied. Populated by TestMain. Task 8's
-// execution_integration_test.go (package worker_test) reuses newPool and
-// seedThreadAssistantRun below.
-var testPool *pgxpool.Pool
+// migrations applied. natsURL points at an embedded in-process JetStream
+// server; serverURL points at an httptest server mounting the worker
+// endpoints over testPool. All three are populated by TestMain and shared
+// across every test in this package (both worker_test and Task 8's
+// execution_integration_test.go). newPool and seedThreadAssistantRun below
+// are reused by Task 8 directly.
+var (
+	testPool  *pgxpool.Pool
+	natsURL   string
+	serverURL string
+)
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
+
+	// --- Postgres testcontainer with tenant migrations applied ---
 	pg, err := tcpostgres.Run(ctx,
 		"postgres:16-alpine",
 		tcpostgres.WithDatabase("tenant"),
@@ -53,10 +67,62 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "migrate: %v\n", err)
 		os.Exit(1)
 	}
+
+	// --- embedded NATS server (JetStream) — mirrors
+	// controlplane/nats/nats_integration_test.go's TestMain ---
+	portSrv, err := freePort()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "free-port: %v\n", err)
+		os.Exit(1)
+	}
+	dataDir, err := os.MkdirTemp("", "duragraph-worker-nats-test-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkdtemp: %v\n", err)
+		os.Exit(1)
+	}
+	natsSrv, err := server.NewServer(&server.Options{
+		Host:      "127.0.0.1",
+		Port:      portSrv,
+		JetStream: true,
+		StoreDir:  filepath.Join(dataDir, "js"),
+		NoSigs:    true,
+		NoLog:     true,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nats new: %v\n", err)
+		os.Exit(1)
+	}
+	go natsSrv.Start()
+	if !natsSrv.ReadyForConnections(10 * time.Second) {
+		fmt.Fprintln(os.Stderr, "nats: did not become ready")
+		os.Exit(1)
+	}
+	natsURL = fmt.Sprintf("nats://127.0.0.1:%d", portSrv)
+
+	// --- httptest server mounting the worker endpoints over testPool ---
+	e := echo.New()
+	g := e.Group("/api/v1")
+	(&endpoints.Server{Tenant: testPool}).RegisterWorkers(g)
+	httpSrv := httptest.NewServer(e)
+	serverURL = httpSrv.URL
+
 	code := m.Run()
+	httpSrv.Close()
+	natsSrv.Shutdown()
+	os.RemoveAll(dataDir)
 	testPool.Close()
 	_ = pg.Terminate(ctx)
 	os.Exit(code)
+}
+
+// freePort finds an available TCP port for the embedded NATS server.
+func freePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
 // applyTenantMigrations runs every tenant *.up.sql in order against the pool.
