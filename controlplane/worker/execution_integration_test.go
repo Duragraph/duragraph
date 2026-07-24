@@ -34,10 +34,16 @@ func TestExecuteRunEndToEnd(t *testing.T) {
 	purgeStream(t, ctx, js, "RUNS")
 	purgeStream(t, ctx, js, "WORKER_COMMANDS")
 
-	tid, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	_, _, rid := seedThreadAssistantRun(t, ctx, pool)
+	// The run-processor enriches worker.graph.execute from the runs row via
+	// aggregate_id, so the seeded run needs graph_id set for the worker to
+	// pick the right executor.
+	if _, err := pool.Exec(ctx, `UPDATE runs SET graph_id = 'counter' WHERE id = $1`, rid); err != nil {
+		t.Fatalf("set graph_id: %v", err)
+	}
 
 	// run-processor: turns run.created into a worker.graph.execute command.
-	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js))
+	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js), pool)
 	go func() { _ = rp.Start(ctx) }()
 	defer rp.Stop()
 
@@ -50,16 +56,19 @@ func TestExecuteRunEndToEnd(t *testing.T) {
 	runner := worker.NewRunner(js, cl, worker.CounterExecutor{})
 	go func() { _ = runner.Start(ctx) }()
 
-	// Publish run.created — thread_id included so the worker can read/write
-	// checkpoints on it, matching the real endpoint's payload shape
-	// (controlplane/endpoints/runs_gen.go: {thread_id, assistant_id, input}).
-	payload := map[string]any{
-		"run_id":       rid.String(),
-		"thread_id":    tid.String(),
-		"assistant_id": aid.String(),
-		"graph_id":     "counter",
+	// Publish the REAL relay envelope for run.created onto RUNS — the run id
+	// is the envelope's aggregate_id (relay.go's envelope()), not a
+	// top-level run_id. The run-processor enriches thread_id/assistant_id/
+	// graph_id from the runs row seeded above.
+	envelope := map[string]any{
+		"event_id":       uuid.New().String(),
+		"aggregate_type": "Run",
+		"aggregate_id":   rid.String(),
+		"event_type":     "run.created",
+		"payload":        map[string]any{},
+		"metadata":       map[string]any{},
 	}
-	if err := dnats.NewPublisher(js).PublishWithID(ctx, dnats.SubjectFor("run.created"), rid.String(), payload); err != nil {
+	if err := dnats.NewPublisher(js).PublishWithID(ctx, dnats.SubjectFor("run.created"), rid.String(), envelope); err != nil {
 		t.Fatalf("publish run.created: %v", err)
 	}
 

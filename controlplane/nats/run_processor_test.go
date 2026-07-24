@@ -7,9 +7,14 @@ import (
 	"time"
 
 	dnats "github.com/duragraph/duragraph/controlplane/nats"
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// TestRunProcessorDispatch proves the run-processor parses the REAL relay
+// envelope (aggregate_id, event_type — see relay.go's envelope()), not a
+// flat {run_id, ...} payload the relay never emits, and enriches the
+// worker.graph.execute command from the runs table.
 func TestRunProcessorDispatch(t *testing.T) {
 	ctx := context.Background()
 	nc, js := connectJS(t) // helper in this package's test files; see nats_integration_test.go
@@ -18,6 +23,23 @@ func TestRunProcessorDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := dnats.EnsureConsumers(ctx, js); err != nil {
+		t.Fatal(err)
+	}
+
+	resetTablesAndOutbox(t)
+
+	// Seed an assistant + a run on a thread — the run-processor enriches
+	// the dispatched command from these rows.
+	var threadID, assistantID, runID uuid.UUID
+	if err := testPool.QueryRow(ctx, `INSERT INTO threads DEFAULT VALUES RETURNING id`).Scan(&threadID); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx, `INSERT INTO assistants (name) VALUES ('a') RETURNING id`).Scan(&assistantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO runs (thread_id, assistant_id, graph_id, status) VALUES ($1,$2,'counter','queued') RETURNING id`,
+		threadID, assistantID).Scan(&runID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -32,7 +54,7 @@ func TestRunProcessorDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js))
+	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js), testPool)
 	go func() { _ = rp.Start(ctx) }()
 	defer rp.Stop()
 
@@ -45,15 +67,23 @@ func TestRunProcessorDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Publish a run.created onto RUNS (Nats-Msg-Id = run_id).
+	// Publish the REAL relay envelope for run.created onto RUNS (Nats-Msg-Id
+	// = run_id) — constructed exactly as relay.go's envelope() does: the run
+	// id is aggregate_id, not a top-level run_id.
 	pub := dnats.NewPublisher(js)
-	runID := "11111111-1111-1111-1111-111111111111"
-	payload := map[string]any{"run_id": runID, "assistant_id": "22222222-2222-2222-2222-222222222222", "graph_id": "counter"}
-	if err := pub.PublishWithID(ctx, dnats.SubjectFor("run.created"), runID, payload); err != nil {
+	envelope := map[string]any{
+		"event_id":       uuid.New().String(),
+		"aggregate_type": "Run",
+		"aggregate_id":   runID.String(),
+		"event_type":     "run.created",
+		"payload":        map[string]any{},
+		"metadata":       map[string]any{},
+	}
+	if err := pub.PublishWithID(ctx, dnats.SubjectFor("run.created"), runID.String(), envelope); err != nil {
 		t.Fatal(err)
 	}
 	// Publish the SAME run.created again → dedup → run-processor sees one.
-	_ = pub.PublishWithID(ctx, dnats.SubjectFor("run.created"), runID, payload)
+	_ = pub.PublishWithID(ctx, dnats.SubjectFor("run.created"), runID.String(), envelope)
 
 	batch, err := cons.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
 	if err != nil {
@@ -68,8 +98,11 @@ func TestRunProcessorDispatch(t *testing.T) {
 	}
 	var cmd map[string]any
 	_ = json.Unmarshal(got.Data(), &cmd)
-	if cmd["run_id"] != runID {
+	if cmd["run_id"] != runID.String() {
 		t.Errorf("command run_id: want %s, got %v", runID, cmd["run_id"])
+	}
+	if cmd["thread_id"] != threadID.String() {
+		t.Errorf("command thread_id: want %s, got %v", threadID, cmd["thread_id"])
 	}
 	_ = got.Ack()
 
