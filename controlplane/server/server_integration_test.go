@@ -485,6 +485,32 @@ func TestServerStartsRunProcessor(t *testing.T) {
 		t.Fatalf("ensure consumers: %v", err)
 	}
 
+	// Purge RUNS and WORKER_COMMANDS so this test is self-contained: the
+	// embedded NATS server (and its streams) is shared across every test
+	// in this package via TestMain, and a prior run of this same test
+	// (e.g. -count=3) leaves its own worker.graph.execute command sitting
+	// in WORKER_COMMANDS and its run.created envelope in RUNS. Without
+	// purging, the observer below can fetch a PREVIOUS run's leftover
+	// command instead of the one this test just published. Mirrors
+	// TestRunProcessorDispatch's RUNS purge in
+	// controlplane/nats/run_processor_test.go, extended to
+	// WORKER_COMMANDS since here we're asserting on the dispatched
+	// command, not just the dedup behavior.
+	runStream, err := js.Stream(ctx, "RUNS")
+	if err != nil {
+		t.Fatalf("get RUNS stream: %v", err)
+	}
+	if err := runStream.Purge(ctx); err != nil {
+		t.Fatalf("purge RUNS: %v", err)
+	}
+	workerCommandsStream, err := js.Stream(ctx, "WORKER_COMMANDS")
+	if err != nil {
+		t.Fatalf("get WORKER_COMMANDS stream: %v", err)
+	}
+	if err := workerCommandsStream.Purge(ctx); err != nil {
+		t.Fatalf("purge WORKER_COMMANDS: %v", err)
+	}
+
 	cons, err := js.CreateOrUpdateConsumer(ctx, "WORKER_COMMANDS", jetstream.ConsumerConfig{
 		FilterSubject: "duragraph.worker_commands.worker.graph.execute",
 		AckPolicy:     jetstream.AckExplicitPolicy,
@@ -509,13 +535,25 @@ func TestServerStartsRunProcessor(t *testing.T) {
 		t.Fatalf("publish run.created: %v", err)
 	}
 
-	batch, err := cons.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
-	if err != nil {
-		t.Fatalf("fetch: %v", err)
-	}
+	// The run.created → relay-equivalent publish → RUNS → run-processor →
+	// enrich (DB read) → WORKER_COMMANDS pipeline is fully async, and with
+	// WORKER_COMMANDS now purged (so no stale command can satisfy the
+	// fetch) the only message that CAN appear is this run's own command.
+	// Retry the Fetch with a bounded overall deadline so the test waits
+	// out the pipeline instead of racing it.
 	var got jetstream.Msg
-	for m := range batch.Messages() {
-		got = m
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		batch, err := cons.Fetch(1, jetstream.FetchMaxWait(2*time.Second))
+		if err != nil {
+			t.Fatalf("fetch: %v", err)
+		}
+		for m := range batch.Messages() {
+			got = m
+		}
+		if got != nil {
+			break
+		}
 	}
 	if got == nil {
 		t.Fatal("no worker.graph.execute command dispatched — server did not start the run-processor")
@@ -532,6 +570,11 @@ func TestServerStartsRunProcessor(t *testing.T) {
 	}
 	_ = got.Ack()
 
+	// Only cancel the server's context (and let the deferred srv.Close()
+	// shut it down) AFTER the command has been observed and asserted on —
+	// canceling earlier races the run-processor's enrich step against
+	// shutdown and can starve the command out of WORKER_COMMANDS entirely
+	// (see WARN "enrich run ...: context canceled" in the pre-fix logs).
 	cancel()
 	time.Sleep(500 * time.Millisecond)
 }
