@@ -14,10 +14,13 @@ import (
 	"testing"
 	"time"
 
+	dnats "github.com/duragraph/duragraph/controlplane/nats"
 	dgserver "github.com/duragraph/duragraph/controlplane/server"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natsgo "github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -410,5 +413,125 @@ func TestServer_Relay_Wired(t *testing.T) {
 	// Shutdown via ctx cancel — Run returns after Shutdown drains.
 	cancel()
 	// Give Run a moment to finish; the deferred srv.Close() will tidy up.
+	time.Sleep(500 * time.Millisecond)
+}
+
+// TestServerStartsRunProcessor proves New/Run actually starts the
+// run-processor goroutine (not just the relay) when NATSURL is set and
+// Relays=true: a run.created envelope — built exactly like relay.go's
+// envelope(), aggregate_id = the run id — dispatches a
+// worker.graph.execute command onto WORKER_COMMANDS, driven through the
+// real composition root rather than a standalone nats.RunProcessor
+// (mirrors controlplane/nats/run_processor_test.go's
+// TestRunProcessorDispatch, but through *server.Server).
+func TestServerStartsRunProcessor(t *testing.T) {
+	ctx := context.Background()
+	resetTables(t)
+	addr, err := freeAddr()
+	if err != nil {
+		t.Fatalf("free addr: %v", err)
+	}
+	srv, err := dgserver.New(ctx, dgserver.Config{
+		TenantDSN:    tenantDSN,
+		Migrate:      false, // applied once in TestMain
+		NATSURL:      natsURL,
+		Relays:       true,
+		ListenerDSN:  tenantDSN, // no pooler in tests; reuse DSN
+		Addr:         addr,
+		DrainTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer srv.Close()
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() { _ = srv.Run(runCtx) }()
+	waitForListen(t, addr)
+
+	pool, err := pgxpool.New(ctx, tenantDSN)
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	defer pool.Close()
+
+	// Seed a thread + assistant + a queued run directly — the
+	// run-processor enriches the dispatched command from these rows via
+	// the envelope's aggregate_id, same as TestRunProcessorDispatch.
+	var threadID, assistantID, runID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO threads DEFAULT VALUES RETURNING id`).Scan(&threadID); err != nil {
+		t.Fatalf("seed thread: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO assistants (name) VALUES ('a') RETURNING id`).Scan(&assistantID); err != nil {
+		t.Fatalf("seed assistant: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO runs (thread_id, assistant_id, graph_id, status) VALUES ($1,$2,'counter','queued') RETURNING id`,
+		threadID, assistantID).Scan(&runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	// A separate NATS connection to publish the run.created envelope and
+	// observe WORKER_COMMANDS — independent of the server's own internal
+	// connection, exactly as a real relay-publisher / worker process would
+	// be.
+	nc, js, err := dnats.Connect(ctx, natsURL)
+	if err != nil {
+		t.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Drain() //nolint:errcheck
+	if err := dnats.EnsureConsumers(ctx, js); err != nil {
+		t.Fatalf("ensure consumers: %v", err)
+	}
+
+	cons, err := js.CreateOrUpdateConsumer(ctx, "WORKER_COMMANDS", jetstream.ConsumerConfig{
+		FilterSubject: "duragraph.worker_commands.worker.graph.execute",
+		AckPolicy:     jetstream.AckExplicitPolicy,
+	})
+	if err != nil {
+		t.Fatalf("create consumer: %v", err)
+	}
+
+	// Publish the REAL relay envelope for run.created onto RUNS — mirrors
+	// relay.go's envelope(): the run id is aggregate_id, not a top-level
+	// run_id.
+	envelope := map[string]any{
+		"event_id":       uuid.New().String(),
+		"aggregate_type": "Run",
+		"aggregate_id":   runID.String(),
+		"event_type":     "run.created",
+		"payload":        map[string]any{},
+		"metadata":       map[string]any{},
+	}
+	pub := dnats.NewPublisher(js)
+	if err := pub.PublishWithID(ctx, dnats.SubjectFor("run.created"), runID.String(), envelope); err != nil {
+		t.Fatalf("publish run.created: %v", err)
+	}
+
+	batch, err := cons.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	var got jetstream.Msg
+	for m := range batch.Messages() {
+		got = m
+	}
+	if got == nil {
+		t.Fatal("no worker.graph.execute command dispatched — server did not start the run-processor")
+	}
+	var cmd map[string]any
+	if err := json.Unmarshal(got.Data(), &cmd); err != nil {
+		t.Fatalf("decode command: %v", err)
+	}
+	if cmd["run_id"] != runID.String() {
+		t.Errorf("command run_id: want %s, got %v", runID, cmd["run_id"])
+	}
+	if cmd["thread_id"] != threadID.String() {
+		t.Errorf("command thread_id: want %s, got %v", threadID, cmd["thread_id"])
+	}
+	_ = got.Ack()
+
+	cancel()
 	time.Sleep(500 * time.Millisecond)
 }
