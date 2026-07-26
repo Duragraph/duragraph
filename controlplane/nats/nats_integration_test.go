@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats-server/v2/server"
 	natsgo "github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -132,6 +133,25 @@ func applyTenantMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 	return nil
+}
+
+// connectJS dials the embedded test NATS server and returns a plain
+// connection plus its JetStream context. Callers own the Conn (close
+// or drain it); streams/consumers are not declared here — call
+// EnsureStreams/EnsureConsumers explicitly, as nats.Connect does that
+// as a side effect and tests want that step visible.
+func connectJS(t *testing.T) (*natsgo.Conn, jetstream.JetStream) {
+	t.Helper()
+	conn, err := natsgo.Connect(natsURL)
+	if err != nil {
+		t.Fatalf("connectJS: connect: %v", err)
+	}
+	js, err := jetstream.New(conn)
+	if err != nil {
+		conn.Close()
+		t.Fatalf("connectJS: jetstream: %v", err)
+	}
+	return conn, js
 }
 
 func freePort() (int, error) {

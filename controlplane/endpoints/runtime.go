@@ -163,6 +163,10 @@ func asUUID(v interface{}) uuid.UUID {
 	return uuid.UUID{}
 }
 
+// mustParseUUID parses a UUID string, returning the zero UUID on failure (the
+// caller has already validated the path param, or the DB FK will reject zero).
+func mustParseUUID(s string) uuid.UUID { u, _ := uuid.Parse(s); return u }
+
 // nilIfEmpty returns nil (SQL NULL) for an empty/absent string slice so a
 // `$n::text[] IS NULL OR ...` guard clause matches everything. A non-empty
 // slice is returned as-is for a TEXT[] bind.

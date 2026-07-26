@@ -659,6 +659,7 @@ groups:
         steps:
           - "INSERT workers (worker_id, graphs, capacity, status='online', lease_expires_at)"
           - "FOR EACH graph: INSERT INTO graphs ON CONFLICT DO NOTHING"
+        custom: true
       - name: heartbeat
         method: POST
         path: /workers/{id}/heartbeat
@@ -666,6 +667,7 @@ groups:
         outbox: false
         returns: "commands: drain | shutdown | update_config (if pending)"
         steps: ["UPDATE workers SET status=:status, lease_expires_at=now()+60s, active_runs=:n WHERE id=:id AND lease_expires_at > now()"]
+        custom: true
       - name: deregister
         method: POST
         path: /workers/{id}/deregister
@@ -674,6 +676,7 @@ groups:
         steps:
           - "UPDATE workers SET status='offline' WHERE id = :id"
           - "UPDATE runs SET status='queued' WHERE worker_id=:id AND status='in_progress' (requeue)"
+        custom: true
       - name: claim
         method: POST
         path: /workers/{id}/runs/claim
@@ -702,6 +705,7 @@ groups:
           - "INSERT events: execution.node_started / node_completed / node_failed"
           - "INSERT outbox (same TX)"
           - "pg_notify('outbox_new','')"
+        custom: true
       - name: write_checkpoint
         method: POST
         path: /threads/{tid}/checkpoints
@@ -710,6 +714,7 @@ groups:
         steps:
           - "INSERT snapshots (stream_id, aggregate_type='Run', aggregate_id=run_id, version, state=channel_values)"
           - "Metadata: parent_checkpoint_id, node, channel_versions, pending_sends"
+        custom: true
       - name: read_checkpoint
         method: GET
         path: /threads/{tid}/checkpoints/{ckpt}
@@ -717,6 +722,13 @@ groups:
         outbox: false
         returns: "channel_values, channel_versions, pending_sends, node"
         steps: ["SELECT * FROM snapshots WHERE id = :ckpt AND aggregate_id IN (SELECT id FROM runs WHERE thread_id = :tid)"]
+        custom: true
+      - name: latest_checkpoint
+        method: GET
+        path: /threads/{tid}/checkpoints/latest
+        kind: read
+        outbox: false
+        custom: true
 
   # ============================================================== AUTH
   - name: auth

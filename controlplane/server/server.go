@@ -98,15 +98,17 @@ func (c *Config) defaults() {
 // mounted on Echo, relay goroutines running. Run blocks until a
 // SIGINT/SIGTERM arrives or the context cancels; Shutdown drains.
 type Server struct {
-	cfg     Config
-	tenant  *pgxpool.Pool
-	plat    *pgxpool.Pool
-	relay   *nats.Relay
-	cleanup *nats.CleanupWorker
-	echo    *echo.Echo
+	cfg          Config
+	tenant       *pgxpool.Pool
+	plat         *pgxpool.Pool
+	relay        *nats.Relay
+	cleanup      *nats.CleanupWorker
+	runProcessor *nats.RunProcessor
+	echo         *echo.Echo
 
 	relayDone   chan error
 	cleanupDone chan error
+	rpDone      chan error
 
 	closeOnce sync.Once
 }
@@ -127,6 +129,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		cfg:         cfg,
 		relayDone:   make(chan error, 1),
 		cleanupDone: make(chan error, 1),
+		rpDone:      make(chan error, 1),
 	}
 
 	// --- pgxpools ---
@@ -192,6 +195,10 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 			time.Hour,
 			7, // 7-day retention per CLAUDE.md default
 		)
+		// run-processor: dispatches run.created (via the relay above) as
+		// worker.graph.execute commands, enriched from the tenant pool. See
+		// controlplane/nats/run_processor.go.
+		s.runProcessor = nats.NewRunProcessor(js, publisher, s.tenant)
 		// nc lives for the relay's lifetime; closed on Shutdown via
 		// the relay's Stop → publisher Drain. For the SSE subscriber,
 		// there's a separate NewSubscriberFromConn path (TODO when
@@ -239,6 +246,9 @@ func (s *Server) Run(ctx context.Context) error {
 			go func() { s.cleanupDone <- s.cleanup.Start(ctx) }()
 		}
 	}
+	if s.runProcessor != nil && s.cfg.Relays {
+		go func() { s.rpDone <- s.runProcessor.Start(ctx) }()
+	}
 
 	// --- HTTP ---
 	httpErr := make(chan error, 1)
@@ -284,6 +294,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.cleanup != nil {
 		s.cleanup.Stop()
 	}
+	if s.runProcessor != nil {
+		s.runProcessor.Stop()
+	}
 	// Wait for those goroutines to exit (bounded by DrainTimeout).
 	select {
 	case <-s.relayDone:
@@ -292,6 +305,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.cleanup != nil {
 		select {
 		case <-s.cleanupDone:
+		case <-shutCtx.Done():
+		}
+	}
+	if s.runProcessor != nil {
+		select {
+		case <-s.rpDone:
 		case <-shutCtx.Done():
 		}
 	}

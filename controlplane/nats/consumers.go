@@ -26,7 +26,7 @@ type consumerSpec struct {
 // WORKER_COMMANDS by the command family they handle.
 var tenantConsumers = []consumerSpec{
 	{name: "run-processor", stream: "RUNS", ackWait: 30 * time.Second},
-	{name: "graph-executor", stream: "WORKER_COMMANDS", filter: "duragraph.worker_commands.worker.graph.execute", ackWait: 5 * time.Minute},
+	{name: "graph-executor", stream: "WORKER_COMMANDS", filter: "duragraph.worker_commands.worker.graph.execute", ackWait: 5 * time.Minute, maxDeliver: 5},
 	{name: "llm-worker", stream: "WORKER_COMMANDS", filter: "duragraph.worker_commands.worker.llm.invoke", ackWait: 2 * time.Minute},
 	{name: "tool-worker", stream: "WORKER_COMMANDS", filter: "duragraph.worker_commands.worker.tool.execute", ackWait: 1 * time.Minute},
 }
