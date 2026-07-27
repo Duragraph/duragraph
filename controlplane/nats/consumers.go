@@ -9,6 +9,10 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// GraphExecutorMaxDeliver bounds worker.graph.execute redeliveries. Shared so the
+// consumer config and the worker's dead-letter escalation threshold agree.
+const GraphExecutorMaxDeliver = 5
+
 // consumerSpec is one of the seven durable JetStream consumers from
 // nats.d2 (consumers shape). Each binds to a stream with a filter
 // subject (when the stream carries more than one subject family) and
@@ -26,7 +30,7 @@ type consumerSpec struct {
 // WORKER_COMMANDS by the command family they handle.
 var tenantConsumers = []consumerSpec{
 	{name: "run-processor", stream: "RUNS", ackWait: 30 * time.Second},
-	{name: "graph-executor", stream: "WORKER_COMMANDS", filter: "duragraph.worker_commands.worker.graph.execute", ackWait: 5 * time.Minute, maxDeliver: 5},
+	{name: "graph-executor", stream: "WORKER_COMMANDS", filter: "duragraph.worker_commands.worker.graph.execute", ackWait: 5 * time.Minute, maxDeliver: GraphExecutorMaxDeliver},
 	{name: "llm-worker", stream: "WORKER_COMMANDS", filter: "duragraph.worker_commands.worker.llm.invoke", ackWait: 2 * time.Minute},
 	{name: "tool-worker", stream: "WORKER_COMMANDS", filter: "duragraph.worker_commands.worker.tool.execute", ackWait: 1 * time.Minute},
 }

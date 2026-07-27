@@ -55,11 +55,17 @@ func TestCounterExecutor(t *testing.T) {
 	if got := ex.Nodes(); len(got) != 2 || got[0] != "A" || got[1] != "B" {
 		t.Fatalf("nodes: %v", got)
 	}
-	st := ex.Run(0, map[string]int{})
+	st, err := ex.Run(0, map[string]int{})
+	if err != nil {
+		t.Fatalf("A: unexpected error: %v", err)
+	}
 	if st["count"] != 1 {
 		t.Errorf("A: want count=1, got %d", st["count"])
 	}
-	st = ex.Run(1, st)
+	st, err = ex.Run(1, st)
+	if err != nil {
+		t.Fatalf("B: unexpected error: %v", err)
+	}
 	if st["count"] != 2 {
 		t.Errorf("B: want count=2, got %d", st["count"])
 	}

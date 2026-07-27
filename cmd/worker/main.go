@@ -107,7 +107,7 @@ func run() error {
 	heartbeatDone := make(chan struct{})
 	go heartbeatLoop(ctx, client, heartbeatDone)
 
-	runner := worker.NewRunner(js, client, worker.CounterExecutor{})
+	runner := worker.NewRunner(js, client, worker.CounterExecutor{}, nats.GraphExecutorMaxDeliver)
 	runnerDone := make(chan error, 1)
 	go func() { runnerDone <- runner.Start(ctx) }()
 
