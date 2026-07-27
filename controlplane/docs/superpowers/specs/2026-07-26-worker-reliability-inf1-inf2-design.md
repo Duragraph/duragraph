@@ -156,14 +156,18 @@ weakening.
 Escalation to `run.failed` requires a **leased epoch**. Two exhaustion cases are
 therefore NOT covered by this design, and both are acceptable-but-noted:
 
-1. **Run never leased.** If `RunStarted` transient-fails on every delivery to
-   exhaustion (e.g. the DB is down the entire time), `epoch=0`, so escalation
-   cannot call the epoch-fenced `RunFailed`. The message is Acked and the run stays
-   `queued` — NOT marked failed, and nothing re-dispatches it (run-processor only
-   dispatches on `run.created`). This is strictly better than today (which silently
-   drops every exhausted run) but leaves a stuck-`queued` run in this narrow case.
-   A lease-free "fail a stuck queued run" path (admin retry, or a queued-run reaper)
-   is a deliberate follow-up, not part of this slice.
+1. **Run not leased on the final delivery.** Escalation reads the epoch from the
+   *current* delivery's `RunStarted`; if that call transient-fails on the final
+   delivery, `epoch=0`, so escalation cannot call the epoch-fenced `RunFailed`. The
+   message is Acked and the run is NOT marked failed. Two sub-cases:
+   - **Never leased at all** (e.g. DB down the entire time): the run stays `queued`.
+   - **Leased on an earlier delivery, then fails to re-lease on the final one**
+     (e.g. a transient blip only on the last attempt): the run stays `in_progress`.
+   Either way nothing re-dispatches it (run-processor only dispatches on
+   `run.created`). This is strictly better than today (which silently drops every
+   exhausted run) but leaves a stuck run in this narrow case. A lease-free "fail a
+   stuck run" path (admin retry, or a queued/in_progress reaper) is a deliberate
+   follow-up, not part of this slice.
 2. **Worker crashes on its own last delivery**, before it can post `run.failed`.
    Same outcome as JetStream dropping the message. The advisory-consumer backstop
    (below) would close this; deferred.
