@@ -48,10 +48,12 @@ const (
 // that a pooler would drop between TXs) and uses the main pgxpool for
 // the drain itself. A Stop signal or ctx cancel cleanly ends both.
 //
-// Stop closes the listener conn from a separate goroutine so any
-// in-flight WaitForNotification unblocks immediately — without this the
-// relay would wait up to safetyNet (default 30s) before noticing the
-// stop signal.
+// Stop cancels the run context so any in-flight WaitForNotification
+// unblocks immediately — without this the relay would wait up to
+// safetyNet (default 30s) before noticing the stop signal. The listener
+// conn itself is only ever touched by Start's own goroutine (pgx.Conn is
+// not safe for concurrent Close + Wait), so shutdown is driven entirely
+// by context cancellation rather than a cross-goroutine conn.Close.
 type Relay struct {
 	drain       *OutboxDrain
 	publisher   *Publisher
@@ -60,8 +62,8 @@ type Relay struct {
 	batchSize   int
 	stopCh      chan struct{}
 
-	listenerMu sync.Mutex
-	listener   *pgx.Conn
+	cancelMu sync.Mutex
+	cancel   context.CancelFunc // set by Start, called by Stop to unblock the wait
 }
 
 // NewRelay constructs the relay.
@@ -112,28 +114,32 @@ func (r *Relay) Start(ctx context.Context) error {
 		return errors.New("relay: drain and publisher are required")
 	}
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r.cancelMu.Lock()
+	r.cancel = cancel
+	r.cancelMu.Unlock()
+
 	backoff := initialReconnectBackoff
 	for {
-		if err := r.shouldStop(ctx); err != nil {
+		if err := r.shouldStop(runCtx); err != nil {
 			return err
 		}
 
-		conn, err := pgx.Connect(ctx, r.listenerDSN)
+		conn, err := pgx.Connect(runCtx, r.listenerDSN)
 		if err != nil {
 			slog.Error("relay: listener connect failed", "err", err, "retry_in", backoff)
-			if waitErr := r.sleepOrStop(ctx, backoff); waitErr != nil {
+			if waitErr := r.sleepOrStop(runCtx, backoff); waitErr != nil {
 				return waitErr
 			}
 			backoff = nextBackoff(backoff)
 			continue
 		}
-		r.setListener(conn)
 
-		if _, err := conn.Exec(ctx, "LISTEN "+outboxNotifyChannel); err != nil {
+		if _, err := conn.Exec(runCtx, "LISTEN "+outboxNotifyChannel); err != nil {
 			slog.Error("relay: LISTEN failed", "err", err, "retry_in", backoff)
 			_ = conn.Close(context.Background())
-			r.clearListener()
-			if waitErr := r.sleepOrStop(ctx, backoff); waitErr != nil {
+			if waitErr := r.sleepOrStop(runCtx, backoff); waitErr != nil {
 				return waitErr
 			}
 			backoff = nextBackoff(backoff)
@@ -147,13 +153,12 @@ func (r *Relay) Start(ctx context.Context) error {
 
 		// Step 5: startup backlog drain — rows may have been written
 		// while we were down. Process before entering the wait loop.
-		if err := r.processOutbox(ctx); err != nil {
+		if err := r.processOutbox(runCtx); err != nil {
 			slog.Error("relay: initial drain failed", "err", err)
 		}
 
-		loopErr := r.listenLoop(ctx, conn)
+		loopErr := r.listenLoop(runCtx, conn)
 		_ = conn.Close(context.Background())
-		r.clearListener()
 
 		if errors.Is(loopErr, context.Canceled) || errors.Is(loopErr, context.DeadlineExceeded) {
 			return loopErr
@@ -191,7 +196,12 @@ func (r *Relay) listenLoop(ctx context.Context, conn *pgx.Conn) error {
 		case errors.Is(err, context.DeadlineExceeded):
 			// Safety-net interval elapsed — drain anyway.
 		case errors.Is(err, context.Canceled):
-			return ctx.Err()
+			select {
+			case <-r.stopCh:
+				return errStopRequested // Stop() → clean shutdown (Start returns nil)
+			default:
+				return ctx.Err() // parent ctx canceled
+			}
 		default:
 			return fmt.Errorf("wait for notification: %w", err)
 		}
@@ -202,8 +212,10 @@ func (r *Relay) listenLoop(ctx context.Context, conn *pgx.Conn) error {
 	}
 }
 
-// Stop signals Start to exit and closes the listener connection so
-// any in-flight WaitForNotification unblocks immediately. Idempotent.
+// Stop signals Start to exit and cancels the run context so any in-flight
+// WaitForNotification unblocks immediately. The listener conn is closed only
+// by Start's own goroutine, so there is no cross-goroutine use of the conn.
+// Idempotent.
 func (r *Relay) Stop() {
 	select {
 	case <-r.stopCh:
@@ -211,31 +223,12 @@ func (r *Relay) Stop() {
 	default:
 		close(r.stopCh)
 	}
-	// Close the listener conn from this goroutine to unblock a
-	// WaitForNotification in listenLoop. Closing after Start has
-	// released the conn is a no-op (clearListener set it to nil).
-	r.listenerMu.Lock()
-	conn := r.listener
-	r.listener = nil
-	r.listenerMu.Unlock()
-	if conn != nil {
-		_ = conn.Close(context.Background())
+	r.cancelMu.Lock()
+	cancel := r.cancel
+	r.cancelMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
-}
-
-// setListener records the current listener conn so Stop can close it.
-func (r *Relay) setListener(conn *pgx.Conn) {
-	r.listenerMu.Lock()
-	r.listener = conn
-	r.listenerMu.Unlock()
-}
-
-// clearListener drops the listener conn reference. Called after Start
-// itself closes the conn (normal reconnect-loop cycle and shutdown).
-func (r *Relay) clearListener() {
-	r.listenerMu.Lock()
-	r.listener = nil
-	r.listenerMu.Unlock()
 }
 
 func (r *Relay) shouldStop(ctx context.Context) error {
