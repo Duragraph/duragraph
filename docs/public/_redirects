@@ -1,0 +1,6 @@
+# Cloudflare Pages redirects for docs.duragraph.ai
+#
+# The docs root used to serve the old marketing landing page. The real
+# landing now lives on its own site (duragraph.ai), so send the docs root
+# straight to the documentation entry point.
+/    /docs/introduction/    301
