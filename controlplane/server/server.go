@@ -24,6 +24,7 @@ import (
 
 	"github.com/duragraph/duragraph/controlplane/endpoints"
 	"github.com/duragraph/duragraph/controlplane/nats"
+	"github.com/duragraph/duragraph/controlplane/reaper"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
@@ -104,11 +105,13 @@ type Server struct {
 	relay        *nats.Relay
 	cleanup      *nats.CleanupWorker
 	runProcessor *nats.RunProcessor
+	reaper       *reaper.RunReaper
 	echo         *echo.Echo
 
 	relayDone   chan error
 	cleanupDone chan error
 	rpDone      chan error
+	reaperDone  chan error
 
 	closeOnce sync.Once
 }
@@ -130,6 +133,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		relayDone:   make(chan error, 1),
 		cleanupDone: make(chan error, 1),
 		rpDone:      make(chan error, 1),
+		reaperDone:  make(chan error, 1),
 	}
 
 	// --- pgxpools ---
@@ -145,6 +149,11 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 			return nil, fmt.Errorf("server: platform pool: %w", err)
 		}
 		s.plat = platformPool
+	}
+
+	// --- run reaper (needs only the tenant pool, not NATS) ---
+	if s.tenant != nil {
+		s.reaper = reaper.NewRunReaper(s.tenant, reaper.Config{})
 	}
 
 	// --- migrations ---
@@ -249,6 +258,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.runProcessor != nil && s.cfg.Relays {
 		go func() { s.rpDone <- s.runProcessor.Start(ctx) }()
 	}
+	if s.reaper != nil && s.cfg.Relays {
+		go func() { s.reaperDone <- s.reaper.Start(ctx) }()
+	}
 
 	// --- HTTP ---
 	httpErr := make(chan error, 1)
@@ -297,6 +309,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.runProcessor != nil {
 		s.runProcessor.Stop()
 	}
+	if s.reaper != nil {
+		s.reaper.Stop()
+	}
 	// Wait for those goroutines to exit (bounded by DrainTimeout).
 	select {
 	case <-s.relayDone:
@@ -311,6 +326,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.runProcessor != nil {
 		select {
 		case <-s.rpDone:
+		case <-shutCtx.Done():
+		}
+	}
+	if s.reaper != nil {
+		select {
+		case <-s.reaperDone:
 		case <-shutCtx.Done():
 		}
 	}
