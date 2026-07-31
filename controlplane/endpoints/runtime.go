@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/duragraph/duragraph/controlplane/eventstore"
 )
 
 // Server holds the control-plane dependencies the handlers need.
@@ -23,16 +25,11 @@ type Server struct {
 	Platform *pgxpool.Pool
 }
 
-// Event is one domain event to append within a write transaction. EventID is
-// app-generated so the mirrored outbox row carries the identical id for
-// JetStream dedup. EventVersion is resolved by appendEvents from the stream.
-type Event struct {
-	AggregateType string
-	AggregateID   uuid.UUID
-	EventType     string
-	Payload       []byte
-	Metadata      []byte
-}
+// Event is one domain event to append within a write transaction. Aliased to
+// eventstore.Event so existing Event{...} literals (handlers + generated
+// *_gen.go) keep compiling unchanged after the append implementation moved to
+// the shared eventstore package.
+type Event = eventstore.Event
 
 // writeTx runs the transactional-outbox write path on pool: it opens a TX,
 // appends each event (advancing the stream version via the
@@ -47,7 +44,7 @@ func (s *Server) writeTx(ctx context.Context, pool *pgxpool.Pool, events []Event
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
 	for _, e := range events {
-		if err := appendEvent(ctx, tx, e); err != nil {
+		if err := eventstore.Append(ctx, tx, e); err != nil {
 			return err
 		}
 	}
@@ -61,42 +58,6 @@ func (s *Server) writeTx(ctx context.Context, pool *pgxpool.Pool, events []Event
 		return err
 	}
 	return tx.Commit(ctx)
-}
-
-// appendEvent mirrors outbox.sql's EnsureStream + AppendEvent + EnqueueOutbox.
-func appendEvent(ctx context.Context, tx pgx.Tx, e Event) error {
-	var streamID uuid.UUID
-	var version int
-	// EnsureStream: upsert by (aggregate_type, aggregate_id), return its row.
-	err := tx.QueryRow(ctx, `
-		INSERT INTO event_streams (stream_id, aggregate_type, aggregate_id, version)
-		VALUES ($1, $2, $3, 0)
-		ON CONFLICT (aggregate_type, aggregate_id) DO UPDATE SET updated_at = now()
-		RETURNING stream_id, version`,
-		uuid.New(), e.AggregateType, e.AggregateID).Scan(&streamID, &version)
-	if err != nil {
-		return err
-	}
-
-	eventID := uuid.New()
-	nextVersion := version + 1
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO events (event_id, stream_id, aggregate_type, aggregate_id,
-		                    event_type, event_version, payload, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		eventID, streamID, e.AggregateType, e.AggregateID,
-		e.EventType, nextVersion, jsonOrEmpty(e.Payload), jsonOrEmpty(e.Metadata)); err != nil {
-		return err
-	}
-
-	_, err = tx.Exec(ctx, `
-		INSERT INTO outbox (event_id, aggregate_type, aggregate_id, event_type, payload, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (event_id) DO NOTHING`,
-		eventID, e.AggregateType, e.AggregateID, e.EventType,
-		jsonOrEmpty(e.Payload), jsonOrEmpty(e.Metadata))
-	return err
 }
 
 func jsonOrEmpty(b []byte) []byte {
