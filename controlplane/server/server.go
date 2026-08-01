@@ -173,6 +173,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	}
 
 	// --- NATS relay + cleanup worker (optional) ---
+	var subscriber *nats.Subscriber
 	if cfg.NATSURL != "" {
 		nc, js, err := nats.Connect(ctx, cfg.NATSURL)
 		if err != nil {
@@ -209,9 +210,10 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		// controlplane/nats/run_processor.go.
 		s.runProcessor = nats.NewRunProcessor(js, publisher, s.tenant)
 		// nc lives for the relay's lifetime; closed on Shutdown via
-		// the relay's Stop → publisher Drain. For the SSE subscriber,
-		// there's a separate NewSubscriberFromConn path (TODO when
-		// SSE handlers land).
+		// the relay's Stop → publisher Drain. The SSE/wait endpoints
+		// share the same conn via a Subscriber (core-NATS, no
+		// separate connection or durable state).
+		subscriber = nats.NewSubscriberFromConn(nc)
 	}
 
 	// --- Echo router with all 10 endpoint groups mounted ---
@@ -225,8 +227,9 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	s.echo = e
 
 	ep := &endpoints.Server{
-		Tenant:   s.tenant,
-		Platform: s.plat,
+		Tenant:     s.tenant,
+		Platform:   s.plat,
+		Subscriber: subscriber,
 	}
 	g := e.Group("/api/v1")
 	ep.RegisterAssistants(g)

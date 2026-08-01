@@ -428,6 +428,7 @@ groups:
         path: /threads/{id}/runs/{rid}/join
         kind: wait
         outbox: false
+        custom: true
         steps:
           - "SELECT status FROM runs WHERE id = :rid"
           - "IF not terminal: subscribe NATS run.completed/run.failed for run_id, block"
@@ -436,6 +437,7 @@ groups:
         path: /threads/{id}/runs/{rid}/stream
         kind: sse
         outbox: false
+        custom: true
         nats: {subscribe: "run.* + execution.* for this run"}
         steps:
           - "SELECT status FROM runs WHERE id = :rid (validate exists)"
@@ -447,6 +449,7 @@ groups:
         path: /threads/{id}/stream
         kind: sse
         outbox: false
+        custom: true
         nats: {subscribe: "all active runs on thread"}
         steps:
           - "SELECT id FROM runs WHERE thread_id = :id AND status IN ('queued','in_progress')"
@@ -457,6 +460,7 @@ groups:
         path: /threads/{id}/runs/stream
         kind: sse
         outbox: true
+        custom: true
         events: [run.created]
         nats: {subject: run.created, stream: RUNS, subscribe: "run.* + execution.* for new run"}
         steps:
@@ -468,6 +472,7 @@ groups:
         path: /runs/stream
         kind: sse
         outbox: true
+        custom: true
         events: [run.created]
         nats: {subject: run.created, stream: RUNS, subscribe: "run.* + execution.* for new run"}
         steps:
@@ -479,6 +484,7 @@ groups:
         path: /runs/wait
         kind: wait
         outbox: true
+        custom: true
         events: [run.created]
         nats: {subject: run.created, stream: RUNS, subscribe: "blocks until terminal"}
         steps:

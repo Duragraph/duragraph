@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/duragraph/duragraph/controlplane/eventstore"
+	"github.com/duragraph/duragraph/controlplane/nats"
 )
 
 // Server holds the control-plane dependencies the handlers need.
@@ -23,6 +24,10 @@ import (
 type Server struct {
 	Tenant   *pgxpool.Pool
 	Platform *pgxpool.Pool
+
+	// Subscriber tails NATS for SSE/wait endpoints. Nil when NATS is disabled
+	// (those endpoints then return 503). Set by the server composition root.
+	Subscriber *nats.Subscriber
 }
 
 // Event is one domain event to append within a write transaction. Aliased to
