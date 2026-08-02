@@ -3,21 +3,22 @@
 // events (catch-up), then stream live NATS events deduped by event_id, closing on
 // the run's terminal event or client disconnect. Thin passthrough frames.
 //
-// Task 1 (this file, initial cut) implements the shared plumbing (streamRun,
-// writeSSEFrame, isTerminalEvent, relayEnvelope) and RunsStreamPerRun in full.
-// RunsJoin, RunsStreamThread, RunsCreateAndStream, RunsStatelessStream, and
-// RunsStatelessWait are stubbed here with the same NotImplemented behavior the
-// generator previously produced — Tasks 2 and 3 replace the stubs with real
-// bodies built on streamRun (see
+// Task 1 implemented the shared plumbing (streamRun, writeSSEFrame,
+// isTerminalEvent, relayEnvelope) and RunsStreamPerRun in full. Task 2 (this
+// pass) adds RunsStreamThread, RunsCreateAndStream, RunsStatelessStream, and
+// the shared createRun helper, all built on streamRun. RunsJoin and
+// RunsStatelessWait remain stubbed pending Task 3 (see
 // controlplane/docs/superpowers/plans/2026-07-31-runs-streaming-wait.md).
 package endpoints
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/duragraph/duragraph/controlplane/nats"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 )
 
@@ -31,6 +32,47 @@ type relayEnvelope struct {
 
 func isTerminalEvent(t string) bool {
 	return t == "run.completed" || t == "run.failed" || t == "run.cancelled"
+}
+
+// seenCap bounds the memory a single streamRun connection's dedup set can use.
+// Per-run streams (closeOnTerminal=true) close quickly and never approach
+// this; the thread feed (closeOnTerminal=false) can run indefinitely, so
+// without a bound its dedup set would grow forever. Evicting the oldest seen
+// event_id once the cap is exceeded trades perfect dedup for very old events
+// (rare — a duplicate that old would surface as a harmless repeat frame, never
+// a missed one) for a fixed memory ceiling.
+const seenCap = 4096
+
+// boundedSeen is a fixed-capacity, O(1) set of event_id strings backed by a
+// ring buffer: once full, each Add overwrites (and evicts from the map) the
+// oldest entry.
+type boundedSeen struct {
+	set  map[string]bool
+	ring []string
+	pos  int
+	full bool
+}
+
+func newBoundedSeen(cap int) *boundedSeen {
+	return &boundedSeen{set: make(map[string]bool, cap), ring: make([]string, cap)}
+}
+
+func (b *boundedSeen) Has(id string) bool { return b.set[id] }
+
+func (b *boundedSeen) Add(id string) {
+	if b.set[id] {
+		return
+	}
+	if b.full {
+		delete(b.set, b.ring[b.pos])
+	}
+	b.ring[b.pos] = id
+	b.set[id] = true
+	b.pos++
+	if b.pos == len(b.ring) {
+		b.pos = 0
+		b.full = true
+	}
 }
 
 // RunsStreamPerRun streams one run's events. GET /threads/{id}/runs/{rid}/stream.
@@ -75,22 +117,30 @@ func (s *Server) streamRun(c echo.Context, runIDs map[uuid.UUID]bool, closeOnTer
 	c.Response().WriteHeader(http.StatusOK)
 	c.Response().Flush()
 
-	seen := map[string]bool{} // event_id → emitted (dedup)
+	seen := newBoundedSeen(seenCap) // event_id → emitted (dedup, bounded)
 
 	// 2. Catch-up: replay persisted events for the watched runs, in order.
+	// Ordered by occurred_at first (event_version alone only orders events
+	// WITHIN one run's own stream; for a multi-run watch set — e.g. the
+	// thread feed, which unions every run on a thread — sorting by version
+	// alone interleaves each run's independently-numbered version sequence
+	// wrongly, since a low version number on one run has no relationship to
+	// a low version number on another. occurred_at gives a single, real
+	// chronological order across runs; event_version stays as the tiebreak
+	// for same-instant events, so single-run ordering is unchanged.
 	ids := make([]uuid.UUID, 0, len(runIDs))
 	for id := range runIDs {
 		ids = append(ids, id)
 	}
 	rows, err := s.Tenant.Query(ctx, `
 		SELECT event_id::text, event_type, payload FROM events
-		WHERE aggregate_id = ANY($1) ORDER BY event_version`, ids)
+		WHERE aggregate_id = ANY($1) ORDER BY occurred_at, event_version`, ids)
 	if err == nil {
 		for rows.Next() {
 			var eid, etype string
 			var payload []byte
 			if rows.Scan(&eid, &etype, &payload) == nil {
-				seen[eid] = true
+				seen.Add(eid)
 				if werr := writeSSEFrame(c, etype, payload); werr != nil {
 					rows.Close()
 					return nil // client gone
@@ -121,10 +171,10 @@ func (s *Server) streamRun(c echo.Context, runIDs map[uuid.UUID]bool, closeOnTer
 			continue
 		}
 		aid, err := uuid.Parse(env.AggregateID)
-		if err != nil || !runIDs[aid] || seen[env.EventID] {
+		if err != nil || !runIDs[aid] || seen.Has(env.EventID) {
 			continue
 		}
-		seen[env.EventID] = true
+		seen.Add(env.EventID)
 		if writeSSEFrame(c, env.EventType, env.Payload) != nil {
 			return nil
 		}
@@ -151,11 +201,123 @@ func writeSSEFrame(c echo.Context, eventType string, payload []byte) error {
 	return nil
 }
 
-// --- Stubs below: Task 1 marks these endpoints custom (so Task 2/3 can build
-// on streamRun without another generator/regen round), but only implements
-// RunsStreamPerRun. The stubs reproduce the exact NotImplemented behavior the
-// generator previously emitted for these (kind: sse / kind: wait, no impl),
-// so this is a no-behavior-change placeholder pending Tasks 2 and 3.
+// RunsStreamThread — GET /threads/{id}/stream  (kind: sse)
+// Streams every run currently on the thread, unioned. The feed stays open
+// until the client disconnects (closeOnTerminal=false): a thread outlives any
+// single run, so a terminal event on one run must not end the whole feed. An
+// empty run set (a brand-new thread with no runs yet) is valid — nothing to
+// catch up on, and the live loop simply drops every envelope until a watched
+// aggregate_id shows up. Known limitation: runIDs is a snapshot taken once at
+// request time, so a run created on this thread AFTER the stream opens is not
+// added to the watch set (its events are silently ignored, not missed-then-
+// caught-up) — reconnecting picks it up. Fine for now; a future pass could
+// re-query periodically or subscribe to run.created for the thread.
+func (s *Server) RunsStreamThread(c echo.Context) error {
+	if s.Subscriber == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "streaming requires NATS")
+	}
+	ctx := c.Request().Context()
+	threadID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	ids := map[uuid.UUID]bool{}
+	rows, err := s.Tenant.Query(ctx, `SELECT id FROM runs WHERE thread_id = $1`, threadID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		if scanErr := rows.Scan(&id); scanErr == nil {
+			ids[id] = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return s.streamRun(c, ids, false /*stay open — thread feed*/)
+}
+
+// createRun is the shared create path for the two stream-and-create
+// endpoints below. It mirrors RunsCreateOnThread/RunsCreateStateless's write
+// (event_streams + events + outbox + runs projection, all in one TX via
+// writeTx) but is parameterized on threadID so both variants can share it —
+// the generated handlers keep their own inline copy so this stays a small,
+// additive helper rather than a generator change. Returns the new run's id.
+func (s *Server) createRun(ctx context.Context, threadID *uuid.UUID, assistantID uuid.UUID, input, metadata []byte) (uuid.UUID, error) {
+	aggID := uuid.New()
+	payload := mustJSON(struct {
+		AssistantID uuid.UUID       `json:"assistant_id"`
+		Input       json.RawMessage `json:"input,omitempty"`
+		Metadata    json.RawMessage `json:"metadata,omitempty"`
+	}{AssistantID: assistantID, Input: input, Metadata: metadata})
+	events := []Event{
+		{AggregateType: "Run", AggregateID: aggID, EventType: "run.created", Payload: payload},
+	}
+	err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
+		var execErr error
+		if threadID != nil {
+			_, execErr = tx.Exec(ctx, `INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata)
+VALUES ($1, $2, $3, 'queued', $4, $5)`, aggID, *threadID, assistantID, input, metadata)
+		} else {
+			_, execErr = tx.Exec(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata)
+VALUES ($1, $2, 'queued', $3, $4)`, aggID, assistantID, input, metadata)
+		}
+		return execErr
+	})
+	if err != nil {
+		return uuid.UUID{}, err
+	}
+	return aggID, nil
+}
+
+// RunsCreateAndStream — POST /threads/{id}/runs/stream  (kind: sse)
+// Creates the run first (a normal HTTP error on a bad request/DB failure,
+// with no SSE header written yet), then streams that one run until terminal.
+func (s *Server) RunsCreateAndStream(c echo.Context) error {
+	if s.Subscriber == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "streaming requires NATS")
+	}
+	ctx := c.Request().Context()
+	threadID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	var req RunCreateStateful
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	rid, err := s.createRun(ctx, &threadID, asUUID(req.AssistantId), mustJSON(req.Input), mustJSON(req.Metadata))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return s.streamRun(c, map[uuid.UUID]bool{rid: true}, true /*closeOnTerminal*/)
+}
+
+// RunsStatelessStream — POST /runs/stream  (kind: sse)
+// Same as RunsCreateAndStream but for a stateless run (no thread).
+func (s *Server) RunsStatelessStream(c echo.Context) error {
+	if s.Subscriber == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "streaming requires NATS")
+	}
+	ctx := c.Request().Context()
+	var req RunCreateStateless
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	rid, err := s.createRun(ctx, nil, asUUID(req.AssistantId), mustJSON(req.Input), mustJSON(req.Metadata))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return s.streamRun(c, map[uuid.UUID]bool{rid: true}, true /*closeOnTerminal*/)
+}
+
+// --- Stub below: Task 1 marks this endpoint custom (so Task 3 can build on
+// streamRun without another generator/regen round). The stub reproduces the
+// exact NotImplemented behavior the generator previously emitted for it
+// (kind: wait, no impl), so this is a no-behavior-change placeholder pending
+// Task 3.
 
 // RunsJoin — POST /threads/{id}/runs/{rid}/join  (kind: wait)
 //   - SELECT status FROM runs WHERE id = :rid
@@ -164,39 +326,6 @@ func writeSSEFrame(c echo.Context, eventType string, payload []byte) error {
 // TODO(Task 3): implement via waitForRun (see the streaming-wait plan).
 func (s *Server) RunsJoin(c echo.Context) error {
 	return echo.NewHTTPError(http.StatusNotImplemented, "wait handler not implemented")
-}
-
-// RunsStreamThread — GET /threads/{id}/stream  (kind: sse)
-//   - SELECT id FROM runs WHERE thread_id = :id AND status IN ('queued','in_progress')
-//   - Subscribe NATS for all active runs on thread
-//   - Loop: receive → SSE → flush
-//
-// TODO(Task 2): implement via streamRun(c, ids, false).
-func (s *Server) RunsStreamThread(c echo.Context) error {
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	return echo.NewHTTPError(http.StatusNotImplemented, "sse handler not implemented")
-}
-
-// RunsCreateAndStream — POST /threads/{id}/runs/stream  (kind: sse)
-//   - CREATE RUN (same as POST /threads/{id}/runs)
-//   - Subscribe NATS immediately to new run's subjects
-//   - Loop: SSE stream until terminal
-//
-// TODO(Task 2): implement via createRun + streamRun(c, {rid}, true).
-func (s *Server) RunsCreateAndStream(c echo.Context) error {
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	return echo.NewHTTPError(http.StatusNotImplemented, "sse handler not implemented")
-}
-
-// RunsStatelessStream — POST /runs/stream  (kind: sse)
-//   - CREATE RUN (same as POST /runs)
-//   - Subscribe NATS immediately to new run's subjects
-//   - Loop: SSE stream until terminal
-//
-// TODO(Task 2): implement via createRun(nil, ...) + streamRun(c, {rid}, true).
-func (s *Server) RunsStatelessStream(c echo.Context) error {
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	return echo.NewHTTPError(http.StatusNotImplemented, "sse handler not implemented")
 }
 
 // RunsStatelessWait — POST /runs/wait  (kind: wait)
