@@ -459,3 +459,121 @@ func TestCreateAndStream(t *testing.T) {
 		t.Errorf("frame 1: want run.started, got %+v", frames[1])
 	}
 }
+
+// joinResult is a join/wait POST's decoded outcome, handed back over a
+// channel from the goroutine driving the (possibly blocking) request.
+type joinResult struct {
+	status int
+	body   map[string]any
+}
+
+// postJoin POSTs url (join or wait) and sends the decoded result on done. A
+// request error is reported via t.Errorf and an empty result is still sent so
+// callers waiting on done never block forever.
+func postJoin(t *testing.T, url string, done chan<- joinResult) {
+	t.Helper()
+	resp, err := http.Post(url, "application/json", nil)
+	if err != nil {
+		t.Errorf("join/wait POST: %v", err)
+		done <- joinResult{}
+		return
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	done <- joinResult{status: resp.StatusCode, body: body}
+}
+
+// TestJoinReturnsOnTerminal proves POST /threads/{id}/runs/{rid}/join blocks
+// on an in_progress run until a terminal run.* event arrives, then returns
+// the run's terminal state as JSON.
+func TestJoinReturnsOnTerminal(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, "TRUNCATE runs, events, outbox, event_streams, assistants CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	rid := seedRunWithStream(t, ctx) // in_progress run
+
+	e := echo.New()
+	s := newStreamTestServer()
+	s.RegisterRuns(e.Group("/api/v1"))
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	url := srv.URL + "/api/v1/threads/" + uuid.Nil.String() + "/runs/" + rid.String() + "/join"
+
+	done := make(chan joinResult, 1)
+	go postJoin(t, url, done)
+
+	time.Sleep(300 * time.Millisecond) // let subscribe + status read run
+	if _, err := testPool.Exec(ctx, `UPDATE runs SET status='completed' WHERE id=$1`, rid); err != nil {
+		t.Fatal(err)
+	}
+	pub := nats.NewPublisher(mustJS(t))
+	_ = pub.PublishWithID(ctx, nats.SubjectFor("run.completed"), uuid.NewString(), envelopeFor(rid, "run.completed", `{}`))
+
+	select {
+	case res := <-done:
+		if res.status != http.StatusOK {
+			t.Fatalf("want 200, got %d: %+v", res.status, res.body)
+		}
+		if res.body["status"] != "success" {
+			t.Errorf("want terminal status \"success\", got %+v", res.body["status"])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("join did not return within 5s")
+	}
+}
+
+// TestJoinAlreadyTerminal proves join returns immediately (no wait) when the
+// run is already terminal at request time.
+func TestJoinAlreadyTerminal(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, "TRUNCATE runs, events, outbox, event_streams, assistants CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	rid := seedRunWithStream(t, ctx)
+	if _, err := testPool.Exec(ctx, `UPDATE runs SET status='completed' WHERE id=$1`, rid); err != nil {
+		t.Fatal(err)
+	}
+
+	e := echo.New()
+	s := newStreamTestServer()
+	s.RegisterRuns(e.Group("/api/v1"))
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	url := srv.URL + "/api/v1/threads/" + uuid.Nil.String() + "/runs/" + rid.String() + "/join"
+
+	done := make(chan joinResult, 1)
+	go postJoin(t, url, done)
+
+	select {
+	case res := <-done:
+		if res.status != http.StatusOK {
+			t.Fatalf("want 200, got %d: %+v", res.status, res.body)
+		}
+		if res.body["status"] != "success" {
+			t.Errorf("want terminal status \"success\", got %+v", res.body["status"])
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("join (already terminal) did not return immediately within 1s")
+	}
+}
+
+// TestWaitRequiresNATS proves POST /runs/wait 503s immediately when the
+// server has no Subscriber (NATS disabled) — no DB round-trip, no wait.
+func TestWaitRequiresNATS(t *testing.T) {
+	e := echo.New()
+	s := &Server{Tenant: testPool}
+	s.RegisterRuns(e.Group("/api/v1"))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/wait", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

@@ -4,16 +4,17 @@
 // the run's terminal event or client disconnect. Thin passthrough frames.
 //
 // Task 1 implemented the shared plumbing (streamRun, writeSSEFrame,
-// isTerminalEvent, relayEnvelope) and RunsStreamPerRun in full. Task 2 (this
-// pass) adds RunsStreamThread, RunsCreateAndStream, RunsStatelessStream, and
-// the shared createRun helper, all built on streamRun. RunsJoin and
-// RunsStatelessWait remain stubbed pending Task 3 (see
-// controlplane/docs/superpowers/plans/2026-07-31-runs-streaming-wait.md).
+// isTerminalEvent, relayEnvelope) and RunsStreamPerRun in full. Task 2 added
+// RunsStreamThread, RunsCreateAndStream, RunsStatelessStream, and the shared
+// createRun helper, all built on streamRun. Task 3 (this pass) adds
+// waitForRun (block-until-terminal, subscribe-first) plus RunsJoin and
+// RunsStatelessWait, built on it.
 package endpoints
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/duragraph/duragraph/controlplane/nats"
@@ -313,27 +314,111 @@ func (s *Server) RunsStatelessStream(c echo.Context) error {
 	return s.streamRun(c, map[uuid.UUID]bool{rid: true}, true /*closeOnTerminal*/)
 }
 
-// --- Stub below: Task 1 marks this endpoint custom (so Task 3 can build on
-// streamRun without another generator/regen round). The stub reproduces the
-// exact NotImplemented behavior the generator previously emitted for it
-// (kind: wait, no impl), so this is a no-behavior-change placeholder pending
-// Task 3.
+// waitForRun blocks until run rid reaches a terminal status (completed,
+// failed, cancelled), then responds 200 with the run's current API
+// representation. Subscribe-first (before the DB status read) is load-bearing:
+// it guarantees a terminal event fired in the gap between the read and the
+// subscribe can never be missed — the same lossless ordering streamRun uses.
+//
+//   - 503 if NATS is disabled (no Subscriber).
+//   - 404 if the run doesn't exist.
+//   - If the run is already terminal, returns immediately without waiting.
+//   - Otherwise blocks on the live feed until a terminal run.* event for rid
+//     arrives, or the request context is canceled (client disconnect/timeout),
+//     in which case it returns the run's state as of the cancellation.
+func (s *Server) waitForRun(c echo.Context, rid uuid.UUID) error {
+	if s.Subscriber == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "wait requires NATS")
+	}
+	ctx := c.Request().Context()
+
+	// 1. Subscribe FIRST (before the status read) so nothing is missed in the gap.
+	runsCh, err := s.Subscriber.Subscribe(ctx, "duragraph.runs.>")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	// 2. Check current status; skip waiting if already terminal.
+	var status string
+	if err := s.Tenant.QueryRow(ctx, `SELECT status FROM runs WHERE id=$1`, rid).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "run not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	if !isTerminalStatus(status) {
+		// 3. Block until a terminal run.* event for rid arrives, or disconnect.
+	waitLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				break waitLoop
+			case msg := <-runsCh:
+				if msg == nil { // channel closed (ctx canceled)
+					break waitLoop
+				}
+				var env relayEnvelope
+				if json.Unmarshal(msg.Payload, &env) != nil {
+					continue
+				}
+				aid, err := uuid.Parse(env.AggregateID)
+				if err != nil || aid != rid || !isTerminalEvent(env.EventType) {
+					continue
+				}
+				break waitLoop
+			}
+		}
+	}
+
+	// 4. Return the run's current state (fresh SELECT — whatever it is at this
+	// point, terminal or not, e.g. if the wait ended via client disconnect).
+	rows, err := s.Tenant.Query(ctx, `SELECT id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+FROM runs WHERE id = $1`, rid)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[runRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "run not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
+}
+
+// isTerminalStatus reports whether a DB runs.status value is terminal
+// (mirrors isTerminalEvent's event-type check, for the DB-status side).
+func isTerminalStatus(status string) bool {
+	return status == "completed" || status == "failed" || status == "cancelled"
+}
 
 // RunsJoin — POST /threads/{id}/runs/{rid}/join  (kind: wait)
-//   - SELECT status FROM runs WHERE id = :rid
-//   - IF not terminal: subscribe NATS run.completed/run.failed for run_id, block
-//
-// TODO(Task 3): implement via waitForRun (see the streaming-wait plan).
+// Blocks until the run reaches a terminal status, then returns it as JSON.
 func (s *Server) RunsJoin(c echo.Context) error {
-	return echo.NewHTTPError(http.StatusNotImplemented, "wait handler not implemented")
+	rid, err := uuid.Parse(c.Param("rid"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid rid")
+	}
+	return s.waitForRun(c, rid)
 }
 
 // RunsStatelessWait — POST /runs/wait  (kind: wait)
-//   - CREATE RUN (same as POST /runs)
-//   - Subscribe NATS, wait for run.completed or run.failed
-//   - Return final run state as JSON
-//
-// TODO(Task 3): implement via createRun(nil, ...) + waitForRun.
+// Creates a stateless run, then blocks until it reaches a terminal status and
+// returns it as JSON.
 func (s *Server) RunsStatelessWait(c echo.Context) error {
-	return echo.NewHTTPError(http.StatusNotImplemented, "wait handler not implemented")
+	if s.Subscriber == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "wait requires NATS")
+	}
+	ctx := c.Request().Context()
+	var req RunCreateStateless
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	rid, err := s.createRun(ctx, nil, asUUID(req.AssistantId), mustJSON(req.Input), mustJSON(req.Metadata))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return s.waitForRun(c, rid)
 }
