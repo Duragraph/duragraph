@@ -194,93 +194,17 @@ RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, k
 	return c.JSON(http.StatusOK, row.toAPI())
 }
 
-// RunsJoin — POST /threads/{id}/runs/{rid}/join  (kind: wait)
-//   - SELECT status FROM runs WHERE id = :rid
-//   - IF not terminal: subscribe NATS run.completed/run.failed for run_id, block
-func (s *Server) RunsJoin(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// WAIT: create/read then block on a terminal NATS event. Bespoke — fill in.
-	//   SELECT status FROM runs WHERE id = :rid
-	//   IF not terminal: subscribe NATS run.completed/run.failed for run_id, block
-	return echo.NewHTTPError(http.StatusNotImplemented, "wait handler not implemented")
-}
+// RunsJoin — POST /threads/{id}/runs/{rid}/join  (kind: wait) — hand-written in runs.go
 
-// RunsStreamPerRun — GET /threads/{id}/runs/{rid}/stream  (kind: sse)
-//   - SELECT status FROM runs WHERE id = :rid (validate exists)
-//   - Subscribe NATS JetStream consumer filtered to run_id subjects
-//   - Loop: receive → SSE data frame → flush
-//   - Cleanup: unsubscribe on client disconnect
-func (s *Server) RunsStreamPerRun(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// SSE: subscribe to NATS, stream frames to client. Bespoke — fill in.
-	//   SELECT status FROM runs WHERE id = :rid (validate exists)
-	//   Subscribe NATS JetStream consumer filtered to run_id subjects
-	//   Loop: receive → SSE data frame → flush
-	//   Cleanup: unsubscribe on client disconnect
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	return echo.NewHTTPError(http.StatusNotImplemented, "sse handler not implemented")
-}
+// RunsStreamPerRun — GET /threads/{id}/runs/{rid}/stream  (kind: sse) — hand-written in runs.go
 
-// RunsStreamThread — GET /threads/{id}/stream  (kind: sse)
-//   - SELECT id FROM runs WHERE thread_id = :id AND status IN ('queued','in_progress')
-//   - Subscribe NATS for all active runs on thread
-//   - Loop: receive → SSE → flush
-func (s *Server) RunsStreamThread(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// SSE: subscribe to NATS, stream frames to client. Bespoke — fill in.
-	//   SELECT id FROM runs WHERE thread_id = :id AND status IN ('queued','in_progress')
-	//   Subscribe NATS for all active runs on thread
-	//   Loop: receive → SSE → flush
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	return echo.NewHTTPError(http.StatusNotImplemented, "sse handler not implemented")
-}
+// RunsStreamThread — GET /threads/{id}/stream  (kind: sse) — hand-written in runs.go
 
-// RunsCreateAndStream — POST /threads/{id}/runs/stream  (kind: sse)
-//   - CREATE RUN (same as POST /threads/{id}/runs)
-//   - Subscribe NATS immediately to new run's subjects
-//   - Loop: SSE stream until terminal
-func (s *Server) RunsCreateAndStream(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// SSE: subscribe to NATS, stream frames to client. Bespoke — fill in.
-	//   CREATE RUN (same as POST /threads/{id}/runs)
-	//   Subscribe NATS immediately to new run's subjects
-	//   Loop: SSE stream until terminal
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	return echo.NewHTTPError(http.StatusNotImplemented, "sse handler not implemented")
-}
+// RunsCreateAndStream — POST /threads/{id}/runs/stream  (kind: sse) — hand-written in runs.go
 
-// RunsStatelessStream — POST /runs/stream  (kind: sse)
-//   - CREATE RUN (same as POST /runs)
-//   - Subscribe NATS immediately to new run's subjects
-//   - Loop: SSE stream until terminal
-func (s *Server) RunsStatelessStream(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// SSE: subscribe to NATS, stream frames to client. Bespoke — fill in.
-	//   CREATE RUN (same as POST /runs)
-	//   Subscribe NATS immediately to new run's subjects
-	//   Loop: SSE stream until terminal
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	return echo.NewHTTPError(http.StatusNotImplemented, "sse handler not implemented")
-}
+// RunsStatelessStream — POST /runs/stream  (kind: sse) — hand-written in runs.go
 
-// RunsStatelessWait — POST /runs/wait  (kind: wait)
-//   - CREATE RUN (same as POST /runs)
-//   - Subscribe NATS, wait for run.completed or run.failed
-//   - Return final run state as JSON
-func (s *Server) RunsStatelessWait(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// WAIT: create/read then block on a terminal NATS event. Bespoke — fill in.
-	//   CREATE RUN (same as POST /runs)
-	//   Subscribe NATS, wait for run.completed or run.failed
-	//   Return final run state as JSON
-	return echo.NewHTTPError(http.StatusNotImplemented, "wait handler not implemented")
-}
+// RunsStatelessWait — POST /runs/wait  (kind: wait) — hand-written in runs.go
 
 // RunsCancelStateless — POST /runs/cancel  (kind: write)
 //   - same as POST /threads/{id}/runs/{rid}/cancel

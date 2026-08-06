@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,19 +14,83 @@ import (
 	"testing"
 	"time"
 
+	dnats "github.com/duragraph/duragraph/controlplane/nats"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+	"github.com/nats-io/nats-server/v2/server"
+	natsgo "github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // testPool connects to a real Postgres (testcontainers) with the tenant
-// migrations applied. Populated by TestMain.
-var testPool *pgxpool.Pool
+// migrations applied. testNATS is a core-NATS connection to an embedded,
+// in-process NATS+JetStream server (mirrors controlplane/nats's test setup).
+// Both are populated by TestMain and shared across every test in this
+// package.
+var (
+	testPool *pgxpool.Pool
+	testNATS *natsgo.Conn
+)
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
+
+	// --- embedded NATS server ---
+	natsPort, err := freeTCPPort()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "free-port: %v\n", err)
+		os.Exit(1)
+	}
+	natsDataDir, err := os.MkdirTemp("", "duragraph-endpoints-nats-test-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkdtemp: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(natsDataDir)
+
+	natsSrv, err := server.NewServer(&server.Options{
+		Host:      "127.0.0.1",
+		Port:      natsPort,
+		JetStream: true,
+		StoreDir:  filepath.Join(natsDataDir, "js"),
+		NoSigs:    true,
+		NoLog:     true, // quiet
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nats new: %v\n", err)
+		os.Exit(1)
+	}
+	go natsSrv.Start()
+	if !natsSrv.ReadyForConnections(10 * time.Second) {
+		fmt.Fprintln(os.Stderr, "nats: did not become ready")
+		os.Exit(1)
+	}
+	defer natsSrv.Shutdown()
+
+	natsURL := fmt.Sprintf("nats://127.0.0.1:%d", natsPort)
+	testNATS, err = natsgo.Connect(natsURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nats connect: %v\n", err)
+		os.Exit(1)
+	}
+	defer testNATS.Drain()
+
+	// Declare the streams so tests can publish via JetStream (Publisher.
+	// PublishMsg requires the subject's stream to already exist).
+	testJS, err := jetstream.New(testNATS)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nats jetstream: %v\n", err)
+		os.Exit(1)
+	}
+	if err := dnats.EnsureStreams(ctx, testJS); err != nil {
+		fmt.Fprintf(os.Stderr, "nats ensure streams: %v\n", err)
+		os.Exit(1)
+	}
+
+	// --- Postgres testcontainer with tenant migrations applied ---
 	pg, err := tcpostgres.Run(ctx,
 		"postgres:16-alpine",
 		tcpostgres.WithDatabase("tenant"),
@@ -58,6 +123,17 @@ func TestMain(m *testing.M) {
 	testPool.Close()
 	_ = pg.Terminate(ctx)
 	os.Exit(code)
+}
+
+// freeTCPPort returns an ephemeral port free at the moment of the call (best
+// effort — used only to hand the embedded NATS server a port to bind).
+func freeTCPPort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
 // applyTenantMigrations runs every tenant *.up.sql in order against the pool.
