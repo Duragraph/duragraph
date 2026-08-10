@@ -151,6 +151,7 @@ groups:
         path: /assistants/{id}/graph
         kind: read
         outbox: false
+        custom: true
         steps: ["SELECT * FROM graphs WHERE assistant_id = :id AND version = (SELECT max version)"]
       - name: get_versions
         method: GET
@@ -285,6 +286,7 @@ groups:
         path: /threads/{id}/state
         kind: read
         outbox: false
+        custom: true
         steps:
           - "SELECT * FROM messages WHERE thread_id = :id ORDER BY created_at"
           - "SELECT * FROM runs WHERE thread_id = :id AND status='completed' ORDER BY completed_at DESC LIMIT 1"
@@ -293,6 +295,7 @@ groups:
         path: /threads/{id}/state/{checkpoint_id}
         kind: read
         outbox: false
+        custom: true
         steps: ["SELECT * FROM snapshots WHERE stream_id = :checkpoint_id"]
       - name: create_checkpoint
         method: POST
@@ -305,6 +308,7 @@ groups:
         path: /threads/{id}/history
         kind: read
         outbox: false
+        custom: true
         steps: ["SELECT * FROM events WHERE aggregate_id IN (SELECT id FROM runs WHERE thread_id=:id) ORDER BY occurred_at"]
       - name: copy
         method: POST

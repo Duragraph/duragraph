@@ -10,6 +10,7 @@ package endpoints
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -91,6 +92,51 @@ func (r threadRow) toAPI() Thread {
 		_ = json.Unmarshal(r.Metadata, &t.Metadata)
 	}
 	return t
+}
+
+// graphRow mirrors the graphs table (postgres.d2 workflow_ctx). name is the
+// graph_id from the SDK's langgraph.json (see migration 002_workflow.up.sql);
+// version is a free-form VARCHAR, not numeric.
+type graphRow struct {
+	ID          uuid.UUID  `db:"id"`
+	AssistantID *uuid.UUID `db:"assistant_id"` // nullable
+	Name        string     `db:"name"`
+	Version     *string    `db:"version"` // nullable
+	Description *string    `db:"description"`
+	Nodes       []byte     `db:"nodes"`  // jsonb
+	Edges       []byte     `db:"edges"`  // jsonb
+	Config      []byte     `db:"config"` // jsonb
+	CreatedAt   time.Time  `db:"created_at"`
+	UpdatedAt   time.Time  `db:"updated_at"`
+}
+
+// toAPI maps a row to the OpenAPI GraphSchema response type. GraphSchema
+// describes JSON schemas (config/context/input/output/state_schema) while the
+// DB stores the graph's actual definition (nodes/edges/config) — these are
+// different concepts (see DIVERGENCES). Best-effort mapping: name -> GraphId
+// (name IS the graph_id per the DB comment); nodes+edges -> StateSchema (the
+// closest required field to "the graph's structure"); config -> ConfigSchema.
+// context_schema/input_schema/output_schema have no DB source and stay nil.
+func (r graphRow) toAPI() GraphSchema {
+	g := GraphSchema{GraphId: r.Name}
+	state := map[string]interface{}{}
+	if len(r.Nodes) > 0 {
+		var nodes interface{}
+		_ = json.Unmarshal(r.Nodes, &nodes)
+		state["nodes"] = nodes
+	}
+	if len(r.Edges) > 0 {
+		var edges interface{}
+		_ = json.Unmarshal(r.Edges, &edges)
+		state["edges"] = edges
+	}
+	g.StateSchema = state
+	if len(r.Config) > 0 {
+		var cfg map[string]interface{}
+		_ = json.Unmarshal(r.Config, &cfg)
+		g.ConfigSchema = &cfg
+	}
+	return g
 }
 
 // runRow mirrors the runs table (postgres.d2 run_ctx).
@@ -277,6 +323,31 @@ func (r snapshotRow) toAPI() CheckpointResponse {
 	}
 }
 
+// toThreadState maps a snapshot row to the OpenAPI ThreadState response type.
+// state (jsonb, the channel values) -> Values, the direct correspondence.
+// Checkpoint.CheckpointId is the snapshot's bigserial id, stringified (the
+// LangGraph checkpoint id contract is opaque string). CreatedAt is formatted
+// RFC3339 to match ThreadState's string type (DB column is timestamptz).
+// aggregate_id is the RUN id, not the thread id, so Checkpoint.ThreadId is not
+// populated here (the row alone doesn't carry it — see DIVERGENCES).
+// Interrupts/ParentCheckpoint/Tasks/Metadata/Next have no snapshots-table
+// source and stay zero/empty.
+func (r snapshotRow) toThreadState() ThreadState {
+	cid := strconv.FormatInt(r.ID, 10)
+	ts := ThreadState{
+		Checkpoint: CheckpointConfig{CheckpointId: &cid},
+		CreatedAt:  r.CreatedAt.Format(time.RFC3339),
+		Metadata:   map[string]interface{}{},
+		Next:       []string{},
+	}
+	var v interface{} = map[string]interface{}{}
+	if len(r.State) > 0 {
+		_ = json.Unmarshal(r.State, &v)
+	}
+	ts.Values = v
+	return ts
+}
+
 // execHistoryRow mirrors execution_history (postgres.d2 run_ctx). Not returned
 // over the API in this slice; used by tests to assert node execution.
 type execHistoryRow struct {
@@ -316,3 +387,39 @@ type execHistoryRow struct {
 //     search) is not honored — no vector index in the new control plane yet;
 //     filter + namespace_prefix only. StoreListNamespacesRequest.max_depth and
 //     .suffix are best-effort (prefix + limit/offset honored).
+//   graphs (assistants.get_graph): GraphSchema describes JSON schemas
+//     (config_schema/context_schema/input_schema/output_schema/state_schema —
+//     LangGraph's introspected I/O shapes) but the DB graphs table stores the
+//     graph's actual definition (nodes/edges/config). These are different
+//     concepts with no clean 1:1 mapping. graphRow.toAPI() maps name -> GraphId
+//     (name IS the graph_id per migration 002's comment), nodes+edges ->
+//     StateSchema (bundled as {"nodes":.., "edges":..} — the closest required
+//     field to "the graph's structure"), config -> ConfigSchema. context_schema/
+//     input_schema/output_schema have no DB source and stay nil. assistant_id/
+//     version/description/timestamps on graphRow are not surfaced by GraphSchema
+//     at all. The get_graph query also uses `ORDER BY version DESC` even though
+//     graphs.version is VARCHAR(50) (free-form, not numeric) — lexicographic,
+//     not numeric, ordering; matches the endpoint-queries.d2 steps literally but
+//     is a latent bug if versions ever exceed one digit.
+//   snapshots (threads.get_state/get_checkpoint_state/get_history): ThreadState
+//     is LangGraph's per-checkpoint state envelope; snapshots is the plain
+//     event-sourcing snapshot table. snapshotRow.toThreadState() maps state
+//     (jsonb) -> Values directly (the one clean correspondence), id -> stringified
+//     Checkpoint.CheckpointId, created_at -> CreatedAt (RFC3339 string, since
+//     ThreadState types it as string not time.Time). Checkpoint.ThreadId/
+//     CheckpointNs/CheckpointMap are NOT populated — the row only carries
+//     aggregate_id (the run id), not the thread id, so the mapper has no thread
+//     id to put there. Interrupts, ParentCheckpoint, Tasks, and Metadata/Next
+//     (required but contentless) have no snapshots-table source and are left
+//     nil/empty. get_state/get_history read snapshots (the snapshots-as-
+//     checkpoints design), NOT the endpoint-queries.d2's messages/events steps:
+//     the LangGraph-Cloud contract for GET /threads/{id}/state returns the
+//     latest checkpoint's channel values, which is exactly snapshots.state; the
+//     d2's messages+completed-run / events sketch predates that design (the
+//     messages table is unrelated to checkpoint state). "Latest" and
+//     newest-first order by `id DESC`, NOT `version DESC`: snapshots.version is
+//     incremented per event-stream (trigger increments WHERE stream_id=...), so
+//     across a thread's multiple runs version does not order globally, whereas
+//     id (BIGSERIAL) is the true global write order. Single-run threads behave
+//     identically; multi-run threads now correctly pick the most recently
+//     written checkpoint.

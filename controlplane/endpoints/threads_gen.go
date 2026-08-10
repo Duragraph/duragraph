@@ -193,27 +193,9 @@ func (s *Server) ThreadsDelete(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-// ThreadsGetState — GET /threads/{id}/state  (kind: read)
-//   - SELECT * FROM messages WHERE thread_id = :id ORDER BY created_at
-//   - SELECT * FROM runs WHERE thread_id = :id AND status='completed' ORDER BY completed_at DESC LIMIT 1
-func (s *Server) ThreadsGetState(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM messages WHERE thread_id = :id ORDER BY created_at
-	//   SELECT * FROM runs WHERE thread_id = :id AND status='completed' ORDER BY completed_at DESC LIMIT 1
-	return c.JSON(http.StatusOK, map[string]any{})
-}
+// ThreadsGetState — GET /threads/{id}/state  (kind: read) — hand-written in threads.go
 
-// ThreadsGetCheckpointState — GET /threads/{id}/state/{checkpoint_id}  (kind: read)
-//   - SELECT * FROM snapshots WHERE stream_id = :checkpoint_id
-func (s *Server) ThreadsGetCheckpointState(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM snapshots WHERE stream_id = :checkpoint_id
-	return c.JSON(http.StatusOK, map[string]any{})
-}
+// ThreadsGetCheckpointState — GET /threads/{id}/state/{checkpoint_id}  (kind: read) — hand-written in threads.go
 
 // ThreadsCreateCheckpoint — POST /threads/{id}/state/checkpoint  (kind: write)
 //   - INSERT snapshots (stream_id, aggregate_type, aggregate_id, version, state)  # infra, not domain event
@@ -229,15 +211,7 @@ func (s *Server) ThreadsCreateCheckpoint(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
 }
 
-// ThreadsGetHistory — GET /threads/{id}/history  (kind: read)
-//   - SELECT * FROM events WHERE aggregate_id IN (SELECT id FROM runs WHERE thread_id=:id) ORDER BY occurred_at
-func (s *Server) ThreadsGetHistory(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM events WHERE aggregate_id IN (SELECT id FROM runs WHERE thread_id=:id) ORDER BY occurred_at
-	return c.JSON(http.StatusOK, map[string]any{})
-}
+// ThreadsGetHistory — GET /threads/{id}/history  (kind: read) — hand-written in threads.go
 
 // ThreadsCopy — POST /threads/{id}/copy  (kind: write)
 //   - INSERT threads (new id, copy metadata)
