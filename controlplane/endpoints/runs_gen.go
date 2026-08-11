@@ -103,30 +103,7 @@ RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, k
 	return c.JSON(http.StatusCreated, row.toAPI())
 }
 
-// RunsBatchCreate — POST /runs/batch  (kind: write)
-//   - FOR EACH run in batch: event_streams + events + outbox + projection
-//   - pg_notify('outbox_new',”) once at end of TX
-func (s *Server) RunsBatchCreate(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (RunsBatchCreate request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
-	events := []Event{
-		{AggregateType: "Run", AggregateID: aggID, EventType: "run.created"},
-	}
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   FOR EACH run in batch: event_streams + events + outbox + projection
-		//   pg_notify('outbox_new','') once at end of TX
-		return nil
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// RunsBatchCreate — POST /runs/batch  (kind: write) — hand-written in runs.go
 
 // RunsGet — GET /threads/{id}/runs/{rid}  (kind: read)
 //   - SELECT * FROM runs WHERE id = :rid AND thread_id = :id
@@ -206,28 +183,7 @@ RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, k
 
 // RunsStatelessWait — POST /runs/wait  (kind: wait) — hand-written in runs.go
 
-// RunsCancelStateless — POST /runs/cancel  (kind: write)
-//   - same as POST /threads/{id}/runs/{rid}/cancel
-func (s *Server) RunsCancelStateless(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (RunsCancelStateless request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
-	events := []Event{
-		{AggregateType: "Run", AggregateID: aggID, EventType: "run.cancelled"},
-	}
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   same as POST /threads/{id}/runs/{rid}/cancel
-		return nil
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// RunsCancelStateless — POST /runs/cancel  (kind: write) — hand-written in runs.go
 
 // RunsResume — POST /threads/{id}/runs/{rid}/resume  (kind: write)
 //   - SELECT runs WHERE id=:rid AND status='requires_action' (validate)

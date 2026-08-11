@@ -67,6 +67,55 @@ func (s *Server) ThreadsGetCheckpointState(c echo.Context) error {
 	return c.JSON(http.StatusOK, row.toThreadState())
 }
 
+// ThreadsCreateCheckpoint, despite its name, is a READ: the OpenAPI
+// ThreadStateCheckpointRequest -> ThreadState contract is "get the state of a
+// thread AT a checkpoint" (the checkpoint id travels in the body's
+// CheckpointConfig, not the path, because a full checkpoint config is richer
+// than a path param). It is the body-carried twin of ThreadsGetCheckpointState.
+// The endpoint-queries.d2 "INSERT snapshots" step mismodels it as a write — see
+// DIVERGENCES in rows.go. When checkpoint.checkpoint_id is absent we fall back
+// to the latest snapshot (same as ThreadsGetState). All lookups are scoped to
+// the thread's own runs so another thread's checkpoint 404s.
+// POST /threads/{id}/state/checkpoint -> 200 ThreadState / 404.
+func (s *Server) ThreadsCreateCheckpoint(c echo.Context) error {
+	ctx := c.Request().Context()
+	tid := c.Param("id")
+	var req ThreadStateCheckpointRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if req.Checkpoint.CheckpointId != nil && *req.Checkpoint.CheckpointId != "" {
+		rows, err = s.Tenant.Query(ctx, `
+			SELECT id, stream_id, aggregate_id, version, state, created_at
+			FROM snapshots
+			WHERE id = $1 AND aggregate_id IN (SELECT id FROM runs WHERE thread_id = $2)`,
+			*req.Checkpoint.CheckpointId, tid)
+	} else {
+		rows, err = s.Tenant.Query(ctx, `
+			SELECT id, stream_id, aggregate_id, version, state, created_at
+			FROM snapshots
+			WHERE aggregate_id IN (SELECT id FROM runs WHERE thread_id = $1)
+			ORDER BY id DESC
+			LIMIT 1`, tid)
+	}
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[snapshotRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toThreadState())
+}
+
 // ThreadsGetHistory returns every snapshot across the thread's runs,
 // newest-first (ORDER BY id DESC — global write order, since version is
 // per-stream). GET /threads/{id}/history -> 200 []ThreadState.

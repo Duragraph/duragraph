@@ -300,9 +300,14 @@ groups:
       - name: create_checkpoint
         method: POST
         path: /threads/{id}/state/checkpoint
-        kind: write
+        kind: read
         outbox: false
-        steps: ["INSERT snapshots (stream_id, aggregate_type, aggregate_id, version, state)  # infra, not domain event"]
+        custom: true
+        # NOT a write: the OpenAPI ThreadStateCheckpointRequest -> ThreadState
+        # contract is "get the state of a thread AT a checkpoint" (checkpoint id
+        # carried in the body's CheckpointConfig). The d2 INSERT-snapshots step
+        # mismodels it — see DIVERGENCES in rows.go. Body in threads_state.go.
+        steps: ["SELECT * FROM snapshots WHERE id = :body.checkpoint.checkpoint_id (thread-scoped); latest when absent"]
       - name: get_history
         method: GET
         path: /threads/{id}/history
@@ -315,6 +320,7 @@ groups:
         path: /threads/{id}/copy
         kind: write
         outbox: true
+        custom: true
         events: [thread.created]
         nats: {subject: thread.created, stream: RUNS}
         steps:
@@ -382,6 +388,7 @@ groups:
         path: /runs/batch
         kind: write
         outbox: true
+        custom: true
         events: [run.created]
         nats: {subject: run.created, stream: RUNS}
         steps:
@@ -500,9 +507,13 @@ groups:
         path: /runs/cancel
         kind: write
         outbox: true
+        custom: true
         events: [run.cancelled]
         nats: {subject: run.cancelled, stream: RUNS}
-        steps: ["same as POST /threads/{id}/runs/{rid}/cancel"]
+        # Cancels a SET of runs (RunsCancel: run_ids OR status filter, optionally
+        # thread-scoped) and returns 204 — not one run returning a Run object.
+        # One run.cancelled event per actually-cancelled run. Body in runs_cancel.go.
+        steps: ["UPDATE runs SET status='cancelled' WHERE id = ANY(:run_ids) | status IN (:status) AND status IN (queued,in_progress,requires_action)"]
       - name: resume
         method: POST
         path: /threads/{id}/runs/{rid}/resume
