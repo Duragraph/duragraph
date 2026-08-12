@@ -201,15 +201,7 @@ func (s *Server) AssistantsDelete(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-// AssistantsGetGraph — GET /assistants/{id}/graph  (kind: read)
-//   - SELECT * FROM graphs WHERE assistant_id = :id AND version = (SELECT max version)
-func (s *Server) AssistantsGetGraph(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM graphs WHERE assistant_id = :id AND version = (SELECT max version)
-	return c.JSON(http.StatusOK, map[string]any{})
-}
+// AssistantsGetGraph — GET /assistants/{id}/graph  (kind: read) — hand-written in assistants.go
 
 // AssistantsGetVersions — GET /assistants/{id}/versions  (kind: read)
 //   - SELECT * FROM graphs WHERE assistant_id = :id ORDER BY version DESC
