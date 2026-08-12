@@ -24,8 +24,10 @@ type assistantRow struct {
 	Description  *string   `db:"description"`
 	Model        *string   `db:"model"`
 	Instructions *string   `db:"instructions"`
-	Tools        []byte    `db:"tools"`    // jsonb
-	Config       []byte    `db:"config"`   // jsonb
+	Tools        []byte    `db:"tools"`   // jsonb
+	Config       []byte    `db:"config"`  // jsonb
+	Context      []byte    `db:"context"` // jsonb
+	Version      int       `db:"version"`
 	Metadata     []byte    `db:"metadata"` // jsonb
 	CreatedAt    time.Time `db:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at"`
@@ -49,9 +51,16 @@ func (r assistantRow) toAPI() Assistant {
 	if len(r.Config) > 0 {
 		_ = json.Unmarshal(r.Config, &a.Config)
 	}
+	if len(r.Context) > 0 {
+		var ctx map[string]interface{}
+		_ = json.Unmarshal(r.Context, &ctx)
+		a.Context = &ctx
+	}
 	if len(r.Metadata) > 0 {
 		_ = json.Unmarshal(r.Metadata, &a.Metadata)
 	}
+	v := r.Version
+	a.Version = &v
 	return a
 }
 
@@ -359,9 +368,10 @@ type execHistoryRow struct {
 }
 
 // DIVERGENCES (OpenAPI ↔ postgres.d2) — reconcile before tightening mappers:
-//   assistants: API has {config(structured), context, version}; DB has
-//     {tools, model, instructions, config(jsonb)}. version/context not in DB;
-//     tools/model/instructions not in the API Assistant response.
+//   assistants: context (jsonb) and version (int) ARE real DB columns and are
+//     now persisted on create + returned on every read (config/context/version).
+//     Remaining divergence: DB has {tools, model, instructions} with no API
+//     Assistant-response equivalent (legacy columns, unused by the contract).
 //   threads: API Thread.interrupts is derived from active runs (not a column);
 //     ThreadCreate.{thread_id, if_exists, supersteps, ttl} not yet honored by
 //     the create impl (always mints a fresh id). ThreadPatch.ttl not honored

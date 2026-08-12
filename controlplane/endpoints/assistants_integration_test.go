@@ -340,3 +340,93 @@ func TestAssistantsCRUD(t *testing.T) {
 		t.Errorf("count after delete: want 1, got %d", count)
 	}
 }
+
+// TestAssistantsContextVersion proves the two LangGraph-Cloud contract fields
+// that the assistants table carries — context (jsonb) and version (int) — are
+// persisted on create and returned on every read path (create response, get,
+// update). context is a real column, so a create that carries it must round-trip
+// verbatim; an omitted context must default to {} (not null); version must
+// surface as 1 for a freshly-created assistant.
+func TestAssistantsContextVersion(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, "TRUNCATE assistants, events, outbox, event_streams CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestServer()
+
+	// --- create WITH a context object ---
+	body := `{"graph_id":"g","name":"n","context":{"model":"gpt-4o","temp":0.2}}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistants", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: want 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var created Assistant
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("create decode: %v", err)
+	}
+	// context round-trips verbatim on the create response
+	if created.Context == nil {
+		t.Fatalf("create: context nil, want {model,temp}")
+	}
+	if (*created.Context)["model"] != "gpt-4o" {
+		t.Errorf("create context.model: want gpt-4o, got %v", (*created.Context)["model"])
+	}
+	if (*created.Context)["temp"].(float64) != 0.2 {
+		t.Errorf("create context.temp: want 0.2, got %v", (*created.Context)["temp"])
+	}
+	// version defaults to 1
+	if created.Version == nil || *created.Version != 1 {
+		t.Errorf("create version: want 1, got %v", created.Version)
+	}
+
+	// --- get returns the same context + version ---
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/assistants/"+created.AssistantId.String(), nil)
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got Assistant
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got.Context == nil || (*got.Context)["model"] != "gpt-4o" {
+		t.Errorf("get context.model: want gpt-4o, got %v", got.Context)
+	}
+	if got.Version == nil || *got.Version != 1 {
+		t.Errorf("get version: want 1, got %v", got.Version)
+	}
+
+	// --- an omitted context defaults to {} (not null) ---
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/assistants",
+		strings.NewReader(`{"graph_id":"g2","name":"n2"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+	var noCtx Assistant
+	_ = json.Unmarshal(rec.Body.Bytes(), &noCtx)
+	if noCtx.Context == nil {
+		t.Errorf("create without context: want {} object, got nil")
+	} else if len(*noCtx.Context) != 0 {
+		t.Errorf("create without context: want empty {}, got %v", *noCtx.Context)
+	}
+
+	// --- update replaces context; version still surfaces ---
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/assistants/"+created.AssistantId.String(),
+		strings.NewReader(`{"context":{"model":"claude"}}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var updated Assistant
+	_ = json.Unmarshal(rec.Body.Bytes(), &updated)
+	if updated.Context == nil || (*updated.Context)["model"] != "claude" {
+		t.Errorf("update context.model: want claude, got %v", updated.Context)
+	}
+	if updated.Version == nil {
+		t.Errorf("update version: want non-nil, got nil")
+	}
+}
