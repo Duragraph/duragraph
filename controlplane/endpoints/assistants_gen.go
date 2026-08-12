@@ -44,10 +44,10 @@ func (s *Server) AssistantsCreate(c echo.Context) error {
 	}
 	var row assistantRow
 	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `INSERT INTO assistants (id, graph_id, name, description, config, metadata)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
-`, aggID, req.GraphId, deref(req.Name), req.Description, mustJSON(req.Config), mustJSON(req.Metadata))
+		rows, err := tx.Query(ctx, `INSERT INTO assistants (id, graph_id, name, description, config, context, metadata)
+VALUES ($1, $2, $3, $4, $5, COALESCE($6::jsonb, '{}'::jsonb), $7)
+RETURNING id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
+`, aggID, req.GraphId, deref(req.Name), req.Description, mustJSON(req.Config), jsonbOrNil(req.Context), mustJSON(req.Metadata))
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func (s *Server) AssistantsSearch(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	rows, err := s.Tenant.Query(ctx, `SELECT id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+	rows, err := s.Tenant.Query(ctx, `SELECT id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
 FROM assistants
 WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
 ORDER BY created_at DESC
@@ -115,7 +115,7 @@ func (s *Server) AssistantsGet(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
 	}
-	rows, err := s.Tenant.Query(ctx, `SELECT id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+	rows, err := s.Tenant.Query(ctx, `SELECT id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
 FROM assistants WHERE id = $1
 `, pathID)
 	if err != nil {
@@ -161,7 +161,7 @@ func (s *Server) AssistantsUpdate(c echo.Context) error {
   context = COALESCE($6, context),
   metadata = COALESCE($7, metadata)
 WHERE id = $1
-RETURNING id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+RETURNING id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
 `, pathID, req.GraphId, req.Name, req.Description, jsonbOrNil(req.Config), jsonbOrNil(req.Context), jsonbOrNil(req.Metadata))
 		if err != nil {
 			return err

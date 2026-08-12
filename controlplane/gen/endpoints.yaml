@@ -43,10 +43,10 @@ groups:
           aggregate: Assistant
           row: assistantRow
           query: |
-            INSERT INTO assistants (id, graph_id, name, description, config, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
-          args: ["aggID", "req.GraphId", "deref(req.Name)", "req.Description", "mustJSON(req.Config)", "mustJSON(req.Metadata)"]
+            INSERT INTO assistants (id, graph_id, name, description, config, context, metadata)
+            VALUES ($1, $2, $3, $4, $5, COALESCE($6::jsonb, '{}'::jsonb), $7)
+            RETURNING id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
+          args: ["aggID", "req.GraphId", "deref(req.Name)", "req.Description", "mustJSON(req.Config)", "jsonbOrNil(req.Context)", "mustJSON(req.Metadata)"]
         steps:
           - "INSERT events: event_type='assistant.created', payload={name, graph_id, config, tools}"
           - "INSERT outbox (same event_id, same TX)"
@@ -63,7 +63,7 @@ groups:
           mode: read_list
           row: assistantRow
           query: |
-            SELECT id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+            SELECT id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
             FROM assistants
             WHERE ($1::jsonb IS NULL OR metadata @> $1::jsonb)
             ORDER BY created_at DESC
@@ -94,7 +94,7 @@ groups:
           row: assistantRow
           path_param: id
           query: |
-            SELECT id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+            SELECT id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
             FROM assistants WHERE id = $1
           args: ["pathID"]
         steps: ["SELECT * FROM assistants WHERE id = :id"]
@@ -121,7 +121,7 @@ groups:
               context = COALESCE($6, context),
               metadata = COALESCE($7, metadata)
             WHERE id = $1
-            RETURNING id, graph_id, name, description, model, instructions, tools, config, metadata, created_at, updated_at
+            RETURNING id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
           args: ["pathID", "req.GraphId", "req.Name", "req.Description", "jsonbOrNil(req.Config)", "jsonbOrNil(req.Context)", "jsonbOrNil(req.Metadata)"]
         steps:
           - "INSERT events: event_type='assistant.updated', payload={changed fields}"
