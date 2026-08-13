@@ -373,9 +373,10 @@ type execHistoryRow struct {
 //     Remaining divergence: DB has {tools, model, instructions} with no API
 //     Assistant-response equivalent (legacy columns, unused by the contract).
 //   threads: API Thread.interrupts is derived from active runs (not a column);
-//     ThreadCreate.{thread_id, if_exists, supersteps, ttl} not yet honored by
-//     the create impl (always mints a fresh id). ThreadPatch.ttl not honored
-//     by the update impl (metadata merge only).
+//     ThreadCreate.{thread_id, if_exists} ARE honored by the create impl now
+//     (client id + idempotent create with raise/do_nothing; see
+//     threads_create.go); {supersteps, ttl} still not honored. ThreadPatch.ttl
+//     not honored by the update impl (metadata merge only).
 //   runs: API RunStatus {pending,running,error,success,timeout,interrupted} ≠
 //     DB status {queued,in_progress,requires_action,completed,failed,cancelled}.
 //     cancelled has no API equivalent (mapped to error). API Run has no

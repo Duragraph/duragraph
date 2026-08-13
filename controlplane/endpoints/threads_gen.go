@@ -27,39 +27,7 @@ func (s *Server) RegisterThreads(g *echo.Group) {
 	g.POST("/threads/:id/copy", s.ThreadsCopy)
 }
 
-// ThreadsCreate — POST /threads  (kind: write)
-//   - INSERT events: event_type='thread.created', payload={metadata}
-//   - INSERT outbox (same event_id, same TX)
-//   - pg_notify('outbox_new',”)
-//   - INSERT threads projection (id, metadata)
-func (s *Server) ThreadsCreate(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req ThreadCreate
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New()
-	payload := mustJSON(req)
-	events := []Event{
-		{AggregateType: "Thread", AggregateID: aggID, EventType: "thread.created", Payload: payload},
-	}
-	var row threadRow
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `INSERT INTO threads (id, metadata)
-VALUES ($1, $2)
-RETURNING id, status, values, config, metadata, created_at, updated_at
-`, aggID, mustJSON(req.Metadata))
-		if err != nil {
-			return err
-		}
-		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[threadRow])
-		return err
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusCreated, row.toAPI())
-}
+// ThreadsCreate — POST /threads  (kind: write) — hand-written in threads.go
 
 // ThreadsSearch — POST /threads/search  (kind: read)
 //   - SELECT * FROM threads WHERE metadata @> :filter ORDER BY created_at DESC LIMIT :limit

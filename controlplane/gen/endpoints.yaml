@@ -181,24 +181,21 @@ groups:
         path: /threads
         kind: write
         outbox: true
+        # custom: honors a client-supplied thread_id + if_exists (LangGraph-Cloud
+        # idempotent-create). The ON CONFLICT (id) DO NOTHING branch — insert-or-
+        # return-existing with distinct 201/200/409 outcomes — can't be expressed
+        # by the write_returning generated body; hand-written in threads_create.go.
+        custom: true
         events: [thread.created]
         nats: {subject: thread.created, stream: RUNS}
         request: ThreadCreate
         response: Thread
-        impl:
-          mode: write_returning
-          aggregate: Thread
-          row: threadRow
-          query: |
-            INSERT INTO threads (id, metadata)
-            VALUES ($1, $2)
-            RETURNING id, status, values, config, metadata, created_at, updated_at
-          args: ["aggID", "mustJSON(req.Metadata)"]
         steps:
-          - "INSERT events: event_type='thread.created', payload={metadata}"
-          - "INSERT outbox (same event_id, same TX)"
-          - "pg_notify('outbox_new','')"
-          - "INSERT threads projection (id, metadata)"
+          - "id = req.thread_id when supplied, else a fresh uuid"
+          - "INSERT threads (id, metadata) ON CONFLICT (id) DO NOTHING RETURNING *"
+          - "inserted: emit thread.created via outbox (event + outbox + pg_notify) -> 201"
+          - "conflict + if_exists=do_nothing: SELECT existing thread -> 200 (no event)"
+          - "conflict + if_exists=raise (default/nil): 409, TX rolled back (no event)"
       - name: search
         method: POST
         path: /threads/search
