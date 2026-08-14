@@ -12,14 +12,16 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// newTestServerWithTenantWrites mounts runs + threads so the write tests
-// (cancel_stateless, batch_create, create_checkpoint, copy) can hit both groups
-// on one Echo instance, sharing the package-level testPool testcontainer.
+// newTestServerWithTenantWrites mounts runs + threads + assistants so the write
+// tests (cancel_stateless, batch_create, create_checkpoint, copy, idempotent
+// create) can hit every group on one Echo instance, sharing the package-level
+// testPool testcontainer.
 func newTestServerWithTenantWrites() *echo.Echo {
 	e := echo.New()
 	s := &Server{Tenant: testPool}
 	s.RegisterRuns(e.Group("/api/v1"))
 	s.RegisterThreads(e.Group("/api/v1"))
+	s.RegisterAssistants(e.Group("/api/v1"))
 	return e
 }
 
