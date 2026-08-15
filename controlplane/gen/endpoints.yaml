@@ -34,24 +34,22 @@ groups:
         path: /assistants
         kind: write
         outbox: true
+        # custom: honors a client-supplied assistant_id + if_exists (LangGraph-Cloud
+        # idempotent-create), mirroring threads.create. The ON CONFLICT (id) DO
+        # NOTHING branch — insert-or-return-existing with 201/200/409 outcomes —
+        # can't be a write_returning generated body; hand-written in
+        # assistants_create.go.
+        custom: true
         events: [assistant.created]
         nats: {subject: assistant.created, stream: RUNS}
         request: AssistantCreate
         response: Assistant
-        impl:
-          mode: write_returning
-          aggregate: Assistant
-          row: assistantRow
-          query: |
-            INSERT INTO assistants (id, graph_id, name, description, config, context, metadata)
-            VALUES ($1, $2, $3, $4, $5, COALESCE($6::jsonb, '{}'::jsonb), $7)
-            RETURNING id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
-          args: ["aggID", "req.GraphId", "deref(req.Name)", "req.Description", "mustJSON(req.Config)", "jsonbOrNil(req.Context)", "mustJSON(req.Metadata)"]
         steps:
-          - "INSERT events: event_type='assistant.created', payload={name, graph_id, config, tools}"
-          - "INSERT outbox (same event_id, same TX)"
-          - "pg_notify('outbox_new','')"
-          - "INSERT assistants projection (id, graph_id, name, model, tools, config)"
+          - "id = req.assistant_id when supplied, else a fresh uuid"
+          - "INSERT assistants (id, graph_id, name, description, config, context, metadata) ON CONFLICT (id) DO NOTHING RETURNING *"
+          - "inserted: emit assistant.created via outbox (event + outbox + pg_notify) -> 201"
+          - "conflict + if_exists=do_nothing: SELECT existing assistant -> 200 (no event)"
+          - "conflict + if_exists=raise (default/nil): 409, TX rolled back (no event)"
       - name: search
         method: POST
         path: /assistants/search

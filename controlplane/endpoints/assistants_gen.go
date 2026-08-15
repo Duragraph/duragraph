@@ -25,39 +25,7 @@ func (s *Server) RegisterAssistants(g *echo.Group) {
 	g.POST("/assistants/:id/latest", s.AssistantsSetLatest)
 }
 
-// AssistantsCreate — POST /assistants  (kind: write)
-//   - INSERT events: event_type='assistant.created', payload={name, graph_id, config, tools}
-//   - INSERT outbox (same event_id, same TX)
-//   - pg_notify('outbox_new',”)
-//   - INSERT assistants projection (id, graph_id, name, model, tools, config)
-func (s *Server) AssistantsCreate(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req AssistantCreate
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New()
-	payload := mustJSON(req)
-	events := []Event{
-		{AggregateType: "Assistant", AggregateID: aggID, EventType: "assistant.created", Payload: payload},
-	}
-	var row assistantRow
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `INSERT INTO assistants (id, graph_id, name, description, config, context, metadata)
-VALUES ($1, $2, $3, $4, $5, COALESCE($6::jsonb, '{}'::jsonb), $7)
-RETURNING id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
-`, aggID, req.GraphId, deref(req.Name), req.Description, mustJSON(req.Config), jsonbOrNil(req.Context), mustJSON(req.Metadata))
-		if err != nil {
-			return err
-		}
-		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[assistantRow])
-		return err
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusCreated, row.toAPI())
-}
+// AssistantsCreate — POST /assistants  (kind: write) — hand-written in assistants.go
 
 // AssistantsSearch — POST /assistants/search  (kind: read)
 //   - SELECT * FROM assistants WHERE metadata @> :filter ORDER BY created_at DESC LIMIT :limit OFFSET :offset
