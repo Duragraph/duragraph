@@ -27,6 +27,17 @@ func (s *Server) RunsBatchCreate(c echo.Context) error {
 		return c.JSON(http.StatusOK, []Run{})
 	}
 
+	// Resolve every assistant reference (UUID or graph name) up front so an
+	// unknown graph fails the whole batch before any event is appended.
+	assistantIDs := make([]uuid.UUID, len(req))
+	for i, r := range req {
+		aid, err := s.resolveAssistantRef(ctx, r.AssistantId)
+		if err != nil {
+			return assistantRefHTTPError(err)
+		}
+		assistantIDs[i] = aid
+	}
+
 	// Pre-mint an id per run so the run.created events (built before the TX
 	// projection) and the projection inserts agree on ids.
 	ids := make([]uuid.UUID, len(req))
@@ -46,8 +57,7 @@ func (s *Server) RunsBatchCreate(c echo.Context) error {
 		for i, r := range req {
 			rows, err := tx.Query(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata)
 VALUES ($1, $2, 'queued', $3, $4)
-RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
-`, ids[i], asUUID(r.AssistantId), mustJSON(r.Input), mustJSON(r.Metadata))
+RETURNING `+runReturningColumns, ids[i], assistantIDs[i], mustJSON(r.Input), mustJSON(r.Metadata))
 			if err != nil {
 				return err
 			}

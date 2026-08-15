@@ -29,79 +29,9 @@ func (s *Server) RegisterRuns(g *echo.Group) {
 	g.POST("/threads/:id/runs/:rid/resume", s.RunsResume)
 }
 
-// RunsCreateOnThread — POST /threads/{id}/runs  (kind: write)
-//   - INSERT event_streams (stream_id, aggregate_type='Run', aggregate_id)
-//   - INSERT events: event_type='run.created', payload={thread_id, assistant_id, input}
-//   - INSERT outbox (same event_id, same TX)
-//   - pg_notify('outbox_new',”)
-//   - INSERT runs projection (status='queued', thread_id, assistant_id, input)
-func (s *Server) RunsCreateOnThread(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	pathID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
-	}
-	var req RunCreateStateful
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New()
-	payload := mustJSON(req)
-	events := []Event{
-		{AggregateType: "Run", AggregateID: aggID, EventType: "run.created", Payload: payload},
-	}
-	var row runRow
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata)
-VALUES ($1, $2, $3, 'queued', $4, $5)
-RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
-`, aggID, pathID, asUUID(req.AssistantId), mustJSON(req.Input), mustJSON(req.Metadata))
-		if err != nil {
-			return err
-		}
-		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[runRow])
-		return err
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusCreated, row.toAPI())
-}
+// RunsCreateOnThread — POST /threads/{id}/runs  (kind: write) — hand-written in runs.go
 
-// RunsCreateStateless — POST /runs  (kind: write)
-//   - INSERT event_streams (stream_id, aggregate_type='Run', aggregate_id)
-//   - INSERT events: event_type='run.created', payload={assistant_id, input}
-//   - INSERT outbox (same event_id, same TX)
-//   - pg_notify('outbox_new',”)
-//   - INSERT runs projection (status='queued', no thread_id)
-func (s *Server) RunsCreateStateless(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req RunCreateStateless
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New()
-	payload := mustJSON(req)
-	events := []Event{
-		{AggregateType: "Run", AggregateID: aggID, EventType: "run.created", Payload: payload},
-	}
-	var row runRow
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata)
-VALUES ($1, $2, 'queued', $3, $4)
-RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
-`, aggID, asUUID(req.AssistantId), mustJSON(req.Input), mustJSON(req.Metadata))
-		if err != nil {
-			return err
-		}
-		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[runRow])
-		return err
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusCreated, row.toAPI())
-}
+// RunsCreateStateless — POST /runs  (kind: write) — hand-written in runs.go
 
 // RunsBatchCreate — POST /runs/batch  (kind: write) — hand-written in runs.go
 

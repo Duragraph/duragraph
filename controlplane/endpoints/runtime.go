@@ -115,9 +115,11 @@ func jsonbOrNil(m *map[string]interface{}) any {
 }
 
 // asUUID coerces an OpenAPI interface{} assistant_id (UUID string or graph
-// name) to a uuid.UUID. A string that parses as a UUID is returned; everything
-// else yields the zero UUID (the DB FK constraint will reject it). Graph-name
-// resolution to a UUID is not yet implemented (see DIVERGENCES in rows.go).
+// name) to a uuid.UUID: a UUID-shaped string passes through, everything else
+// yields the zero UUID (the DB FK rejects it). Run-create resolves graph names
+// properly via Server.resolveAssistantRef (runs_create.go); this remains the
+// fallback only for crons.create, whose graph-name + other fields are deferred
+// wholesale (see DIVERGENCES in rows.go).
 func asUUID(v interface{}) uuid.UUID {
 	switch t := v.(type) {
 	case string:
