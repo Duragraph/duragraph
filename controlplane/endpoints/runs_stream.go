@@ -289,7 +289,11 @@ func (s *Server) RunsCreateAndStream(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	rid, err := s.createRun(ctx, &threadID, asUUID(req.AssistantId), mustJSON(req.Input), mustJSON(req.Metadata))
+	assistantID, err := s.resolveAssistantRef(ctx, req.AssistantId)
+	if err != nil {
+		return assistantRefHTTPError(err)
+	}
+	rid, err := s.createRun(ctx, &threadID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -307,7 +311,11 @@ func (s *Server) RunsStatelessStream(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	rid, err := s.createRun(ctx, nil, asUUID(req.AssistantId), mustJSON(req.Input), mustJSON(req.Metadata))
+	assistantID, err := s.resolveAssistantRef(ctx, req.AssistantId)
+	if err != nil {
+		return assistantRefHTTPError(err)
+	}
+	rid, err := s.createRun(ctx, nil, assistantID, mustJSON(req.Input), mustJSON(req.Metadata))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -416,7 +424,11 @@ func (s *Server) RunsStatelessWait(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	rid, err := s.createRun(ctx, nil, asUUID(req.AssistantId), mustJSON(req.Input), mustJSON(req.Metadata))
+	assistantID, err := s.resolveAssistantRef(ctx, req.AssistantId)
+	if err != nil {
+		return assistantRefHTTPError(err)
+	}
+	rid, err := s.createRun(ctx, nil, assistantID, mustJSON(req.Input), mustJSON(req.Metadata))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

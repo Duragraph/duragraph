@@ -388,8 +388,11 @@ type execHistoryRow struct {
 //     checkpoint_during, command, context, durability, feedback_keys,
 //     if_not_exists, interrupt_after/before, on_disconnect, stream_mode,
 //     stream_resumable, stream_subgraphs, webhook, after_seconds} not yet
-//     honored by the create impl. Stateful create requires assistant_id as
-//     UUID but API types it as interface{} (UUID or graph name string).
+//     honored by the create impl. assistant_id (typed interface{}: UUID or graph
+//     name) IS resolved now — a graph name maps to the first assistant of that
+//     graph (created_at ASC), unknown graph -> 404 — at every run-create path
+//     (stateful/stateless/batch/stream/wait), see resolveAssistantRef in
+//     runs_create.go. (crons.create still uses the zero-coerce asUUID fallback.)
 //   crons: API exposes DB 'input' as 'payload' and 'next_run_at' as
 //     'next_run_date'. CronCreate.{config, context, end_time, interrupt_*,
 //     metadata, multitask_strategy, webhook, assistant_id as graph-name} not
