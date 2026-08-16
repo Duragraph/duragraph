@@ -22,36 +22,7 @@ func (s *Server) RegisterCrons(g *echo.Group) {
 	g.DELETE("/runs/crons/:cron_id", s.CronsDelete)
 }
 
-// CronsCreate — POST /threads/{id}/runs/crons  (kind: write)
-//   - INSERT crons (id, thread_id, assistant_id, schedule, input, config)  # cron def, not domain event
-func (s *Server) CronsCreate(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	pathID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
-	}
-	var req CronCreate
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	var row cronRow
-	rows, err := s.Tenant.Query(ctx, `INSERT INTO crons (thread_id, assistant_id, schedule, input, metadata)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
-`, pathID, asUUID(req.AssistantId), req.Schedule, mustJSON(req.Input), mustJSON(req.Metadata))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[cronRow])
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, row.toAPI())
-}
+// CronsCreate — POST /threads/{id}/runs/crons  (kind: write) — hand-written in crons.go
 
 // CronsList — GET /runs/crons  (kind: read)
 //   - SELECT * FROM crons ORDER BY created_at DESC
