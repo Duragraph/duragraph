@@ -99,51 +99,7 @@ FROM assistants WHERE id = $1
 	return c.JSON(http.StatusOK, row.toAPI())
 }
 
-// AssistantsUpdate — PATCH /assistants/{id}  (kind: write)
-//   - INSERT events: event_type='assistant.updated', payload={changed fields}
-//   - INSERT outbox (same event_id, same TX)
-//   - pg_notify('outbox_new',”)
-//   - UPDATE assistants SET name=:name, model=:model, ... WHERE id=:id
-func (s *Server) AssistantsUpdate(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	pathID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
-	}
-	var req AssistantPatch
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	payload := mustJSON(req)
-	events := []Event{
-		{AggregateType: "Assistant", AggregateID: pathID, EventType: "assistant.updated", Payload: payload},
-	}
-	var row assistantRow
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `UPDATE assistants SET
-  graph_id = COALESCE($2, graph_id),
-  name = COALESCE($3, name),
-  description = COALESCE($4, description),
-  config = COALESCE($5, config),
-  context = COALESCE($6, context),
-  metadata = COALESCE($7, metadata)
-WHERE id = $1
-RETURNING id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
-`, pathID, req.GraphId, req.Name, req.Description, jsonbOrNil(req.Config), jsonbOrNil(req.Context), jsonbOrNil(req.Metadata))
-		if err != nil {
-			return err
-		}
-		row, err = pgx.CollectOneRow(rows, pgx.RowToStructByName[assistantRow])
-		return err
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, row.toAPI())
-}
+// AssistantsUpdate — PATCH /assistants/{id}  (kind: write) — hand-written in assistants.go
 
 // AssistantsDelete — DELETE /assistants/{id}  (kind: write)
 //   - INSERT events: event_type='assistant.deleted'

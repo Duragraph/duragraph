@@ -101,31 +101,22 @@ groups:
         path: /assistants/{id}
         kind: write
         outbox: true
+        # Every update mints a new assistant version and snapshots the result
+        # into assistant_versions (the next version is MAX(history)+1, not
+        # live+1, so update stays correct after a set_latest rollback). The
+        # generated update mode does neither, so this is hand-written in
+        # assistants_update.go.
+        custom: true
         events: [assistant.updated]
         nats: {subject: assistant.updated, stream: RUNS}
         request: AssistantPatch
         response: Assistant
-        impl:
-          mode: update
-          aggregate: Assistant
-          row: assistantRow
-          path_param: id
-          query: |
-            UPDATE assistants SET
-              graph_id = COALESCE($2, graph_id),
-              name = COALESCE($3, name),
-              description = COALESCE($4, description),
-              config = COALESCE($5, config),
-              context = COALESCE($6, context),
-              metadata = COALESCE($7, metadata)
-            WHERE id = $1
-            RETURNING id, graph_id, name, description, model, instructions, tools, config, context, version, metadata, created_at, updated_at
-          args: ["pathID", "req.GraphId", "req.Name", "req.Description", "jsonbOrNil(req.Config)", "jsonbOrNil(req.Context)", "jsonbOrNil(req.Metadata)"]
         steps:
           - "INSERT events: event_type='assistant.updated', payload={changed fields}"
           - "INSERT outbox (same event_id, same TX)"
           - "pg_notify('outbox_new','')"
-          - "UPDATE assistants SET name=:name, model=:model, ... WHERE id=:id"
+          - "UPDATE assistants SET <coalesced fields>, version = MAX(assistant_versions.version)+1 WHERE id=:id"
+          - "INSERT assistant_versions snapshot at the new version"
       - name: delete
         method: DELETE
         path: /assistants/{id}
