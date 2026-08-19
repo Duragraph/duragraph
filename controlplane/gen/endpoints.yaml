@@ -143,23 +143,39 @@ groups:
         custom: true
         steps: ["SELECT * FROM graphs WHERE assistant_id = :id AND version = (SELECT max version)"]
       - name: get_versions
-        method: GET
+        method: POST
         path: /assistants/{id}/versions
         kind: read
         outbox: false
-        steps: ["SELECT * FROM graphs WHERE assistant_id = :id ORDER BY version DESC"]
+        # custom: reads immutable snapshots from assistant_versions newest-first
+        # (optional metadata @> filter + limit/offset from the request body) and
+        # returns []Assistant. Hand-written in assistants_versions.go. The old
+        # GET + graphs-table step was stale — versions live in assistant_versions.
+        custom: true
+        request: AssistantVersionsSearchRequest
+        response: Assistant
+        steps:
+          - "SELECT <snapshot cols> FROM assistant_versions WHERE assistant_id=:id [AND metadata @> :filter] ORDER BY version DESC LIMIT :limit OFFSET :offset"
       - name: set_latest
         method: POST
         path: /assistants/{id}/latest
         kind: write
         outbox: true
-        events: [graph.updated]
-        nats: {subject: graph.updated, stream: RUNS}
+        # custom: re-points the live assistant to an existing version (integer
+        # `version` query param) by copying that assistant_versions snapshot back
+        # onto the live row WITHOUT minting a new version, emitting
+        # assistant.updated. Hand-written in assistants_versions.go. The old
+        # graphs-table re-point steps were stale.
+        custom: true
+        events: [assistant.updated]
+        nats: {subject: assistant.updated, stream: RUNS}
+        response: Assistant
         steps:
-          - "INSERT events: event_type='graph.updated', payload={graph_id, version}"
+          - "version = :version (integer query param; 422 if absent/non-integer)"
+          - "INSERT events: event_type='assistant.updated', payload={version}"
           - "INSERT outbox (same event_id, same TX)"
           - "pg_notify('outbox_new','')"
-          - "UPDATE graphs SET assistant_id=:id WHERE name=:graph_id AND version=:v"
+          - "UPDATE assistants a SET <editable cols>=v.*, version=v.version FROM assistant_versions v WHERE a.id=:id AND v.version=:version (404 if no such assistant/version)"
 
   # ============================================================== THREADS
   - name: threads
