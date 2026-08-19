@@ -515,18 +515,7 @@ groups:
         path: /threads/{id}/runs/crons
         kind: write
         outbox: false
-        request: CronCreate
-        response: Cron
-        impl:
-          mode: write_plain_returning
-          aggregate: Cron
-          row: cronRow
-          path_param: id
-          query: |
-            INSERT INTO crons (thread_id, assistant_id, schedule, input, metadata)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, thread_id, assistant_id, schedule, input, config, metadata, end_time, user_id, next_run_at, created_at, updated_at
-          args: ["pathID", "asUUID(req.AssistantId)", "req.Schedule", "mustJSON(req.Input)", "mustJSON(req.Metadata)"]
+        custom: true  # hand-written in crons_create.go — resolves assistant_id (UUID or graph name) + persists config/end_time
         steps: ["INSERT crons (id, thread_id, assistant_id, schedule, input, config)  # cron def, not domain event"]
       - name: list
         method: GET

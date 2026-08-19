@@ -392,12 +392,17 @@ type execHistoryRow struct {
 //     name) IS resolved now — a graph name maps to the first assistant of that
 //     graph (created_at ASC), unknown graph -> 404 — at every run-create path
 //     (stateful/stateless/batch/stream/wait), see resolveAssistantRef in
-//     runs_create.go. (crons.create still uses the zero-coerce asUUID fallback.)
+//     runs_create.go.
 //   crons: API exposes DB 'input' as 'payload' and 'next_run_at' as
-//     'next_run_date'. CronCreate.{config, context, end_time, interrupt_*,
-//     metadata, multitask_strategy, webhook, assistant_id as graph-name} not
-//     yet honored by create impl. ThreadId is NOT NULL in the API Cron
-//     response but nullable in DB for stateless crons (zero UUID when null).
+//     'next_run_date'. CronCreate.{assistant_id as graph-name, config,
+//     end_time, metadata} ARE honored now — assistant_id resolves via
+//     resolveAssistantRef (UUID or graph name, unknown -> 404) and config/
+//     end_time persist to their columns (see crons_create.go). Still not
+//     honored: context/interrupt_after/interrupt_before/multitask_strategy/
+//     webhook — no crons column, and interrupt/multitask/webhook also need a
+//     scheduler engine + webhook delivery that don't exist yet. ThreadId is
+//     NOT NULL in the API Cron response but nullable in DB for stateless crons
+//     (zero UUID when null).
 //   store: namespace is TEXT[] (postgres.d2) / []string (OpenAPI Item.Namespace)
 //     — the endpoint-queries.d2 `namespace LIKE :prefix` SQL is stale and
 //     discarded in favor of array ops. StoreSearchRequest.query (vector/semantic

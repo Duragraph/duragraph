@@ -114,21 +114,21 @@ func jsonbOrNil(m *map[string]interface{}) any {
 	return b
 }
 
-// asUUID coerces an OpenAPI interface{} assistant_id (UUID string or graph
-// name) to a uuid.UUID: a UUID-shaped string passes through, everything else
-// yields the zero UUID (the DB FK rejects it). Run-create resolves graph names
-// properly via Server.resolveAssistantRef (runs_create.go); this remains the
-// fallback only for crons.create, whose graph-name + other fields are deferred
-// wholesale (see DIVERGENCES in rows.go).
-func asUUID(v interface{}) uuid.UUID {
-	switch t := v.(type) {
-	case string:
-		u, _ := uuid.Parse(t)
-		return u
-	case uuid.UUID:
-		return t
+// jsonbObjectOrEmpty marshals an optional pointer request field (config,
+// metadata) for a JSONB column, returning "{}" when the pointer is nil. This
+// is distinct from mustJSON: mustJSON receives the boxed field as `any`, where
+// a typed nil pointer is NOT == nil and marshals to JSONB 'null' rather than
+// the empty object the column defaults to. Taking the typed pointer directly
+// lets the nil check fire, so an omitted config/metadata stores '{}'.
+func jsonbObjectOrEmpty[T any](p *T) []byte {
+	if p == nil {
+		return []byte("{}")
 	}
-	return uuid.UUID{}
+	b, err := json.Marshal(p)
+	if err != nil || len(b) == 0 {
+		return []byte("{}")
+	}
+	return b
 }
 
 // mustParseUUID parses a UUID string, returning the zero UUID on failure (the
