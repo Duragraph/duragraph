@@ -21,7 +21,7 @@ func (s *Server) RegisterAssistants(g *echo.Group) {
 	g.PATCH("/assistants/:id", s.AssistantsUpdate)
 	g.DELETE("/assistants/:id", s.AssistantsDelete)
 	g.GET("/assistants/:id/graph", s.AssistantsGetGraph)
-	g.GET("/assistants/:id/versions", s.AssistantsGetVersions)
+	g.POST("/assistants/:id/versions", s.AssistantsGetVersions)
 	g.POST("/assistants/:id/latest", s.AssistantsSetLatest)
 }
 
@@ -127,41 +127,6 @@ func (s *Server) AssistantsDelete(c echo.Context) error {
 
 // AssistantsGetGraph — GET /assistants/{id}/graph  (kind: read) — hand-written in assistants.go
 
-// AssistantsGetVersions — GET /assistants/{id}/versions  (kind: read)
-//   - SELECT * FROM graphs WHERE assistant_id = :id ORDER BY version DESC
-func (s *Server) AssistantsGetVersions(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	// TODO read query (no side effects):
-	//   SELECT * FROM graphs WHERE assistant_id = :id ORDER BY version DESC
-	return c.JSON(http.StatusOK, map[string]any{})
-}
+// AssistantsGetVersions — POST /assistants/{id}/versions  (kind: read) — hand-written in assistants.go
 
-// AssistantsSetLatest — POST /assistants/{id}/latest  (kind: write)
-//   - INSERT events: event_type='graph.updated', payload={graph_id, version}
-//   - INSERT outbox (same event_id, same TX)
-//   - pg_notify('outbox_new',”)
-//   - UPDATE graphs SET assistant_id=:id WHERE name=:graph_id AND version=:v
-func (s *Server) AssistantsSetLatest(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (AssistantsSetLatest request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
-	events := []Event{
-		{AggregateType: "Graph", AggregateID: aggID, EventType: "graph.updated"},
-	}
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   INSERT events: event_type='graph.updated', payload={graph_id, version}
-		//   INSERT outbox (same event_id, same TX)
-		//   pg_notify('outbox_new','')
-		//   UPDATE graphs SET assistant_id=:id WHERE name=:graph_id AND version=:v
-		return nil
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// AssistantsSetLatest — POST /assistants/{id}/latest  (kind: write) — hand-written in assistants.go
