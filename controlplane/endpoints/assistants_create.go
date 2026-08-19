@@ -74,7 +74,12 @@ func (s *Server) AssistantsCreate(c echo.Context) error {
 			conflicted = true
 			return errAssistantConflict
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// Snapshot the freshly-inserted assistant as version 1 (the column
+		// default) into the history table, in the same TX as the insert.
+		return snapshotAssistant(ctx, tx, id)
 	})
 	if conflicted {
 		return s.assistantCreateConflict(c, ctx, id, req.IfExists)
