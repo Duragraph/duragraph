@@ -1,24 +1,34 @@
 // The worker Runner — consumes worker.graph.execute commands from the
 // graph-executor durable consumer (WORKER_COMMANDS stream, ack_wait=5m,
-// maxDeliver=5) and drives CounterExecutor's 2-step graph with the ack
-// discipline that makes execution durable across a worker crash:
+// maxDeliver=5) and drives an edge-driven graph walk with the ack discipline
+// that makes execution durable across a worker crash:
 //
 //   - RunStarted leases the run and bumps its lease_epoch. A stale lease
 //     (409, someone else already owns or finished this run) means there is
 //     nothing left to do — ack. A transient error means retry — Nak.
-//   - Before running node N, the runner checks the run's latest checkpoint.
-//     A checkpoint of version v means nodes 0..v-1 already ran, so execution
-//     resumes at step v — the node that already completed is never re-run,
-//     even if the command is redelivered after a crash.
-//   - After each node: WriteCheckpoint then NodeCompleted, both fenced on
-//     the epoch obtained from RunStarted. A stale-lease response here means
-//     another worker has since re-leased the run (e.g. because this worker
-//     died and JetStream redelivered the command to a second Runner) — stop
-//     and ack, since the newer worker owns the run now. A transient error
-//     means Nak so JetStream redelivers.
-//   - After the last node: RunCompleted, fenced the same way.
+//   - LoadGraph fetches the run's GraphDefinition (nodes + edges + config)
+//     over HTTP; the runner walks it from its entry nodes, following edges
+//     (unconditional always, conditional when their expression holds against
+//     the current channel state) rather than a fixed node index.
+//   - Before starting, the runner checks the run's latest checkpoint. The
+//     checkpoint carries the full walk state — channel values, the set of
+//     completed nodes, and the pending frontier — so a redelivery after a
+//     crash resumes exactly where it left off: completed nodes never re-run.
+//   - Per node: Execute → merge writes into channels → WriteCheckpoint (the
+//     new state, versioned by completed-node count) → NodeCompleted, all
+//     fenced on the epoch from RunStarted. A stale-lease response here means
+//     another worker has since re-leased the run (this worker died and
+//     JetStream redelivered to a second Runner) — stop and ack, the newer
+//     worker owns the run now. A transient error means Nak so JetStream
+//     redelivers. A deterministic executor error is a poison node: record
+//     run.failed and ack (redelivery cannot help).
+//   - When the frontier empties: RunCompleted, fenced the same way. A
+//     max_iterations guard bounds cyclic graphs, escalating to run.failed.
 //
-// Source: spec/models/d2 workers block + the worker-execution design doc.
+// HITL interrupts and real llm/tool sub-worker delegation are deferred to
+// later slices; the executors here are deterministic (see graph.go).
+//
+// Source: spec/models/d2/graph-engine.d2 + the worker-execution design doc.
 package worker
 
 import (
@@ -62,6 +72,7 @@ func ackDecision(acked bool, epoch, numDelivered, maxDeliver int) decision {
 // inject failures. *Client satisfies it.
 type runClient interface {
 	RunStarted(ctx context.Context, runID uuid.UUID) (int, error)
+	LoadGraph(ctx context.Context, runID uuid.UUID) (GraphDefinition, error)
 	LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (int, []byte, bool, error)
 	WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) error
 	NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error
@@ -69,12 +80,12 @@ type runClient interface {
 	RunFailed(ctx context.Context, runID uuid.UUID, epoch int, reason string) error
 }
 
-// Runner consumes worker.graph.execute commands and executes them against
-// an Executor.
+// Runner consumes worker.graph.execute commands and walks each run's graph
+// with the per-type NodeExecutors in execs.
 type Runner struct {
-	js jetstream.JetStream
-	cl runClient
-	ex Executor
+	js    jetstream.JetStream
+	cl    runClient
+	execs map[string]NodeExecutor
 
 	// MaxDeliver is the graph-executor consumer's configured MaxDeliver
 	// (nats.GraphExecutorMaxDeliver in production). Used by ackDecision to
@@ -83,21 +94,23 @@ type Runner struct {
 	MaxDeliver int
 
 	// StopAfterNode is a test hook that simulates a worker crash: when >= 0,
-	// ProcessOne returns (acked=false, nil) — without acking, without
-	// running or checkpointing any further node — as soon as it is about to
-	// start the node AFTER StopAfterNode. Default -1 (disabled; run to
-	// completion normally). Exported so execution_integration_test.go
-	// (package worker_test) can drive TestDurableResume deterministically,
-	// without waiting on the 5-minute ack_wait for a real redelivery.
+	// ProcessOne returns (acked=false, nil) — without acking, without running
+	// or checkpointing any further node — as soon as it is about to start a
+	// node once more than StopAfterNode nodes have already completed (i.e.
+	// len(completed) > StopAfterNode). Default -1 (disabled; run to completion
+	// normally). Exported so execution_integration_test.go (package
+	// worker_test) can drive TestDurableResume deterministically, without
+	// waiting on the 5-minute ack_wait for a real redelivery.
 	StopAfterNode int
 }
 
-// NewRunner builds a Runner bound to js, cl, and ex, with maxDeliver as the
-// dead-letter escalation threshold (nats.GraphExecutorMaxDeliver in
-// production — must match the graph-executor consumer's MaxDeliver).
-// StopAfterNode defaults to -1 (disabled).
-func NewRunner(js jetstream.JetStream, cl runClient, ex Executor, maxDeliver int) *Runner {
-	return &Runner{js: js, cl: cl, ex: ex, MaxDeliver: maxDeliver, StopAfterNode: -1}
+// NewRunner builds a Runner bound to js and cl with the default per-type
+// NodeExecutors (defaultExecutors), and maxDeliver as the dead-letter
+// escalation threshold (nats.GraphExecutorMaxDeliver in production — must
+// match the graph-executor consumer's MaxDeliver). StopAfterNode defaults to
+// -1 (disabled).
+func NewRunner(js jetstream.JetStream, cl runClient, maxDeliver int) *Runner {
+	return &Runner{js: js, cl: cl, execs: defaultExecutors(), MaxDeliver: maxDeliver, StopAfterNode: -1}
 }
 
 // GraphCommand is the worker.graph.execute payload shape, matching what
@@ -177,23 +190,36 @@ func (r *Runner) escalate(ctx context.Context, runID uuid.UUID, epoch int, perr 
 	}
 }
 
-// ProcessOne executes cmd's run against r.ex with checkpoint resume,
-// following the control flow documented on Runner and in the task brief.
-// Returns acked=true when the message should be Acked (success,
-// terminal/stale-lease outcomes with nothing left to do, or a poison
-// deterministic executor error recorded as run.failed) and acked=false when
-// it should be Nak'd for redelivery (transient errors, or the StopAfterNode
-// test hook simulating a crash). epoch is the lease epoch obtained from
+// checkpointState is the JSON envelope persisted by WriteCheckpoint and
+// restored by LatestCheckpoint. It captures the full graph-walk state so a
+// redelivery after a crash resumes exactly where it stopped:
+//
+//   - Channels: the run's channel values (accumulated node writes).
+//   - CompletedNodes: node IDs already executed, in completion order. Its
+//     length is the checkpoint version, and it seeds the "already done" set so
+//     completed nodes are never re-run.
+//   - Frontier: node IDs pending execution (FIFO), i.e. the successors
+//     discovered but not yet run.
+type checkpointState struct {
+	Channels       map[string]any `json:"channels"`
+	CompletedNodes []string       `json:"completed_nodes"`
+	Frontier       []string       `json:"frontier"`
+}
+
+// ProcessOne walks cmd's run graph with checkpoint resume, following the
+// control flow documented on Runner. Returns acked=true when the message
+// should be Acked (success, terminal/stale-lease outcomes with nothing left to
+// do, or a poison deterministic executor error recorded as run.failed) and
+// acked=false when it should be Nak'd for redelivery (transient errors, or the
+// StopAfterNode test hook simulating a crash). epoch is the lease epoch from
 // RunStarted — 0 if the run was never leased (RunStarted failed before
 // returning one).
 //
-// Exported (not the brief's literal lowercase "processOne") because the
-// integration tests live in the external worker_test package alongside
-// Task 7's shared Postgres/NATS test harness (newPool,
-// seedThreadAssistantRun, testPool) — an internal-package test file could
-// call an unexported method but could not reach that harness, since Go
-// external test packages are not importable from internal ones. Behavior
-// matches the brief's processOne exactly; only the exported name differs.
+// Exported (not lowercase "processOne") because the integration tests live in
+// the external worker_test package alongside the shared Postgres/NATS test
+// harness — an internal-package test file could call an unexported method but
+// could not reach that harness, since Go external test packages are not
+// importable from internal ones.
 func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, epoch int, err error) {
 	epoch, err = r.cl.RunStarted(ctx, cmd.RunID)
 	if err != nil {
@@ -205,60 +231,116 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		return false, 0, err // transient — Nak, redeliver
 	}
 
-	resumeFrom := 0
-	var state map[string]int
-	v, raw, found, lerr := r.cl.LatestCheckpoint(ctx, cmd.ThreadID, cmd.RunID)
+	graph, gerr := r.cl.LoadGraph(ctx, cmd.RunID)
+	if gerr != nil {
+		// A run whose graph can't be loaded can't execute. Treat as transient
+		// (Nak); a genuinely missing graph exhausts redeliveries and escalates
+		// to run.failed via ackDecision.
+		return false, epoch, gerr
+	}
+
+	// Restore the walk state from the latest checkpoint, or start fresh.
+	channels := map[string]any{}
+	var completed []string
+	completedSet := map[string]bool{}
+	var frontier []string
+
+	_, raw, found, lerr := r.cl.LatestCheckpoint(ctx, cmd.ThreadID, cmd.RunID)
 	if lerr != nil {
 		return false, epoch, lerr // transient — Nak, redeliver
 	}
-	if found {
-		// version v = count of completed nodes (1-based), so resume at
-		// step index v: nodes 0..v-1 already ran and must not run again.
-		resumeFrom = v
-		if len(raw) > 0 {
-			if uerr := json.Unmarshal(raw, &state); uerr != nil {
-				return false, epoch, fmt.Errorf("runner: decode checkpoint state: %w", uerr)
+	if found && len(raw) > 0 {
+		var cp checkpointState
+		if uerr := json.Unmarshal(raw, &cp); uerr != nil {
+			return false, epoch, fmt.Errorf("runner: decode checkpoint state: %w", uerr)
+		}
+		if cp.Channels != nil {
+			channels = cp.Channels
+		}
+		completed = cp.CompletedNodes
+		for _, id := range completed {
+			completedSet[id] = true
+		}
+		frontier = cp.Frontier
+	} else {
+		// Fresh run: seed channels from the command input, frontier from the
+		// graph's entry nodes.
+		if len(cmd.Input) > 0 {
+			if uerr := json.Unmarshal(cmd.Input, &channels); uerr != nil {
+				return false, epoch, fmt.Errorf("runner: decode run input: %w", uerr)
+			}
+			if channels == nil {
+				channels = map[string]any{}
 			}
 		}
-	}
-	if state == nil {
-		state = map[string]int{}
+		frontier = graph.entryNodes()
 	}
 
-	nodes := r.ex.Nodes()
-	for step := resumeFrom; step < len(nodes); step++ {
-		if r.StopAfterNode >= 0 && step > r.StopAfterNode {
-			// Test hook: simulate a crash after StopAfterNode completed and
-			// checkpointed, before starting the next node. No ack — the
-			// command must be redelivered (to a fresh Runner in the resume
-			// test) for the run to actually finish.
+	maxIter := graph.maxIterations()
+	iterations := 0
+
+	for len(frontier) > 0 {
+		nodeID := frontier[0]
+		frontier = frontier[1:]
+		if completedSet[nodeID] {
+			continue // already executed on an earlier delivery
+		}
+
+		if r.StopAfterNode >= 0 && len(completed) > r.StopAfterNode {
+			// Test hook: simulate a crash after StopAfterNode nodes completed
+			// and checkpointed, before starting the next. No ack — the command
+			// must be redelivered (to a fresh Runner in the resume test) for
+			// the run to finish.
 			return false, epoch, nil
 		}
 
-		var rerr error
-		state, rerr = r.ex.Run(step, state)
-		if rerr != nil {
-			// Poison run — record run.failed and stop; do NOT redeliver.
-			if ferr := r.cl.RunFailed(ctx, cmd.RunID, epoch, rerr.Error()); ferr != nil {
-				if errors.Is(ferr, ErrStaleLease) {
-					return true, epoch, nil // superseded — ack
-				}
-				return false, epoch, ferr // transient failure to record — nak, retry
-			}
-			return true, epoch, nil // failure recorded — ack
+		iterations++
+		if iterations > maxIter {
+			return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("max_iterations (%d) exceeded", maxIter))
 		}
 
-		stateJSON, merr := json.Marshal(state)
-		if merr != nil {
-			return false, epoch, fmt.Errorf("runner: encode state: %w", merr)
+		node, ok := graph.node(nodeID)
+		if !ok {
+			return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("edge targets unknown node %q", nodeID))
 		}
-		if werr := r.cl.WriteCheckpoint(ctx, cmd.ThreadID, cmd.RunID, epoch, step+1, stateJSON); werr != nil {
+		exec, ok := r.execs[node.Type]
+		if !ok {
+			return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("no executor for node type %q", node.Type))
+		}
+
+		writes, xerr := exec.Execute(ctx, node, channels)
+		if xerr != nil {
+			// Poison node — deterministic failure, redelivery cannot help.
+			return r.failRun(ctx, cmd.RunID, epoch, xerr.Error())
+		}
+		for k, v := range writes {
+			channels[k] = v
+		}
+
+		completed = append(completed, nodeID)
+		completedSet[nodeID] = true
+
+		succs, serr := graph.successors(nodeID, channels)
+		if serr != nil {
+			return r.failRun(ctx, cmd.RunID, epoch, serr.Error())
+		}
+		frontier = append(frontier, succs...)
+
+		stateJSON, merr := json.Marshal(checkpointState{
+			Channels:       channels,
+			CompletedNodes: completed,
+			Frontier:       frontier,
+		})
+		if merr != nil {
+			return false, epoch, fmt.Errorf("runner: encode checkpoint state: %w", merr)
+		}
+		if werr := r.cl.WriteCheckpoint(ctx, cmd.ThreadID, cmd.RunID, epoch, len(completed), stateJSON); werr != nil {
 			if errors.Is(werr, ErrStaleLease) {
 				return true, epoch, nil // superseded by a newer lease — stop, ack
 			}
 			return false, epoch, werr // transient — Nak, redeliver
 		}
-		if nerr := r.cl.NodeCompleted(ctx, cmd.RunID, epoch, nodes[step], "tool"); nerr != nil {
+		if nerr := r.cl.NodeCompleted(ctx, cmd.RunID, epoch, node.ID, node.Type); nerr != nil {
 			if errors.Is(nerr, ErrStaleLease) {
 				return true, epoch, nil
 			}
@@ -273,4 +355,18 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		return false, epoch, cerr
 	}
 	return true, epoch, nil
+}
+
+// failRun records a deterministic (poison) failure as run.failed and returns
+// the ProcessOne verdict. A successful record acks (redelivery cannot help). A
+// stale lease means a newer worker owns the run — ack. A transient failure to
+// record the failure itself naks so the record is retried.
+func (r *Runner) failRun(ctx context.Context, runID uuid.UUID, epoch int, reason string) (bool, int, error) {
+	if ferr := r.cl.RunFailed(ctx, runID, epoch, reason); ferr != nil {
+		if errors.Is(ferr, ErrStaleLease) {
+			return true, epoch, nil // superseded — ack
+		}
+		return false, epoch, ferr // transient failure to record — nak, retry
+	}
+	return true, epoch, nil // failure recorded — ack
 }

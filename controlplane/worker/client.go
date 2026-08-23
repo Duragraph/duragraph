@@ -131,6 +131,36 @@ func (c *Client) LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID
 	return resp.Version, []byte(resp.State), true, nil
 }
 
+// LoadGraph fetches the GraphDefinition the worker must execute for runID: the
+// latest graph registered for the run's assistant. GET
+// /api/v1/workers/runs/{rid}/graph. The server returns raw nodes/edges/config
+// JSON, which this parses into the worker's own GraphDefinition (keeping the
+// worker decoupled from the server's types). A 404 (no graph) surfaces as an
+// error — a run with no graph cannot execute.
+func (c *Client) LoadGraph(ctx context.Context, runID uuid.UUID) (GraphDefinition, error) {
+	var resp workerGraphResponse
+	if _, err := c.doJSON(ctx, http.MethodGet, "/api/v1/workers/runs/"+runID.String()+"/graph", nil, &resp); err != nil {
+		return GraphDefinition{}, err
+	}
+	var g GraphDefinition
+	if len(resp.Nodes) > 0 {
+		if err := json.Unmarshal(resp.Nodes, &g.Nodes); err != nil {
+			return GraphDefinition{}, fmt.Errorf("worker: decode graph nodes: %w", err)
+		}
+	}
+	if len(resp.Edges) > 0 {
+		if err := json.Unmarshal(resp.Edges, &g.Edges); err != nil {
+			return GraphDefinition{}, fmt.Errorf("worker: decode graph edges: %w", err)
+		}
+	}
+	if len(resp.Config) > 0 {
+		if err := json.Unmarshal(resp.Config, &g.Config); err != nil {
+			return GraphDefinition{}, fmt.Errorf("worker: decode graph config: %w", err)
+		}
+	}
+	return g, nil
+}
+
 // eventsPath builds the worker events endpoint path for runID.
 func (c *Client) eventsPath(runID uuid.UUID) string {
 	return "/api/v1/workers/" + c.workerID.String() + "/runs/" + runID.String() + "/events"

@@ -157,7 +157,7 @@ func applyTenantMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 func newPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	if _, err := testPool.Exec(context.Background(),
-		"TRUNCATE workers, runs, execution_history, snapshots, events, outbox, event_streams, assistants, threads CASCADE"); err != nil {
+		"TRUNCATE workers, runs, execution_history, snapshots, events, outbox, event_streams, graphs, assistants, threads CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 	return testPool
@@ -179,4 +179,27 @@ func seedThreadAssistantRun(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		t.Fatal(err)
 	}
 	return threadID, assistantID, runID
+}
+
+// seedCounterGraph inserts the 2-node counter graph for assistantID: node A
+// (type tool, writes count=1) → node B (type tool, writes count=2), connected
+// by a single edge A→B. This is what worker.Client.LoadGraph fetches (keyed by
+// the run's assistant), replacing the old hard-coded CounterExecutor. When
+// failB is true, node B is a poison node (config.fail set) so its executor
+// returns a deterministic error — used by TestGraphErrorMarksRunFailed.
+func seedCounterGraph(t *testing.T, ctx context.Context, pool *pgxpool.Pool, assistantID uuid.UUID, failB bool) {
+	t.Helper()
+	bConfig := `{"set":{"count":2}}`
+	if failB {
+		bConfig = `{"fail":"boom at node B"}`
+	}
+	nodes := `[{"id":"A","type":"tool","config":{"set":{"count":1}}},` +
+		`{"id":"B","type":"tool","config":` + bConfig + `}]`
+	edges := `[{"source":"A","target":"B"}]`
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO graphs (assistant_id, name, version, nodes, edges, config)
+		VALUES ($1, 'counter', '1', $2::jsonb, $3::jsonb, '{}'::jsonb)`,
+		assistantID, nodes, edges); err != nil {
+		t.Fatalf("seed counter graph: %v", err)
+	}
 }

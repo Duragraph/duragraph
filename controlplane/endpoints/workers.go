@@ -283,3 +283,31 @@ func (s *Server) WorkersLatestCheckpoint(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, row.toAPI())
 }
+
+// WorkersLoadGraph returns the GraphDefinition a worker must execute for a run:
+// the latest graph registered for the run's assistant. Keyed by run_id so the
+// worker passes only the id it already holds (staying decoupled from the DB
+// schema). GET /workers/{id}/runs is claim; this is /workers/runs/{rid}/graph
+// -> 200 WorkerGraphResponse / 404 (unknown run, or assistant with no graph).
+func (s *Server) WorkersLoadGraph(c echo.Context) error {
+	ctx := c.Request().Context()
+	rid := c.Param("rid")
+	var resp WorkerGraphResponse
+	// Latest graph for the run's assistant. Ordered by created_at, NOT version:
+	// version is VARCHAR(50), so `ORDER BY version DESC` sorts lexicographically
+	// ('10' < '2') and would pick the wrong graph once an assistant has more than
+	// one version. Slice-1 assumes one graph per assistant; created_at keeps
+	// "latest wins" correct if that assumption is ever relaxed. (Selecting by
+	// graph_id/name is a separate TARGET — see graph-engine.d2 loader.)
+	err := s.Tenant.QueryRow(ctx, `
+		SELECT nodes, edges, config FROM graphs
+		WHERE assistant_id = (SELECT assistant_id FROM runs WHERE id = $1)
+		ORDER BY created_at DESC LIMIT 1`, rid).Scan(&resp.Nodes, &resp.Edges, &resp.Config)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "no graph for run")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, resp)
+}

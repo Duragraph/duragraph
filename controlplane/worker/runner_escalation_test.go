@@ -22,6 +22,14 @@ func (c *stubEscalationClient) RunStarted(ctx context.Context, runID uuid.UUID) 
 	return 1, nil
 }
 
+// LoadGraph returns a single-node graph so ProcessOne reaches WriteCheckpoint
+// (where this stub injects the transient failure) after executing the entry
+// node. The node type "tool" resolves to a deterministic passthrough executor
+// (see defaultExecutors), so Execute itself never errors.
+func (c *stubEscalationClient) LoadGraph(ctx context.Context, runID uuid.UUID) (GraphDefinition, error) {
+	return GraphDefinition{Nodes: []Node{{ID: "A", Type: "tool"}}}, nil
+}
+
 func (c *stubEscalationClient) LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (int, []byte, bool, error) {
 	return 0, nil, false, nil
 }
@@ -58,7 +66,7 @@ func (c *stubEscalationClient) RunFailed(ctx context.Context, runID uuid.UUID, e
 func TestEscalationWiring(t *testing.T) {
 	ctx := context.Background()
 	cl := &stubEscalationClient{}
-	runner := NewRunner(nil, cl, CounterExecutor{}, 1)
+	runner := NewRunner(nil, cl, 1)
 	runner.MaxDeliver = 1
 
 	cmd := GraphCommand{RunID: uuid.New(), ThreadID: uuid.New()}

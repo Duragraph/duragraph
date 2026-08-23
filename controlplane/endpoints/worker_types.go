@@ -71,3 +71,13 @@ type CheckpointResponse struct {
 	Version      int             `json:"version"`
 	State        json.RawMessage `json:"state"`
 }
+
+// WorkerGraphResponse is the graph definition a worker loads to execute a run:
+// the raw nodes/edges/config JSON from the graphs table, forwarded verbatim.
+// The worker parses these into its own worker.GraphDefinition, so the server
+// never needs the interpreter's types (keeps the HTTP decoupling intact).
+type WorkerGraphResponse struct {
+	Nodes  json.RawMessage `json:"nodes"`
+	Edges  json.RawMessage `json:"edges"`
+	Config json.RawMessage `json:"config"`
+}
