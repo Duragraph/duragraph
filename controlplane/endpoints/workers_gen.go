@@ -21,6 +21,7 @@ func (s *Server) RegisterWorkers(g *echo.Group) {
 	g.POST("/threads/:tid/checkpoints", s.WorkersWriteCheckpoint)
 	g.GET("/threads/:tid/checkpoints/:ckpt", s.WorkersReadCheckpoint)
 	g.GET("/threads/:tid/checkpoints/latest", s.WorkersLatestCheckpoint)
+	g.GET("/workers/runs/:rid/graph", s.WorkersLoadGraph)
 }
 
 // WorkersRegister — POST /workers/register  (kind: write) — hand-written in workers.go
@@ -69,3 +70,5 @@ func (s *Server) WorkersClaim(c echo.Context) error {
 // WorkersReadCheckpoint — GET /threads/{tid}/checkpoints/{ckpt}  (kind: read) — hand-written in workers.go
 
 // WorkersLatestCheckpoint — GET /threads/{tid}/checkpoints/latest  (kind: read) — hand-written in workers.go
+
+// WorkersLoadGraph — GET /workers/runs/{rid}/graph  (kind: read) — hand-written in workers.go

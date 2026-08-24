@@ -50,23 +50,38 @@ func TestClientLifecycleAndCheckpoints(t *testing.T) {
 	}
 }
 
-func TestCounterExecutor(t *testing.T) {
-	ex := worker.CounterExecutor{}
-	if got := ex.Nodes(); len(got) != 2 || got[0] != "A" || got[1] != "B" {
-		t.Fatalf("nodes: %v", got)
-	}
-	st, err := ex.Run(0, map[string]int{})
+// TestClientLoadGraph proves the graph-loader round trip: a graph seeded for a
+// run's assistant is fetched by run id and parsed into the worker's own
+// GraphDefinition (nodes/edges/config), and an unknown run surfaces as an
+// error (404 → a run with no graph cannot execute).
+func TestClientLoadGraph(t *testing.T) {
+	ctx := context.Background()
+	pool := newPool(t)
+	e := echo.New()
+	g := e.Group("/api/v1")
+	(&endpoints.Server{Tenant: pool}).RegisterWorkers(g)
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	cl := worker.NewClient(srv.URL, uuid.New(), srv.Client())
+
+	_, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	seedCounterGraph(t, ctx, pool, aid, false)
+
+	graph, err := cl.LoadGraph(ctx, rid)
 	if err != nil {
-		t.Fatalf("A: unexpected error: %v", err)
+		t.Fatalf("load graph: %v", err)
 	}
-	if st["count"] != 1 {
-		t.Errorf("A: want count=1, got %d", st["count"])
+	if len(graph.Nodes) != 2 || graph.Nodes[0].ID != "A" || graph.Nodes[1].ID != "B" {
+		t.Fatalf("nodes: %+v", graph.Nodes)
 	}
-	st, err = ex.Run(1, st)
-	if err != nil {
-		t.Fatalf("B: unexpected error: %v", err)
+	if len(graph.Edges) != 1 || graph.Edges[0].Source != "A" || graph.Edges[0].Target != "B" {
+		t.Fatalf("edges: %+v", graph.Edges)
 	}
-	if st["count"] != 2 {
-		t.Errorf("B: want count=2, got %d", st["count"])
+
+	// A run with no graph (its assistant has none) is a load error.
+	_, _, noGraphRID := seedThreadAssistantRun(t, ctx, pool)
+	if _, err := cl.LoadGraph(ctx, noGraphRID); err == nil {
+		t.Fatal("load graph for assistant with no graph: want error, got nil")
 	}
 }

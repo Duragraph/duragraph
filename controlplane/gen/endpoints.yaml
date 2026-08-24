@@ -720,6 +720,14 @@ groups:
         kind: read
         outbox: false
         custom: true
+      - name: load_graph
+        method: GET
+        path: /workers/runs/{rid}/graph
+        kind: read
+        outbox: false
+        returns: "nodes, edges, config for the run's assistant's latest graph (404 if none)"
+        steps: ["SELECT nodes, edges, config FROM graphs WHERE assistant_id = (SELECT assistant_id FROM runs WHERE id = :rid) ORDER BY version DESC LIMIT 1"]
+        custom: true
 
   # ============================================================== AUTH
   - name: auth

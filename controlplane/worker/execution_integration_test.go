@@ -3,7 +3,6 @@ package worker_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -35,13 +34,10 @@ func TestExecuteRunEndToEnd(t *testing.T) {
 	purgeStream(t, ctx, js, "RUNS")
 	purgeStream(t, ctx, js, "WORKER_COMMANDS")
 
-	_, _, rid := seedThreadAssistantRun(t, ctx, pool)
-	// The run-processor enriches worker.graph.execute from the runs row via
-	// aggregate_id, so the seeded run needs graph_id set for the worker to
-	// pick the right executor.
-	if _, err := pool.Exec(ctx, `UPDATE runs SET graph_id = 'counter' WHERE id = $1`, rid); err != nil {
-		t.Fatalf("set graph_id: %v", err)
-	}
+	_, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	// The worker's LoadGraph fetches the graph registered for the run's
+	// assistant, so seed the counter graph on that assistant.
+	seedCounterGraph(t, ctx, pool, aid, false)
 
 	// run-processor: turns run.created into a worker.graph.execute command.
 	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js), pool)
@@ -54,7 +50,7 @@ func TestExecuteRunEndToEnd(t *testing.T) {
 	if err := cl.Register(ctx, []string{"counter"}, 1); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	runner := worker.NewRunner(js, cl, worker.CounterExecutor{}, dnats.GraphExecutorMaxDeliver)
+	runner := worker.NewRunner(js, cl, dnats.GraphExecutorMaxDeliver)
 	go func() { _ = runner.Start(ctx) }()
 
 	// Publish the REAL relay envelope for run.created onto RUNS — the run id
@@ -99,6 +95,7 @@ func TestDurableResume(t *testing.T) {
 	pool := newPool(t)
 
 	tid, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	seedCounterGraph(t, ctx, pool, aid, false)
 	cmd := worker.GraphCommand{RunID: rid, ThreadID: tid, AssistantID: aid, GraphID: "counter"}
 
 	// Worker 1: dies right after node A's checkpoint (before node B).
@@ -107,8 +104,8 @@ func TestDurableResume(t *testing.T) {
 	if err := cl1.Register(ctx, []string{"counter"}, 1); err != nil {
 		t.Fatalf("register worker1: %v", err)
 	}
-	r1 := worker.NewRunner(nil, cl1, worker.CounterExecutor{}, dnats.GraphExecutorMaxDeliver)
-	r1.StopAfterNode = 0 // simulate death before starting node index 1 (B)
+	r1 := worker.NewRunner(nil, cl1, dnats.GraphExecutorMaxDeliver)
+	r1.StopAfterNode = 0 // simulate death after node A completes, before node B
 
 	acked1, _, err1 := r1.ProcessOne(ctx, cmd)
 	if err1 != nil {
@@ -132,7 +129,7 @@ func TestDurableResume(t *testing.T) {
 	if err := cl2.Register(ctx, []string{"counter"}, 1); err != nil {
 		t.Fatalf("register worker2: %v", err)
 	}
-	r2 := worker.NewRunner(nil, cl2, worker.CounterExecutor{}, dnats.GraphExecutorMaxDeliver)
+	r2 := worker.NewRunner(nil, cl2, dnats.GraphExecutorMaxDeliver)
 
 	acked2, _, err2 := r2.ProcessOne(ctx, cmd)
 	if err2 != nil {
@@ -156,35 +153,18 @@ func TestDurableResume(t *testing.T) {
 	}
 }
 
-// failingExecutor is a 2-step graph (A, B) whose node B is deterministically
-// poison: it always errors instead of returning a new state. Used to prove
-// the graph-error → run.failed path (INF-1b) without touching the real graph
-// engine (a later cycle).
-type failingExecutor struct{}
-
-func (failingExecutor) Nodes() []string { return []string{"A", "B"} }
-func (failingExecutor) Run(step int, state map[string]int) (map[string]int, error) {
-	if step == 1 {
-		return nil, fmt.Errorf("boom at node B")
-	}
-	out := map[string]int{}
-	for k, v := range state {
-		out[k] = v
-	}
-	out["count"] = step + 1
-	return out, nil
-}
-
 // TestGraphErrorMarksRunFailed proves a deterministic graph error becomes
 // run.failed instead of a silent drop or an infinite redelivery loop
-// (INF-1b): node A completes and checkpoints normally, node B's executor
-// error is recorded via RunFailed and the message is Acked (not Nak'd) so
-// JetStream never redelivers a poison command.
+// (INF-1b): node A completes and checkpoints normally, node B's poison
+// executor error (config.fail — see seedCounterGraph) is recorded via
+// RunFailed and the message is Acked (not Nak'd) so JetStream never redelivers
+// a poison command.
 func TestGraphErrorMarksRunFailed(t *testing.T) {
 	ctx := context.Background()
 	pool := newPool(t)
 
 	tid, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	seedCounterGraph(t, ctx, pool, aid, true) // node B is poison
 	cmd := worker.GraphCommand{RunID: rid, ThreadID: tid, AssistantID: aid, GraphID: "counter"}
 
 	wid := uuid.New()
@@ -192,7 +172,7 @@ func TestGraphErrorMarksRunFailed(t *testing.T) {
 	if err := cl.Register(ctx, []string{"counter"}, 1); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	runner := worker.NewRunner(nil, cl, failingExecutor{}, dnats.GraphExecutorMaxDeliver)
+	runner := worker.NewRunner(nil, cl, dnats.GraphExecutorMaxDeliver)
 
 	acked, epoch, err := runner.ProcessOne(ctx, cmd)
 	if err != nil {

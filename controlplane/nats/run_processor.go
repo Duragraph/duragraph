@@ -110,13 +110,16 @@ func (rp *RunProcessor) dispatch(ctx context.Context, msg jetstream.Msg) error {
 
 	// Enrich from the DB: the envelope only reliably gives us the run id
 	// (aggregate_id). thread_id and graph_id are nullable (stateless runs,
-	// runs not yet bound to a graph); assistant_id is NOT NULL.
+	// runs not yet bound to a graph); assistant_id is NOT NULL. input is the
+	// run's initial channel seed (NOT NULL DEFAULT '{}'), forwarded so the
+	// worker's entry (start) node can seed channels from it.
 	var threadID *uuid.UUID
 	var assistantID uuid.UUID
 	var graphID *string
+	var input []byte
 	err = rp.pool.QueryRow(ctx,
-		`SELECT thread_id, assistant_id, graph_id FROM runs WHERE id = $1`, runID,
-	).Scan(&threadID, &assistantID, &graphID)
+		`SELECT thread_id, assistant_id, graph_id, input FROM runs WHERE id = $1`, runID,
+	).Scan(&threadID, &assistantID, &graphID, &input)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Run no longer exists (e.g. deleted) — nothing to dispatch.
@@ -128,12 +131,15 @@ func (rp *RunProcessor) dispatch(ctx context.Context, msg jetstream.Msg) error {
 	}
 
 	// Keys match worker.GraphCommand's JSON tags exactly (run_id, thread_id,
-	// assistant_id, graph_id) — see controlplane/worker/runner.go.
+	// assistant_id, graph_id, input) — see controlplane/worker/runner.go.
 	cmd := map[string]any{
 		"run_id":       runID.String(),
 		"thread_id":    threadID,
 		"assistant_id": assistantID.String(),
 		"graph_id":     graphID,
+	}
+	if len(input) > 0 {
+		cmd["input"] = json.RawMessage(input)
 	}
 	// Nats-Msg-Id = run_id → one command per run even if run.created duplicates.
 	return rp.pub.PublishWithID(ctx, SubjectFor("worker.graph.execute"), runID.String(), cmd)

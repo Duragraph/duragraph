@@ -51,3 +51,12 @@ type checkpointResponse struct {
 	Version      int             `json:"version"`
 	State        json.RawMessage `json:"state"`
 }
+
+// workerGraphResponse mirrors endpoints.WorkerGraphResponse (used to decode the
+// GET .../runs/{rid}/graph response). Fields stay raw so LoadGraph can unmarshal
+// them into the worker's own GraphDefinition.
+type workerGraphResponse struct {
+	Nodes  json.RawMessage `json:"nodes"`
+	Edges  json.RawMessage `json:"edges"`
+	Config json.RawMessage `json:"config"`
+}

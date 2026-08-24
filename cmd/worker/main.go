@@ -2,7 +2,7 @@
 // rebuild: it registers with the control-plane's worker endpoints,
 // consumes worker.graph.execute commands off the graph-executor durable
 // consumer (WORKER_COMMANDS stream, filter worker.graph.execute), and
-// drives CounterExecutor's 2-step graph via controlplane/worker.Runner
+// drives each run's graph (loaded over HTTP) via controlplane/worker.Runner
 // with the ack/checkpoint discipline documented on that type. This
 // binary is wiring only — see controlplane/worker/runner.go for the
 // actual execution + durability logic.
@@ -107,7 +107,7 @@ func run() error {
 	heartbeatDone := make(chan struct{})
 	go heartbeatLoop(ctx, client, heartbeatDone)
 
-	runner := worker.NewRunner(js, client, worker.CounterExecutor{}, nats.GraphExecutorMaxDeliver)
+	runner := worker.NewRunner(js, client, nats.GraphExecutorMaxDeliver)
 	runnerDone := make(chan error, 1)
 	go func() { runnerDone <- runner.Start(ctx) }()
 

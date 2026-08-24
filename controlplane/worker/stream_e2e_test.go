@@ -119,13 +119,10 @@ func TestStreamEndToEnd(t *testing.T) {
 	purgeStream(t, ctx, js, "RUNS")
 	purgeStream(t, ctx, js, "WORKER_COMMANDS")
 
-	_, _, rid := seedThreadAssistantRun(t, ctx, pool)
-	// The run-processor enriches worker.graph.execute from the runs row via
-	// aggregate_id, so the seeded run needs graph_id set for the worker to
-	// pick the right executor.
-	if _, err := pool.Exec(ctx, `UPDATE runs SET graph_id = 'counter' WHERE id = $1`, rid); err != nil {
-		t.Fatalf("set graph_id: %v", err)
-	}
+	_, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	// The worker's LoadGraph fetches the graph registered for the run's
+	// assistant, so seed the counter graph on that assistant.
+	seedCounterGraph(t, ctx, pool, aid, false)
 
 	// run-processor: turns run.created into a worker.graph.execute command.
 	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js), pool)
@@ -141,7 +138,7 @@ func TestStreamEndToEnd(t *testing.T) {
 	if err := cl.Register(ctx, []string{"counter"}, 1); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	runner := worker.NewRunner(js, cl, worker.CounterExecutor{}, dnats.GraphExecutorMaxDeliver)
+	runner := worker.NewRunner(js, cl, dnats.GraphExecutorMaxDeliver)
 	go func() { _ = runner.Start(ctx) }()
 
 	// The real outbox relay: drains pool's outbox table and publishes each
