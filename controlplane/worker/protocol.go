@@ -23,6 +23,9 @@ type workerEvent struct {
 	Output     json.RawMessage `json:"output,omitempty"`
 	DurationMs *int            `json:"duration_ms,omitempty"`
 	Error      *string         `json:"error,omitempty"`
+	Reason     string          `json:"reason,omitempty"`
+	State      json.RawMessage `json:"state,omitempty"`
+	ToolCalls  json.RawMessage `json:"tool_calls,omitempty"`
 }
 
 // eventsRequest mirrors endpoints.WorkerEventsRequest.

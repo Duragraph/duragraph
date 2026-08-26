@@ -1,8 +1,11 @@
-// run-processor: the dispatch consumer. Drains the RUNS stream (filter
-// run.created) and turns each queued run into a worker.graph.execute command on
-// WORKER_COMMANDS, with Nats-Msg-Id = run_id so a duplicate run.created yields a
-// single command. Thin dispatcher — it does not mutate run state; the worker
-// leases via run.started.
+// run-processor: the dispatch consumer. Drains the RUNS stream and turns each
+// run.created (initial dispatch) and run.resumed (HITL continuation) into a
+// worker.graph.execute command on WORKER_COMMANDS. run.created dedups on run_id
+// (a duplicate create yields a single command); run.resumed dedups on event_id
+// (each resume is a distinct command that must not collapse into the original
+// create). Thin dispatcher — it does not mutate run state; the worker leases via
+// run.started, and the resume endpoint has already flipped status back to
+// in_progress before emitting run.resumed.
 //
 // The relay (relay.go's envelope()) publishes run.created as an ENVELOPE —
 // {event_id, aggregate_type, aggregate_id, event_type, payload, metadata} —
@@ -51,10 +54,31 @@ func NewRunProcessor(js jetstream.JetStream, pub *Publisher, pool *pgxpool.Pool)
 
 // runEnvelope is the subset of the outbox-relay envelope (relay.go's
 // envelope()) the dispatcher needs. The run id lives at aggregate_id, not in
-// the nested payload — see the package doc comment above.
+// the nested payload — see the package doc comment above. EventID is the
+// globally-unique event id; for run.resumed it becomes the worker.graph.execute
+// dedup key (see dispatch). Payload carries the resume command for run.resumed.
 type runEnvelope struct {
-	AggregateID string `json:"aggregate_id"`
-	EventType   string `json:"event_type"`
+	EventID     string          `json:"event_id"`
+	AggregateID string          `json:"aggregate_id"`
+	EventType   string          `json:"event_type"`
+	Payload     json.RawMessage `json:"payload"`
+}
+
+// resumeCommandFromPayload extracts the LangGraph-style resume command from a
+// run.resumed event payload ({"interrupt_id":..., "command":{...}}). Absent or
+// malformed → an empty object, so the worker always receives a well-formed
+// (possibly empty) resume value.
+func resumeCommandFromPayload(payload json.RawMessage) json.RawMessage {
+	if len(payload) == 0 {
+		return json.RawMessage("{}")
+	}
+	var p struct {
+		Command json.RawMessage `json:"command"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil || len(p.Command) == 0 {
+		return json.RawMessage("{}")
+	}
+	return p.Command
 }
 
 // Start binds the durable run-processor consumer and blocks, dispatching each
@@ -86,25 +110,32 @@ func (rp *RunProcessor) Start(ctx context.Context) error {
 }
 
 func (rp *RunProcessor) dispatch(ctx context.Context, msg jetstream.Msg) error {
-	// Only run.created triggers dispatch; ignore other run.* subjects on RUNS.
-	if !strings.HasSuffix(msg.Subject(), "run.created") {
+	// Both run.created (initial dispatch) and run.resumed (HITL continuation)
+	// trigger a worker.graph.execute command; ignore other run.* subjects.
+	subj := msg.Subject()
+	isResumed := strings.HasSuffix(subj, "run.resumed")
+	if !strings.HasSuffix(subj, "run.created") && !isResumed {
 		return nil
+	}
+	wantType := "run.created"
+	if isResumed {
+		wantType = "run.resumed"
 	}
 	var env runEnvelope
 	if err := json.Unmarshal(msg.Data(), &env); err != nil {
-		slog.Warn("run-processor: malformed run.created envelope, dropping",
-			"subject", msg.Subject(), "err", err)
+		slog.Warn("run-processor: malformed run envelope, dropping",
+			"subject", subj, "err", err)
 		return nil // malformed → drop (ack); nothing to retry
 	}
-	if env.AggregateID == "" || env.EventType != "run.created" {
-		slog.Warn("run-processor: run.created envelope missing aggregate_id or wrong event_type, dropping",
-			"subject", msg.Subject(), "aggregate_id", env.AggregateID, "event_type", env.EventType)
+	if env.AggregateID == "" || env.EventType != wantType {
+		slog.Warn("run-processor: run envelope missing aggregate_id or wrong event_type, dropping",
+			"subject", subj, "aggregate_id", env.AggregateID, "event_type", env.EventType)
 		return nil
 	}
 	runID, err := uuid.Parse(env.AggregateID)
 	if err != nil {
-		slog.Warn("run-processor: run.created aggregate_id is not a valid UUID, dropping",
-			"subject", msg.Subject(), "aggregate_id", env.AggregateID, "err", err)
+		slog.Warn("run-processor: run aggregate_id is not a valid UUID, dropping",
+			"subject", subj, "aggregate_id", env.AggregateID, "err", err)
 		return nil
 	}
 
@@ -141,8 +172,27 @@ func (rp *RunProcessor) dispatch(ctx context.Context, msg jetstream.Msg) error {
 	if len(input) > 0 {
 		cmd["input"] = json.RawMessage(input)
 	}
-	// Nats-Msg-Id = run_id → one command per run even if run.created duplicates.
-	return rp.pub.PublishWithID(ctx, SubjectFor("worker.graph.execute"), runID.String(), cmd)
+
+	// Dedup key for the worker.graph.execute command:
+	//   run.created → run_id     (one command per run; duplicate creates collapse)
+	//   run.resumed → event_id   (each resume is a NEW command; using run_id here
+	//                             would be deduped against the original create
+	//                             command on WORKER_COMMANDS and the resume would
+	//                             be silently dropped).
+	msgID := runID.String()
+	if isResumed {
+		cmd["resume"] = resumeCommandFromPayload(env.Payload)
+		if env.EventID == "" {
+			// event_id is the resume's only safe dedup key. Missing it is a
+			// permanent envelope defect (the relay always sets it), so drop
+			// rather than Nak into a poison-redelivery loop.
+			slog.Warn("run-processor: run.resumed envelope missing event_id, dropping",
+				"run_id", runID)
+			return nil
+		}
+		msgID = env.EventID
+	}
+	return rp.pub.PublishWithID(ctx, SubjectFor("worker.graph.execute"), msgID, cmd)
 }
 
 // Stop signals Start to exit. Safe to call from any goroutine at any

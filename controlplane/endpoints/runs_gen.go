@@ -115,41 +115,4 @@ RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, k
 
 // RunsCancelStateless — POST /runs/cancel  (kind: write) — hand-written in runs.go
 
-// RunsResume — POST /threads/{id}/runs/{rid}/resume  (kind: write)
-//   - SELECT runs WHERE id=:rid AND status='requires_action' (validate)
-//   - SELECT interrupts WHERE run_id=:rid AND resolved=false
-//   - UPDATE interrupts SET resolved=true, resolved_at=now()
-//   - IF command.update: merge state updates into run input
-//   - INSERT events: event_type='run.resumed', payload={interrupt_id, tool_outputs, command}
-//   - INSERT outbox (same event_id, same TX)
-//   - pg_notify('outbox_new',”)
-//   - UPDATE runs SET status='in_progress', input=merged_input, version=version+1
-//   - Re-dispatch: ExecuteRun() — worker claims with checkpoint_id
-func (s *Server) RunsResume(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (RunsResume request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
-	events := []Event{
-		{AggregateType: "Run", AggregateID: aggID, EventType: "run.resumed"},
-	}
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   SELECT runs WHERE id=:rid AND status='requires_action' (validate)
-		//   SELECT interrupts WHERE run_id=:rid AND resolved=false
-		//   UPDATE interrupts SET resolved=true, resolved_at=now()
-		//   IF command.update: merge state updates into run input
-		//   INSERT events: event_type='run.resumed', payload={interrupt_id, tool_outputs, command}
-		//   INSERT outbox (same event_id, same TX)
-		//   pg_notify('outbox_new','')
-		//   UPDATE runs SET status='in_progress', input=merged_input, version=version+1
-		//   Re-dispatch: ExecuteRun() — worker claims with checkpoint_id
-		return nil
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// RunsResume — POST /threads/{id}/runs/{rid}/resume  (kind: write) — hand-written in runs.go

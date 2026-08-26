@@ -52,6 +52,10 @@ func (c *stubEscalationClient) RunFailed(ctx context.Context, runID uuid.UUID, e
 	return nil
 }
 
+func (c *stubEscalationClient) RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state []byte) error {
+	return nil
+}
+
 // TestEscalationWiring proves the dead-letter escalation wiring (INF-1a): a
 // run that leases (epoch 1) but then fails transiently on every attempt
 // escalates to run.failed via RunFailed on the final allowed delivery,

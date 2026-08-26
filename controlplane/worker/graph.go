@@ -33,6 +33,26 @@ type Node struct {
 	Config map[string]any `json:"config,omitempty"`
 }
 
+// interruptsBefore reports whether this node suspends the run for
+// human-in-the-loop BEFORE it executes (config.interrupt_before: true). Mirrors
+// the hitl.d2 interrupt_before trigger. interrupt_after / requires_human are
+// later slices.
+func (n Node) interruptsBefore() bool {
+	v, _ := n.Config["interrupt_before"].(bool)
+	return v
+}
+
+// interruptReason returns the HITL interrupt reason recorded when this node
+// suspends the run (config.interrupt_reason), defaulting to "approval_required".
+// The value must be one of the interrupts.reason CHECK constants
+// (tool_call | approval_required | input_needed).
+func (n Node) interruptReason() string {
+	if s, ok := n.Config["interrupt_reason"].(string); ok && s != "" {
+		return s
+	}
+	return "approval_required"
+}
+
 // Edge connects Source→Target, optionally guarded by Condition (an expression
 // over channel_values; empty = unconditional). Mirrors graph-entity.d2
 // (Edge{source,target,condition}).

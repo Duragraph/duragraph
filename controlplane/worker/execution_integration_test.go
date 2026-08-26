@@ -3,6 +3,10 @@ package worker_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,6 +200,144 @@ func TestGraphErrorMarksRunFailed(t *testing.T) {
 	}
 	if nOutbox != 1 {
 		t.Errorf("outbox[run.failed]: want 1 row, got %d", nOutbox)
+	}
+}
+
+// TestInterruptResumeEndToEnd proves the whole HITL interrupt/resume loop
+// through the real components — no stubs, no shortcuts around the wire:
+//
+//  1. run.created dispatches; the Runner walks A, reaches GATE (config
+//     interrupt_before) and PAUSES: it checkpoints the walk state, calls the
+//     worker RequiresAction endpoint (which flips runs.status →
+//     requires_action and records an unresolved interrupts row at GATE), and
+//     acks. B has NOT run.
+//  2. POST /threads/{id}/runs/{rid}/resume with command.update {approved:true}
+//     resolves the interrupt, flips the run back to in_progress, and appends
+//     run.resumed to the outbox.
+//  3. The Relay (LISTEN outbox_new) publishes run.resumed onto RUNS; the
+//     run-processor re-dispatches it as a fresh worker.graph.execute (deduped
+//     on event_id, not run_id — so it does NOT collapse into the original
+//     create command); the Runner re-claims, merges command.update into
+//     channels, executes GATE, and — because the GATE→B edge is conditional on
+//     `approved == true` — follows it to B and completes.
+//
+// B running is the proof the resume's state patch actually merged: without the
+// injected approved=true the conditional edge would be false and B would never
+// execute (the run would still "complete", but with B count 0).
+func TestInterruptResumeEndToEnd(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := newPool(t)
+
+	nc, js, err := dnats.Connect(ctx, natsURL)
+	if err != nil {
+		t.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Drain() //nolint:errcheck
+	if err := dnats.EnsureConsumers(ctx, js); err != nil {
+		t.Fatalf("ensure consumers: %v", err)
+	}
+	purgeStream(t, ctx, js, "RUNS")
+	purgeStream(t, ctx, js, "WORKER_COMMANDS")
+
+	tid, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	seedInterruptGraph(t, ctx, pool, aid)
+
+	// run-processor: run.created / run.resumed → worker.graph.execute.
+	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js), pool)
+	go func() { _ = rp.Start(ctx) }()
+	defer rp.Stop()
+
+	// Relay: LISTEN outbox_new → publish outbox rows (the resume endpoint's
+	// run.resumed) onto their JetStream subjects. Without it, the resume's
+	// outbox write never reaches RUNS and the run-processor never re-dispatches.
+	relay := dnats.NewRelay(dnats.NewOutboxDrain(pool), dnats.NewPublisher(js),
+		listenerDSNFromPool(), 200*time.Millisecond, 20)
+	go func() { _ = relay.Start(ctx) }()
+	defer relay.Stop()
+
+	// A live worker + Runner on the graph-executor consumer.
+	wid := uuid.New()
+	cl := worker.NewClient(serverURL, wid, nil)
+	if err := cl.Register(ctx, []string{"hitl"}, 1); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	runner := worker.NewRunner(js, cl, dnats.GraphExecutorMaxDeliver)
+	go func() { _ = runner.Start(ctx) }()
+
+	// Kick off the run: publish the real run.created envelope onto RUNS.
+	createEnvelope := map[string]any{
+		"event_id":       uuid.New().String(),
+		"aggregate_type": "Run",
+		"aggregate_id":   rid.String(),
+		"event_type":     "run.created",
+		"payload":        map[string]any{},
+		"metadata":       map[string]any{},
+	}
+	if err := dnats.NewPublisher(js).PublishWithID(ctx, dnats.SubjectFor("run.created"), rid.String(), createEnvelope); err != nil {
+		t.Fatalf("publish run.created: %v", err)
+	}
+
+	// --- Phase 1: the run pauses at GATE ---
+	waitForRunStatus(t, ctx, pool, rid, "requires_action", 10*time.Second)
+
+	// A ran, GATE and B have not; exactly one unresolved interrupt at GATE with
+	// the configured reason.
+	assertNodeCount(t, ctx, pool, rid, "A", 1)
+	assertNodeCount(t, ctx, pool, rid, "GATE", 0)
+	assertNodeCount(t, ctx, pool, rid, "B", 0)
+
+	var (
+		interruptID uuid.UUID
+		gotNode     string
+		gotReason   string
+		resolved    bool
+	)
+	if err := pool.QueryRow(ctx,
+		`SELECT id, node_id, reason, resolved FROM interrupts WHERE run_id=$1`, rid,
+	).Scan(&interruptID, &gotNode, &gotReason, &resolved); err != nil {
+		t.Fatalf("select interrupt: %v", err)
+	}
+	if gotNode != "GATE" {
+		t.Errorf("interrupt node_id: want GATE, got %q", gotNode)
+	}
+	if gotReason != "input_needed" {
+		t.Errorf("interrupt reason: want input_needed, got %q", gotReason)
+	}
+	if resolved {
+		t.Error("interrupt: want unresolved at pause, got resolved")
+	}
+
+	// --- Phase 2: resume with a state patch approving the gate ---
+	resumeURL := fmt.Sprintf("%s/api/v1/threads/%s/runs/%s/resume", serverURL, tid, rid)
+	resp, err := http.Post(resumeURL, "application/json",
+		strings.NewReader(`{"command":{"update":{"approved":true}}}`))
+	if err != nil {
+		t.Fatalf("POST resume: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST resume: want 200, got %d (%s)", resp.StatusCode, body)
+	}
+
+	// --- Phase 3: the worker re-claims, merges the patch, and completes ---
+	waitForRunStatus(t, ctx, pool, rid, "completed", 10*time.Second)
+
+	// A still ran exactly once (resume skipped it); GATE ran once after resume;
+	// B ran once — which only happens if approved=true merged into channels and
+	// the conditional GATE→B edge evaluated true.
+	assertNodeCount(t, ctx, pool, rid, "A", 1)
+	assertNodeCount(t, ctx, pool, rid, "GATE", 1)
+	assertNodeCount(t, ctx, pool, rid, "B", 1)
+
+	// The interrupt is now resolved (the resume endpoint marked it).
+	if err := pool.QueryRow(ctx,
+		`SELECT resolved FROM interrupts WHERE id=$1`, interruptID).Scan(&resolved); err != nil {
+		t.Fatalf("re-select interrupt: %v", err)
+	}
+	if !resolved {
+		t.Error("interrupt: want resolved after resume, got unresolved")
 	}
 }
 
