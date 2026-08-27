@@ -72,6 +72,16 @@ func jsonOrEmpty(b []byte) []byte {
 	return b
 }
 
+// nullableJSON maps an empty/absent payload to a Go nil (→ SQL NULL) rather than
+// an empty object, for nullable jsonb columns (e.g. interrupts.tool_calls) where
+// "no value" is semantically distinct from "{}".
+func nullableJSON(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
+}
+
 // mustJSON marshals v to JSON for jsonb columns / event payloads. A nil or
 // unmarshalable value becomes an empty object rather than failing the write.
 func mustJSON(v any) []byte {

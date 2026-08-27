@@ -500,6 +500,7 @@ groups:
         path: /threads/{id}/runs/{rid}/resume
         kind: write
         outbox: true
+        custom: true  # hand-written in runs_resume.go — validates requires_action + unresolved interrupt, resolves it, emits run.resumed{interrupt_id, command}, flips run to in_progress
         events: [run.resumed]
         nats: {subject: run.resumed, stream: RUNS}
         steps:

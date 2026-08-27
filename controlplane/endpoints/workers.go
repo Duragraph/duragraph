@@ -105,6 +105,10 @@ func (s *Server) WorkersStreamEvents(c echo.Context) error {
 			if err := s.terminalRun(ctx, rid, ev); err != nil {
 				return err
 			}
+		case "run.requires_action":
+			if err := s.requiresActionRun(ctx, rid, ev); err != nil {
+				return err
+			}
 		case "execution.node_started", "execution.node_completed", "execution.node_failed":
 			if err := s.nodeEvent(ctx, rid, ev); err != nil {
 				return err
@@ -182,6 +186,49 @@ func (s *Server) terminalRun(ctx context.Context, rid string, ev WorkerEvent) er
 		}
 		if ct.RowsAffected() == 0 {
 			return errStaleLease
+		}
+		return nil
+	})
+}
+
+// requiresActionRun suspends a run for human-in-the-loop: it flips
+// runs.status → 'requires_action' (epoch-fenced) and records the interrupt row,
+// emitting run.requires_action. Both writes share the writeTx transaction, so a
+// stale worker (fenced by the UPDATE) never leaves an orphan interrupt.
+//
+// Idempotent under JetStream redelivery: the interrupt INSERT is guarded by NOT
+// EXISTS on an unresolved (run_id, node_id), so re-posting the same pause does
+// not create a duplicate interrupt row. The status UPDATE tolerates a run
+// already in 'requires_action' (WHERE status IN ('in_progress','requires_action'))
+// so a redelivered pause is not fenced as stale.
+func (s *Server) requiresActionRun(ctx context.Context, rid string, ev WorkerEvent) error {
+	reason := ev.Reason
+	if reason == "" {
+		reason = "approval_required"
+	}
+	return s.writeTxOrHTTP(ctx, rid, ev.Type, ev, func(tx pgx.Tx) error {
+		ct, err := tx.Exec(ctx, `
+			UPDATE runs SET status='requires_action'
+			WHERE id=$1 AND lease_epoch=$2
+			  AND status IN ('in_progress','requires_action')`,
+			rid, ev.LeaseEpoch)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return errStaleLease
+		}
+		// Casts are required: in an INSERT..SELECT the select-list params carry no
+		// column context, so pgx cannot infer their types — and $5 is passed as a
+		// nil []byte (NULL tool_calls), which is doubly ambiguous. Explicit casts
+		// pin every parameter and avoid SQLSTATE 42P08.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO interrupts (run_id, node_id, reason, state, tool_calls)
+			SELECT $1::uuid, $2::text, $3::text, $4::jsonb, $5::jsonb
+			WHERE NOT EXISTS (
+			  SELECT 1 FROM interrupts WHERE run_id=$1::uuid AND node_id=$2::text AND NOT resolved)`,
+			rid, ev.NodeID, reason, jsonOrEmpty(ev.State), nullableJSON(ev.ToolCalls)); err != nil {
+			return err
 		}
 		return nil
 	})

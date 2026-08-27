@@ -107,6 +107,23 @@ func (c *Client) RunFailed(ctx context.Context, runID uuid.UUID, epoch int, reas
 	return err
 }
 
+// RequiresAction suspends runID for human-in-the-loop, fenced on epoch: the
+// server flips the run to requires_action and records the interrupt row. nodeID
+// is the node the run paused at, reason is one of the interrupts.reason CHECK
+// values (tool_call|approval_required|input_needed), and state is the
+// checkpointed channel state at the pause point.
+func (c *Client) RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state []byte) error {
+	body := eventsRequest{Events: []workerEvent{{
+		Type:       "run.requires_action",
+		LeaseEpoch: epoch,
+		NodeID:     nodeID,
+		Reason:     reason,
+		State:      json.RawMessage(state),
+	}}}
+	_, err := c.doJSON(ctx, http.MethodPost, c.eventsPath(runID), body, nil)
+	return err
+}
+
 // WriteCheckpoint upserts a run snapshot, fenced on epoch.
 // POST /api/v1/threads/{tid}/checkpoints.
 func (c *Client) WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) error {

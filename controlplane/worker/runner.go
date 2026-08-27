@@ -25,10 +25,18 @@
 //   - When the frontier empties: RunCompleted, fenced the same way. A
 //     max_iterations guard bounds cyclic graphs, escalating to run.failed.
 //
-// HITL interrupts and real llm/tool sub-worker delegation are deferred to
-// later slices; the executors here are deterministic (see graph.go).
+// HITL (human-in-the-loop) interrupt_before is implemented: a node marked
+// config.interrupt_before pauses the walk BEFORE executing — the runner
+// checkpoints the walk state (with the paused node at the head of the frontier
+// and an Interrupted marker), calls RequiresAction (server flips the run to
+// requires_action + records the interrupt), and acks. A later run.resumed
+// redelivers the command carrying cmd.Resume; the runner merges the resume
+// payload into channels, marks the paused node resumed-past, clears the marker,
+// and continues the walk. interrupt_after / requires_human and real llm/tool
+// sub-worker delegation are deferred to later slices; the executors here are
+// deterministic (see graph.go).
 //
-// Source: spec/models/d2/graph-engine.d2 + the worker-execution design doc.
+// Source: spec/models/d2/graph-engine.d2 + hitl.d2 + the worker-execution design doc.
 package worker
 
 import (
@@ -78,6 +86,7 @@ type runClient interface {
 	NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error
 	RunCompleted(ctx context.Context, runID uuid.UUID, epoch int) error
 	RunFailed(ctx context.Context, runID uuid.UUID, epoch int, reason string) error
+	RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state []byte) error
 }
 
 // Runner consumes worker.graph.execute commands and walks each run's graph
@@ -115,14 +124,22 @@ func NewRunner(js jetstream.JetStream, cl runClient, maxDeliver int) *Runner {
 
 // GraphCommand is the worker.graph.execute payload shape, matching what
 // nats.RunProcessor.dispatch publishes (run_id, thread_id, assistant_id,
-// graph_id, input). Exported so tests can construct/decode commands without
-// duplicating the shape.
+// graph_id, input, resume). Exported so tests can construct/decode commands
+// without duplicating the shape.
 type GraphCommand struct {
 	RunID       uuid.UUID       `json:"run_id"`
 	ThreadID    uuid.UUID       `json:"thread_id"`
 	AssistantID uuid.UUID       `json:"assistant_id,omitempty"`
 	GraphID     string          `json:"graph_id,omitempty"`
 	Input       json.RawMessage `json:"input,omitempty"`
+
+	// Resume is the LangGraph-style resume command carried by a run.resumed
+	// dispatch (nats.RunProcessor sets it from the run.resumed event payload's
+	// `command`). Present only when continuing a run that was paused at an
+	// interrupt_before node; its keys are merged into the run's channel values
+	// before the walk continues past the paused node. Absent (nil) on the
+	// initial run.created dispatch.
+	Resume json.RawMessage `json:"resume,omitempty"`
 }
 
 // Start binds the graph-executor durable consumer (WORKER_COMMANDS,
@@ -200,10 +217,17 @@ func (r *Runner) escalate(ctx context.Context, runID uuid.UUID, epoch int, perr 
 //     completed nodes are never re-run.
 //   - Frontier: node IDs pending execution (FIFO), i.e. the successors
 //     discovered but not yet run.
+//   - Interrupted: the node id the walk is paused at for HITL (interrupt_before),
+//     "" when the run is not paused. When set, that node sits at the head of
+//     Frontier; on resume the runner clears it and executes that node. It is the
+//     redelivery guard: a redelivered run.created finds Interrupted=node and
+//     re-pauses (server-idempotent), while a redelivered run.resumed finds
+//     Interrupted="" (already cleared) and does not re-merge the resume payload.
 type checkpointState struct {
 	Channels       map[string]any `json:"channels"`
 	CompletedNodes []string       `json:"completed_nodes"`
 	Frontier       []string       `json:"frontier"`
+	Interrupted    string         `json:"interrupted,omitempty"`
 }
 
 // ProcessOne walks cmd's run graph with checkpoint resume, following the
@@ -244,6 +268,12 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 	var completed []string
 	completedSet := map[string]bool{}
 	var frontier []string
+	// interrupted is the node the walk is paused at for HITL (from the restored
+	// checkpoint); "" when not paused. resumedPast records nodes whose pause has
+	// already been satisfied by a resume this delivery, so the walk executes
+	// them instead of re-pausing.
+	interrupted := ""
+	resumedPast := map[string]bool{}
 
 	_, raw, found, lerr := r.cl.LatestCheckpoint(ctx, cmd.ThreadID, cmd.RunID)
 	if lerr != nil {
@@ -262,6 +292,7 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 			completedSet[id] = true
 		}
 		frontier = cp.Frontier
+		interrupted = cp.Interrupted
 	} else {
 		// Fresh run: seed channels from the command input, frontier from the
 		// graph's entry nodes.
@@ -274,6 +305,30 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 			}
 		}
 		frontier = graph.entryNodes()
+	}
+
+	// HITL resume: a run.resumed dispatch carries cmd.Resume, the LangGraph-style
+	// Command ({update, resume, goto, ...}; see spec/models/d2/hitl.d2). Only act
+	// on it when the restored checkpoint says we are actually paused
+	// (interrupted != "") — this makes a redelivered resume a no-op (the first
+	// resume already cleared the marker, so it won't re-merge) and ignores a
+	// stray resume on a run that is not paused. For this slice we apply
+	// command.update (the state patch merged into channels before the paused node
+	// runs); command.resume / command.goto / command.send are later slices. Then
+	// mark the paused node resumed-past so the loop executes it rather than
+	// re-pausing, and clear the marker.
+	if len(cmd.Resume) > 0 && interrupted != "" {
+		var command struct {
+			Update map[string]any `json:"update,omitempty"`
+		}
+		if uerr := json.Unmarshal(cmd.Resume, &command); uerr != nil {
+			return false, epoch, fmt.Errorf("runner: decode resume command: %w", uerr)
+		}
+		for k, v := range command.Update {
+			channels[k] = v
+		}
+		resumedPast[interrupted] = true
+		interrupted = ""
 	}
 
 	maxIter := graph.maxIterations()
@@ -303,6 +358,44 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		if !ok {
 			return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("edge targets unknown node %q", nodeID))
 		}
+
+		// HITL interrupt_before: pause the walk BEFORE executing this node,
+		// unless a resume this delivery already cleared its pause (resumedPast).
+		// Checkpoint the walk state with the paused node re-prepended to the
+		// frontier and the Interrupted marker set, tell the server to flip the
+		// run to requires_action (+ record the interrupt), then park (ack). The
+		// run continues when a run.resumed redelivers this command with
+		// cmd.Resume set (handled before the loop).
+		if node.interruptsBefore() && !resumedPast[nodeID] {
+			pauseFrontier := append([]string{nodeID}, frontier...)
+			channelsJSON, merr := json.Marshal(channels)
+			if merr != nil {
+				return false, epoch, fmt.Errorf("runner: encode interrupt state: %w", merr)
+			}
+			pauseJSON, merr := json.Marshal(checkpointState{
+				Channels:       channels,
+				CompletedNodes: completed,
+				Frontier:       pauseFrontier,
+				Interrupted:    nodeID,
+			})
+			if merr != nil {
+				return false, epoch, fmt.Errorf("runner: encode pause checkpoint: %w", merr)
+			}
+			if werr := r.cl.WriteCheckpoint(ctx, cmd.ThreadID, cmd.RunID, epoch, len(completed), pauseJSON); werr != nil {
+				if errors.Is(werr, ErrStaleLease) {
+					return true, epoch, nil // superseded — stop, ack
+				}
+				return false, epoch, werr // transient — Nak, redeliver
+			}
+			if aerr := r.cl.RequiresAction(ctx, cmd.RunID, epoch, nodeID, node.interruptReason(), channelsJSON); aerr != nil {
+				if errors.Is(aerr, ErrStaleLease) {
+					return true, epoch, nil
+				}
+				return false, epoch, aerr // transient — Nak, redeliver
+			}
+			return true, epoch, nil // paused for human input — ack, await run.resumed
+		}
+
 		exec, ok := r.execs[node.Type]
 		if !ok {
 			return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("no executor for node type %q", node.Type))
@@ -330,6 +423,7 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 			Channels:       channels,
 			CompletedNodes: completed,
 			Frontier:       frontier,
+			Interrupted:    interrupted, // "" here — executing past a resumed node clears the marker
 		})
 		if merr != nil {
 			return false, epoch, fmt.Errorf("runner: encode checkpoint state: %w", merr)

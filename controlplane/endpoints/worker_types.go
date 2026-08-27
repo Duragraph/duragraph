@@ -31,9 +31,15 @@ type WorkerHeartbeatResponse struct {
 }
 
 // WorkerEvent is one worker→server state event. Type is one of:
-// run.started | run.completed | run.failed | execution.node_started |
-// execution.node_completed | execution.node_failed. LeaseEpoch fences all
-// non-start events; run.started ignores it (it establishes the lease).
+// run.started | run.completed | run.failed | run.requires_action |
+// execution.node_started | execution.node_completed | execution.node_failed.
+// LeaseEpoch fences all non-start events; run.started ignores it (it
+// establishes the lease).
+//
+// run.requires_action carries the HITL suspension: Reason is the interrupt
+// reason CHECK value ('tool_call'|'approval_required'|'input_needed'), State is
+// the checkpointed channel state at the pause point, and ToolCalls is the
+// optional pending tool-call payload. NodeID names the node the run paused at.
 type WorkerEvent struct {
 	Type       string          `json:"type"`
 	LeaseEpoch int             `json:"lease_epoch"`
@@ -44,6 +50,9 @@ type WorkerEvent struct {
 	Output     json.RawMessage `json:"output,omitempty"`
 	DurationMs *int            `json:"duration_ms,omitempty"`
 	Error      *string         `json:"error,omitempty"`
+	Reason     string          `json:"reason,omitempty"`
+	State      json.RawMessage `json:"state,omitempty"`
+	ToolCalls  json.RawMessage `json:"tool_calls,omitempty"`
 }
 
 type WorkerEventsRequest struct {

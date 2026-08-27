@@ -99,10 +99,17 @@ func TestMain(m *testing.M) {
 	}
 	natsURL = fmt.Sprintf("nats://127.0.0.1:%d", portSrv)
 
-	// --- httptest server mounting the worker endpoints over testPool ---
+	// --- httptest server mounting the worker + runs endpoints over testPool ---
+	// RegisterWorkers backs the runner's *Client (RunStarted, WriteCheckpoint,
+	// RequiresAction, …); RegisterRuns backs the HITL resume endpoint
+	// (POST /threads/{id}/runs/{rid}/resume) that TestInterruptResumeEndToEnd
+	// drives. Subscriber is nil (no SSE/wait in these tests — those routes 503
+	// if hit, which they never are); only Tenant is needed here.
 	e := echo.New()
 	g := e.Group("/api/v1")
-	(&endpoints.Server{Tenant: testPool}).RegisterWorkers(g)
+	srv := &endpoints.Server{Tenant: testPool}
+	srv.RegisterWorkers(g)
+	srv.RegisterRuns(g)
 	httpSrv := httptest.NewServer(e)
 	serverURL = httpSrv.URL
 
@@ -201,5 +208,30 @@ func seedCounterGraph(t *testing.T, ctx context.Context, pool *pgxpool.Pool, ass
 		VALUES ($1, 'counter', '1', $2::jsonb, $3::jsonb, '{}'::jsonb)`,
 		assistantID, nodes, edges); err != nil {
 		t.Fatalf("seed counter graph: %v", err)
+	}
+}
+
+// seedInterruptGraph inserts a 3-node HITL graph for assistantID:
+//
+//	A --(always)--> GATE --(approved == true)--> B
+//
+// GATE carries config.interrupt_before (reason input_needed), so the walk
+// pauses BEFORE executing GATE. The GATE→B edge is conditional on
+// `approved == true`, a channel value that only exists if the resume's
+// command.update injected it — so B running is proof the state patch merged.
+// A writes {stage:"a"} and B writes {done:true} via the deterministic
+// configExecutor (both type tool); GATE itself writes nothing.
+func seedInterruptGraph(t *testing.T, ctx context.Context, pool *pgxpool.Pool, assistantID uuid.UUID) {
+	t.Helper()
+	nodes := `[{"id":"A","type":"tool","config":{"set":{"stage":"a"}}},` +
+		`{"id":"GATE","type":"tool","config":{"interrupt_before":true,"interrupt_reason":"input_needed"}},` +
+		`{"id":"B","type":"tool","config":{"set":{"done":true}}}]`
+	edges := `[{"source":"A","target":"GATE"},` +
+		`{"source":"GATE","target":"B","condition":"approved == true"}]`
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO graphs (assistant_id, name, version, nodes, edges, config)
+		VALUES ($1, 'hitl', '1', $2::jsonb, $3::jsonb, '{}'::jsonb)`,
+		assistantID, nodes, edges); err != nil {
+		t.Fatalf("seed interrupt graph: %v", err)
 	}
 }
