@@ -25,15 +25,21 @@
 //   - When the frontier empties: RunCompleted, fenced the same way. A
 //     max_iterations guard bounds cyclic graphs, escalating to run.failed.
 //
-// HITL (human-in-the-loop) interrupt_before is implemented: a node marked
-// config.interrupt_before pauses the walk BEFORE executing — the runner
-// checkpoints the walk state (with the paused node at the head of the frontier
-// and an Interrupted marker), calls RequiresAction (server flips the run to
-// requires_action + records the interrupt), and acks. A later run.resumed
-// redelivers the command carrying cmd.Resume; the runner merges the resume
-// payload into channels, marks the paused node resumed-past, clears the marker,
-// and continues the walk. interrupt_after / requires_human and real llm/tool
-// sub-worker delegation are deferred to later slices; the executors here are
+// HITL (human-in-the-loop) is implemented for all of hitl.d2's triggers. A node
+// may pause the walk BEFORE it executes (config.interrupt_before, or any node of
+// type human) or AFTER it has run and merged its writes (config.interrupt_after,
+// requires_human, or pending tool_calls — see graph.go pausesAfter). Either way
+// the runner checkpoints the walk state with an Interrupted marker, calls
+// RequiresAction (server flips the run to requires_action + records the
+// interrupt), and acks.
+//
+// A later run.resumed redelivers the command carrying cmd.Resume, the LangGraph
+// Command: the runner applies its update / resume / goto (command.go), marks the
+// paused node resumed-past, clears the marker, and continues the walk. Routing
+// out of a node that paused AFTER itself is deliberately deferred to this point
+// — see the resume block in ProcessOne.
+//
+// Real llm/tool sub-worker delegation remains deferred; the executors here are
 // deterministic (see graph.go).
 //
 // Source: spec/models/d2/graph-engine.d2 + hitl.d2 + the worker-execution design doc.
@@ -352,42 +358,58 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		frontier = graph.entryNodes()
 	}
 
-	// HITL resume: a run.resumed dispatch carries cmd.Resume, the LangGraph-style
-	// Command ({update, resume, goto, ...}; see spec/models/d2/hitl.d2). Only act
-	// on it when the restored checkpoint says we are actually paused
-	// (interrupted != "") — this makes a redelivered resume a no-op (the first
-	// resume already cleared the marker, so it won't re-merge) and ignores a
-	// stray resume on a run that is not paused. For this slice we apply
-	// command.update (the state patch merged into channels before the paused node
-	// runs); command.resume / command.goto / command.send are later slices. Then
-	// mark the paused node resumed-past so the loop executes it rather than
-	// re-pausing, and clear the marker.
+	// HITL resume: a run.resumed dispatch carries cmd.Resume, the LangGraph
+	// Command (update / resume / goto — see command.go for how the spec's
+	// "send" folds into goto). Only act on it when the restored checkpoint says
+	// we are actually paused (interrupted != "") — this makes a redelivered
+	// resume a no-op (the first resume already cleared the marker, so it won't
+	// re-merge) and ignores a stray resume on a run that is not paused.
 	if len(cmd.Resume) > 0 && interrupted != "" {
-		var command struct {
-			Update map[string]any `json:"update,omitempty"`
-		}
+		var command resumeCommand
 		if uerr := json.Unmarshal(cmd.Resume, &command); uerr != nil {
 			return false, epoch, fmt.Errorf("runner: decode resume command: %w", uerr)
 		}
-		for k, v := range command.Update {
-			channels[k] = v
+		// Merge update + resume + any Send inputs into channel_values, and
+		// collect where goto says to navigate. A malformed goto is the client's
+		// error, not a transient one, so it fails the run rather than looping.
+		targets, aerr := command.apply(channels)
+		if aerr != nil {
+			return r.failRun(ctx, cmd.RunID, epoch, aerr.Error())
 		}
-		// Expand the routing that was deferred at a pause-after, now that the
-		// human's patch is merged: the paused node's edges are evaluated
-		// against the UPDATED channels, which is what lets a conditional edge
-		// out of that node depend on the answer. Prepended so this branch
-		// continues ahead of anything queued from a parallel branch.
-		if pausedAfter {
-			succs, serr := graph.successors(interrupted, channels)
+
+		pausedNode := interrupted
+		switch {
+		case len(targets.Nodes) > 0:
+			// command.goto redirects THIS branch: the targets replace whatever
+			// this pause would have run next — the paused node itself for a
+			// pause-before, or its successors for a pause-after. Anything
+			// already queued from a parallel branch stays behind them.
+			for _, n := range targets.Nodes {
+				if _, ok := graph.node(n); !ok {
+					return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("command.goto names unknown node %q", n))
+				}
+			}
+			if !pausedAfter && len(frontier) > 0 && frontier[0] == pausedNode {
+				frontier = frontier[1:] // skip the node we were parked before
+			}
+			frontier = append(append([]string{}, targets.Nodes...), frontier...)
+		case pausedAfter:
+			// Expand the routing deferred at the pause, now that the patch is
+			// merged: the paused node's edges are evaluated against the UPDATED
+			// channels, which is what lets a conditional edge out of that node
+			// depend on the answer. Prepended so this branch continues ahead of
+			// anything queued from a parallel branch.
+			succs, serr := graph.successors(pausedNode, channels)
 			if serr != nil {
 				return r.failRun(ctx, cmd.RunID, epoch, serr.Error())
 			}
 			frontier = append(succs, frontier...)
 		}
+
 		// A pause taken AFTER the node ran needs no resumedPast entry (the node
 		// is already in completedSet), but recording it is harmless and keeps
 		// the two phases symmetric.
-		resumedPast[interrupted] = true
+		resumedPast[pausedNode] = true
 		interrupted = ""
 		pausedAfter = false
 	}

@@ -15,7 +15,11 @@
 // The run.resumed event lands on the RUNS stream; run-processor turns it into a
 // fresh worker.graph.execute command carrying the command as `resume` (deduped
 // on the event id, not the run id — see nats/run_processor.go). The worker
-// restores the pause checkpoint, applies command.update, and continues the walk.
+// restores the pause checkpoint, applies the Command — update, resume and goto
+// (worker/command.go) — and continues the walk.
+//
+// The body is passed through verbatim: the Command's shape is the worker's
+// contract, not this endpoint's, so a field added there needs no change here.
 package endpoints
 
 import (
@@ -42,9 +46,9 @@ func (s *Server) RunsResume(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid run id")
 	}
 
-	// Body is a ResumeRunRequest; for this slice we carry only the nested
-	// `command` through to the worker. An absent command resumes with no state
-	// change (the worker applies command.update, which is then empty).
+	// Body is a ResumeRunRequest; we carry the nested `command` through to the
+	// worker verbatim. An absent command resumes with no state change and no
+	// redirection (the worker's Command apply is then a no-op).
 	var req struct {
 		Command json.RawMessage `json:"command,omitempty"`
 	}
