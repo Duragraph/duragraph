@@ -246,7 +246,10 @@ func (s *Server) RunsStreamThread(c echo.Context) error {
 // writeTx) but is parameterized on threadID so both variants can share it —
 // the generated handlers keep their own inline copy so this stays a small,
 // additive helper rather than a generator change. Returns the new run's id.
-func (s *Server) createRun(ctx context.Context, threadID *uuid.UUID, assistantID uuid.UUID, input, metadata []byte) (uuid.UUID, error) {
+// kwargs carries the run-level LangGraph kwargs (interrupt_before /
+// interrupt_after) already validated by the caller via buildRunKwargs; pass
+// nil for none and the column default '{}' applies.
+func (s *Server) createRun(ctx context.Context, threadID *uuid.UUID, assistantID uuid.UUID, input, metadata, kwargs []byte) (uuid.UUID, error) {
 	aggID := uuid.New()
 	payload := mustJSON(struct {
 		AssistantID uuid.UUID       `json:"assistant_id"`
@@ -259,11 +262,11 @@ func (s *Server) createRun(ctx context.Context, threadID *uuid.UUID, assistantID
 	err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
 		var execErr error
 		if threadID != nil {
-			_, execErr = tx.Exec(ctx, `INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata)
-VALUES ($1, $2, $3, 'queued', $4, $5)`, aggID, *threadID, assistantID, input, metadata)
+			_, execErr = tx.Exec(ctx, `INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata, kwargs)
+VALUES ($1, $2, $3, 'queued', $4, $5, $6)`, aggID, *threadID, assistantID, input, metadata, jsonOrEmpty(kwargs))
 		} else {
-			_, execErr = tx.Exec(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata)
-VALUES ($1, $2, 'queued', $3, $4)`, aggID, assistantID, input, metadata)
+			_, execErr = tx.Exec(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata, kwargs)
+VALUES ($1, $2, 'queued', $3, $4, $5)`, aggID, assistantID, input, metadata, jsonOrEmpty(kwargs))
 		}
 		return execErr
 	})
@@ -293,7 +296,11 @@ func (s *Server) RunsCreateAndStream(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	rid, err := s.createRun(ctx, &threadID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata))
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
+	rid, err := s.createRun(ctx, &threadID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata), kwargs)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -315,7 +322,11 @@ func (s *Server) RunsStatelessStream(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	rid, err := s.createRun(ctx, nil, assistantID, mustJSON(req.Input), mustJSON(req.Metadata))
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
+	rid, err := s.createRun(ctx, nil, assistantID, mustJSON(req.Input), mustJSON(req.Metadata), kwargs)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -428,7 +439,11 @@ func (s *Server) RunsStatelessWait(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	rid, err := s.createRun(ctx, nil, assistantID, mustJSON(req.Input), mustJSON(req.Metadata))
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
+	rid, err := s.createRun(ctx, nil, assistantID, mustJSON(req.Input), mustJSON(req.Metadata), kwargs)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

@@ -144,13 +144,18 @@ func (rp *RunProcessor) dispatch(ctx context.Context, msg jetstream.Msg) error {
 	// runs not yet bound to a graph); assistant_id is NOT NULL. input is the
 	// run's initial channel seed (NOT NULL DEFAULT '{}'), forwarded so the
 	// worker's entry (start) node can seed channels from it.
+	// kwargs carries the run-level LangGraph knobs the CALLER set on create —
+	// currently interrupt_before / interrupt_after, which the worker unions with
+	// each node's own interrupt config. Forwarded on the command so the worker
+	// needs no extra round trip to learn them.
 	var threadID *uuid.UUID
 	var assistantID uuid.UUID
 	var graphID *string
 	var input []byte
+	var kwargs []byte
 	err = rp.pool.QueryRow(ctx,
-		`SELECT thread_id, assistant_id, graph_id, input FROM runs WHERE id = $1`, runID,
-	).Scan(&threadID, &assistantID, &graphID, &input)
+		`SELECT thread_id, assistant_id, graph_id, input, kwargs FROM runs WHERE id = $1`, runID,
+	).Scan(&threadID, &assistantID, &graphID, &input, &kwargs)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Run no longer exists (e.g. deleted) — nothing to dispatch.
@@ -171,6 +176,11 @@ func (rp *RunProcessor) dispatch(ctx context.Context, msg jetstream.Msg) error {
 	}
 	if len(input) > 0 {
 		cmd["input"] = json.RawMessage(input)
+	}
+	// Omit an empty bag so a run with no run-level knobs sends the same command
+	// shape it did before this field existed.
+	if len(kwargs) > 0 && string(kwargs) != "{}" {
+		cmd["kwargs"] = json.RawMessage(kwargs)
 	}
 
 	// Dedup key for the worker.graph.execute command:

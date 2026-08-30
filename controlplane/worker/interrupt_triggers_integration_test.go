@@ -409,6 +409,105 @@ func TestInterruptBeforeAndAfterOnSameNode(t *testing.T) {
 	assertNodeCount(t, ctx, pool, rid, "B", 1)
 }
 
+// TestRunLevelInterruptSpec covers the second interrupt axis: nodes named by
+// the CALLER on the run (RunCreate.interrupt_before / interrupt_after,
+// persisted to runs.kwargs and forwarded on GraphCommand.Kwargs), on a graph
+// whose nodes carry NO interrupt config at all. Before this slice the field was
+// accepted with a 201 and silently discarded, so the run just ran to
+// completion.
+func TestRunLevelInterruptSpec(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		kwargs       string
+		wantPaused   string // node the run must park at
+		wantACount   int    // execution_history rows for A at the pause
+		wantPauseSet bool
+	}{
+		{
+			name: "interrupt_before names a node", kwargs: `{"interrupt_before":["B"]}`,
+			wantPaused: "B", wantACount: 1, wantPauseSet: true,
+		},
+		{
+			name: "interrupt_after names a node", kwargs: `{"interrupt_after":["A"]}`,
+			wantPaused: "A", wantACount: 1, wantPauseSet: true,
+		},
+		{
+			name: "wildcard before parks at the very first node", kwargs: `{"interrupt_before":"*"}`,
+			wantPaused: "A", wantACount: 0, wantPauseSet: true,
+		},
+		{
+			name: "empty list parks nowhere", kwargs: `{"interrupt_before":[]}`,
+			wantACount: 1,
+		},
+		{
+			name: "unnamed node parks nowhere", kwargs: `{"interrupt_before":["nope"]}`,
+			wantACount: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			pool := newPool(t)
+
+			tid, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+			// Neither node carries any interrupt config — every pause below is
+			// attributable to the run-level spec alone.
+			seedGraph(t, ctx, pool, aid, "runlevel",
+				`[{"id":"A","type":"tool","config":{"set":{"stage":"a"}}},
+				  {"id":"B","type":"tool","config":{"set":{"done":true}}}]`,
+				`[{"source":"A","target":"B"}]`)
+			runner, _ := newLiveRunner(t, ctx, "runlevel")
+
+			if _, _, err := runner.ProcessOne(ctx, worker.GraphCommand{
+				RunID: rid, ThreadID: tid, AssistantID: aid, GraphID: "runlevel",
+				Kwargs: json.RawMessage(tc.kwargs),
+			}); err != nil {
+				t.Fatalf("ProcessOne: %v", err)
+			}
+
+			assertNodeCount(t, ctx, pool, rid, "A", tc.wantACount)
+			if !tc.wantPauseSet {
+				assertRunStatus(t, ctx, pool, rid, "completed")
+				assertNodeCount(t, ctx, pool, rid, "B", 1)
+				return
+			}
+			assertRunStatus(t, ctx, pool, rid, "requires_action")
+			if in := soleInterrupt(t, ctx, pool, rid); in.NodeID != tc.wantPaused {
+				t.Errorf("interrupt node_id: want %q, got %q", tc.wantPaused, in.NodeID)
+			}
+		})
+	}
+}
+
+// TestRunLevelUnionsWithNodeConfig pins that the two interrupt axes are a
+// UNION, not an override: a node the graph author marked still pauses even
+// though the caller's run-level spec names a different node. Honouring only one
+// side would silently discard the other party's intent.
+func TestRunLevelUnionsWithNodeConfig(t *testing.T) {
+	ctx := context.Background()
+	pool := newPool(t)
+
+	tid, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	seedGraph(t, ctx, pool, aid, "union",
+		`[{"id":"A","type":"tool","config":{"set":{"stage":"a"},"interrupt_before":true}},
+		  {"id":"B","type":"tool","config":{"set":{"done":true}}}]`,
+		`[{"source":"A","target":"B"}]`)
+	runner, _ := newLiveRunner(t, ctx, "union")
+
+	// The run-level spec names only B; A's own config must still park the walk.
+	if _, _, err := runner.ProcessOne(ctx, worker.GraphCommand{
+		RunID: rid, ThreadID: tid, AssistantID: aid, GraphID: "union",
+		Kwargs: json.RawMessage(`{"interrupt_before":["B"]}`),
+	}); err != nil {
+		t.Fatalf("ProcessOne: %v", err)
+	}
+
+	assertRunStatus(t, ctx, pool, rid, "requires_action")
+	assertNodeCount(t, ctx, pool, rid, "A", 0)
+	if in := soleInterrupt(t, ctx, pool, rid); in.NodeID != "A" {
+		t.Errorf("interrupt node_id: want A (node config still honoured), got %q", in.NodeID)
+	}
+}
+
 // postResume drives the real HITL resume endpoint.
 func postResume(t *testing.T, tid, rid uuid.UUID, body string) {
 	t.Helper()
