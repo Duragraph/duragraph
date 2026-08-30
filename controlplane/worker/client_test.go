@@ -31,12 +31,19 @@ func TestClientLifecycleAndCheckpoints(t *testing.T) {
 	if err != nil || epoch != 1 {
 		t.Fatalf("run started: epoch=%d err=%v", epoch, err)
 	}
-	if err := cl.WriteCheckpoint(ctx, tid, rid, epoch, 1, []byte(`{"count":1}`)); err != nil {
+	ckptID, err := cl.WriteCheckpoint(ctx, tid, rid, epoch, 1, []byte(`{"count":1}`))
+	if err != nil {
 		t.Fatal(err)
 	}
-	v, state, found, err := cl.LatestCheckpoint(ctx, tid, rid)
-	if err != nil || !found || v != 1 || string(state) != `{"count":1}` {
-		t.Fatalf("latest: v=%d found=%v state=%s err=%v", v, found, state, err)
+	if ckptID == 0 {
+		t.Error("WriteCheckpoint: want a non-zero snapshots.id (it becomes the next checkpoint's parent), got 0")
+	}
+	cp, found, err := cl.LatestCheckpoint(ctx, tid, rid)
+	if err != nil || !found || cp.Version != 1 || string(cp.State) != `{"count":1}` {
+		t.Fatalf("latest: v=%d found=%v state=%s err=%v", cp.Version, found, cp.State, err)
+	}
+	if cp.ID != ckptID {
+		t.Errorf("LatestCheckpoint id: want %d (the row WriteCheckpoint created), got %d", ckptID, cp.ID)
 	}
 	if err := cl.NodeCompleted(ctx, rid, epoch, "A", "tool"); err != nil {
 		t.Fatal(err)

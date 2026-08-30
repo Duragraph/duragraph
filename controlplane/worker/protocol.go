@@ -46,6 +46,13 @@ type checkpointWriteRequest struct {
 	State      json.RawMessage `json:"state"`
 }
 
+// checkpointWriteResponse mirrors endpoints.CheckpointWriteResponse (used to
+// decode the POST .../checkpoints response, whose id becomes the next
+// checkpoint's parent_checkpoint_id).
+type checkpointWriteResponse struct {
+	CheckpointID int64 `json:"checkpoint_id"`
+}
+
 // checkpointResponse mirrors endpoints.CheckpointResponse (used to decode the
 // GET .../checkpoints/latest response).
 type checkpointResponse struct {
