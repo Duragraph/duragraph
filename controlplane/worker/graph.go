@@ -9,8 +9,11 @@
 // Slice scope (see the d2 legend): node typing + edge routing + input seeding
 // are IMPLEMENTED here; the executors are deterministic and self-contained (no
 // LLM keys, no sub-worker delegation) so the whole engine is testcontainers-
-// testable offline. HITL interrupts and real llm/tool delegation to
-// worker.llm.invoke / worker.tool.execute are TARGET — later slices.
+// testable offline. All three of hitl.d2's interrupt triggers are implemented
+// (interrupt_before, interrupt_after, requires_human — see pausesAfter), as is
+// the tool_calls→approval trigger from graph-engine.d2 §3. Real llm/tool
+// delegation to worker.llm.invoke / worker.tool.execute remains TARGET, as does
+// the end node's output-freeze to runs.output.
 package worker
 
 import (
@@ -33,24 +36,106 @@ type Node struct {
 	Config map[string]any `json:"config,omitempty"`
 }
 
+// Node types that carry engine meaning. nodeTypeHuman exists purely to collect
+// human input: graph-engine.d2 §3 human_ex specifies it as "always interrupt —
+// requires_human", so it suspends unconditionally regardless of config.
+const nodeTypeHuman = "human"
+
+// The interrupts.reason CHECK constants (003_run.up.sql:43) —
+// tool_call | approval_required | input_needed. reasonToolCall is recorded when
+// a tool node emits pending tool_calls for human approval (graph-engine.d2 §3
+// tool_ex "may: emit tool_calls → interrupt (approval)").
+const (
+	reasonToolCall         = "tool_call"
+	reasonApprovalRequired = "approval_required"
+	reasonInputNeeded      = "input_needed"
+)
+
+// toolCallsKey is the channel-write key a tool node uses to surface pending
+// tool calls that need a human decision. Its presence is itself an interrupt
+// trigger (graph-engine.d2 §3 tool_ex), and the value is persisted to
+// interrupts.tool_calls (hitl.d2 on_interrupt step 2).
+const toolCallsKey = "tool_calls"
+
+// requiresHumanKey is the channel-write key a node uses to signal, from its own
+// output, that it needs human input — graph-engine.d2 §5 triggers
+// "requires_human: node output signals need for input".
+const requiresHumanKey = "requires_human"
+
 // interruptsBefore reports whether this node suspends the run for
-// human-in-the-loop BEFORE it executes (config.interrupt_before: true). Mirrors
-// the hitl.d2 interrupt_before trigger. interrupt_after / requires_human are
-// later slices.
+// human-in-the-loop BEFORE it executes: either config.interrupt_before is set,
+// or the node is a "human" node, which graph-engine.d2 §3 defines as always
+// interrupting. Pausing BEFORE (rather than after) is what makes a human node
+// meaningful — the walk parks, the client supplies the human's contribution via
+// the resume Command, and the node then executes with that state in channels.
+// The first of hitl.d2's three triggers.
 func (n Node) interruptsBefore() bool {
+	if n.Type == nodeTypeHuman {
+		return true
+	}
 	v, _ := n.Config["interrupt_before"].(bool)
 	return v
 }
 
+// interruptsAfter reports whether this node suspends the run AFTER it executes
+// and its writes are merged (config.interrupt_after: true). The second of
+// hitl.d2's three triggers.
+func (n Node) interruptsAfter() bool {
+	v, _ := n.Config["interrupt_after"].(bool)
+	return v
+}
+
+// pausesAfter reports whether the walk must suspend AFTER this node has run,
+// and with which interrupts.reason. It folds the two post-execution triggers
+// the spec names, in precedence order:
+//
+//   - pending tool_calls in the node's writes (graph-engine.d2 §3 tool_ex) →
+//     reason tool_call. Most specific: there is a concrete decision to approve.
+//   - requires_human, either statically via config.requires_human (hitl.d2
+//     graph_node.definition) or dynamically when the node's own output carries
+//     it (graph-engine.d2 §5 triggers) → reason input_needed.
+//   - config.interrupt_after → the node's configured reason.
+//
+// writes (not the merged channel state) is the input on purpose: a
+// requires_human or tool_calls value that arrived in the RUN'S INPUT would
+// otherwise pause the walk at every single node.
+func (n Node) pausesAfter(writes map[string]any) (bool, string) {
+	if len(n.toolCalls(writes)) > 0 {
+		return true, reasonToolCall
+	}
+	if v, _ := n.Config[requiresHumanKey].(bool); v {
+		return true, reasonInputNeeded
+	}
+	if v, _ := writes[requiresHumanKey].(bool); v {
+		return true, reasonInputNeeded
+	}
+	if n.interruptsAfter() {
+		return true, n.interruptReason()
+	}
+	return false, ""
+}
+
+// toolCalls returns the pending tool calls this node emitted, if any. Only a
+// non-empty list counts: an empty array is a tool node reporting it needs no
+// approval, not an interrupt trigger.
+func (n Node) toolCalls(writes map[string]any) []any {
+	calls, _ := writes[toolCallsKey].([]any)
+	return calls
+}
+
 // interruptReason returns the HITL interrupt reason recorded when this node
-// suspends the run (config.interrupt_reason), defaulting to "approval_required".
-// The value must be one of the interrupts.reason CHECK constants
+// suspends the run (config.interrupt_reason). Defaults to input_needed for a
+// human node (it exists to ask a human for input) and approval_required
+// otherwise. The value must be one of the interrupts.reason CHECK constants
 // (tool_call | approval_required | input_needed).
 func (n Node) interruptReason() string {
 	if s, ok := n.Config["interrupt_reason"].(string); ok && s != "" {
 		return s
 	}
-	return "approval_required"
+	if n.Type == nodeTypeHuman {
+		return reasonInputNeeded
+	}
+	return reasonApprovalRequired
 }
 
 // Edge connects Source→Target, optionally guarded by Condition (an expression
@@ -191,16 +276,24 @@ type NodeExecutor interface {
 	Execute(ctx context.Context, node Node, channels map[string]any) (writes map[string]any, err error)
 }
 
-// defaultExecutors maps Node.type → its executor for this slice. start/end/
-// conditional pass through (start's seeding happens before the loop; end's
-// output-freeze is a server-side TARGET; conditional's routing lives in the
-// edge evaluator). llm/tool are stood in by configExecutor — declarative,
-// deterministic, dependency-free — until real sub-worker delegation lands.
+// defaultExecutors maps Node.type → its executor for this slice, covering every
+// type graph-engine.d2 §3 names. start/end/conditional/human pass through
+// (start's seeding happens before the loop; end's output-freeze to runs.output
+// is a server-side TARGET; conditional's routing lives in the edge evaluator;
+// human contributes no writes of its own — it exists to suspend, and the state
+// it "produces" arrives via the resume Command). llm/tool are stood in by
+// configExecutor — declarative, deterministic, dependency-free — until real
+// sub-worker delegation lands.
+//
+// human MUST have an entry even though it does nothing: without one, the walk
+// hits the "no executor for node type" guard and fails the run outright on the
+// delivery that resumes past the interrupt.
 func defaultExecutors() map[string]NodeExecutor {
 	return map[string]NodeExecutor{
 		"start":       passthroughExecutor{},
 		"end":         passthroughExecutor{},
 		"conditional": passthroughExecutor{},
+		nodeTypeHuman: passthroughExecutor{},
 		"llm":         configExecutor{},
 		"tool":        configExecutor{},
 	}

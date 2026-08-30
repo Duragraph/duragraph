@@ -81,12 +81,12 @@ func ackDecision(acked bool, epoch, numDelivered, maxDeliver int) decision {
 type runClient interface {
 	RunStarted(ctx context.Context, runID uuid.UUID) (int, error)
 	LoadGraph(ctx context.Context, runID uuid.UUID) (GraphDefinition, error)
-	LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (int, []byte, bool, error)
-	WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) error
+	LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (Checkpoint, bool, error)
+	WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) (int64, error)
 	NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error
 	RunCompleted(ctx context.Context, runID uuid.UUID, epoch int) error
 	RunFailed(ctx context.Context, runID uuid.UUID, epoch int, reason string) error
-	RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state []byte) error
+	RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state, toolCalls []byte) error
 }
 
 // Runner consumes worker.graph.execute commands and walks each run's graph
@@ -208,26 +208,64 @@ func (r *Runner) escalate(ctx context.Context, runID uuid.UUID, epoch int, perr 
 }
 
 // checkpointState is the JSON envelope persisted by WriteCheckpoint and
-// restored by LatestCheckpoint. It captures the full graph-walk state so a
-// redelivery after a crash resumes exactly where it stopped:
+// restored by LatestCheckpoint. The snapshots table stores only (version,
+// state), so every field the spec calls "checkpoint metadata" rides inside this
+// state jsonb — see gen/endpoints.yaml:18 and its write_checkpoint step
+// "Metadata: parent_checkpoint_id, node, channel_versions, pending_sends".
 //
-//   - Channels: the run's channel values (accumulated node writes).
+// Spec-named metadata (graph-engine.d2 §4 checkpoint_mgr.metadata, hitl.d2
+// checkpoint.metadata):
+//
+//   - Node: the boundary node that created this checkpoint — the node that had
+//     just finished when it was written, or "" for a pause taken before any
+//     node ran.
+//   - ParentCheckpointID: the snapshots.id of the checkpoint this one
+//     supersedes (0 for the first), giving the chain its lineage.
 //   - CompletedNodes: node IDs already executed, in completion order. Its
 //     length is the checkpoint version, and it seeds the "already done" set so
-//     completed nodes are never re-run.
-//   - Frontier: node IDs pending execution (FIFO), i.e. the successors
-//     discovered but not yet run.
-//   - Interrupted: the node id the walk is paused at for HITL (interrupt_before),
-//     "" when the run is not paused. When set, that node sits at the head of
-//     Frontier; on resume the runner clears it and executes that node. It is the
-//     redelivery guard: a redelivered run.created finds Interrupted=node and
-//     re-pauses (server-idempotent), while a redelivered run.resumed finds
-//     Interrupted="" (already cleared) and does not re-merge the resume payload.
+//     completed nodes are never re-run ("skipped verbatim on resume").
+//
+// Engine working state (not spec-named, required to make the walk resumable):
+//
+//   - Channels: the run's channel values (accumulated node writes).
+//   - Frontier: node IDs pending execution (FIFO) — the successors discovered
+//     but not yet run.
+//   - Interrupted: the node the walk is parked at for HITL, "" when running.
+//
+// PHASE IS DERIVED, NOT STORED. hitl.d2 resume_behavior step 4 calls
+// checkpoint.node "the interrupted one", which only coincides with the boundary
+// node for a pause taken AFTER a node completes. So:
+//
+//	Interrupted == Node  → parked AFTER Node ran (interrupt_after /
+//	                       requires_human / tool_calls); it is in CompletedNodes
+//	                       and its successors are deliberately NOT yet on
+//	                       Frontier — routing is deferred until the resume
+//	                       patches channels (see ProcessOne).
+//	Interrupted != Node  → parked BEFORE Interrupted runs (interrupt_before /
+//	                       a human node); it is NOT in CompletedNodes and sits at
+//	                       the head of Frontier.
+//
+// Interrupted is also the redelivery guard, and it must live HERE rather than
+// be re-derived from the interrupts table: the checkpoint is written BEFORE
+// RequiresAction announces the pause, so in the window where the checkpoint
+// committed but the announce failed there is no interrupts row to find — yet
+// the run is genuinely parked and must not walk on.
 type checkpointState struct {
-	Channels       map[string]any `json:"channels"`
-	CompletedNodes []string       `json:"completed_nodes"`
-	Frontier       []string       `json:"frontier"`
-	Interrupted    string         `json:"interrupted,omitempty"`
+	Channels           map[string]any `json:"channels"`
+	CompletedNodes     []string       `json:"completed_nodes"`
+	Frontier           []string       `json:"frontier"`
+	Node               string         `json:"node,omitempty"`
+	ParentCheckpointID int64          `json:"parent_checkpoint_id,omitempty"`
+	Interrupted        string         `json:"interrupted,omitempty"`
+}
+
+// pausedAfter reports whether this checkpoint was taken AFTER its boundary node
+// completed, as opposed to before the interrupted node ran. A checkpoint that
+// is not a pause at all is never "after": without the Interrupted guard an
+// ordinary checkpoint taken before any node ran (Node == "") would compare
+// equal to an empty Interrupted and report a pause that does not exist.
+func (cp checkpointState) pausedAfter() bool {
+	return cp.Interrupted != "" && cp.Interrupted == cp.Node
 }
 
 // ProcessOne walks cmd's run graph with checkpoint resume, following the
@@ -268,20 +306,25 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 	var completed []string
 	completedSet := map[string]bool{}
 	var frontier []string
-	// interrupted is the node the walk is paused at for HITL (from the restored
-	// checkpoint); "" when not paused. resumedPast records nodes whose pause has
-	// already been satisfied by a resume this delivery, so the walk executes
-	// them instead of re-pausing.
+	// interrupted is the node the walk is parked at for HITL (from the restored
+	// checkpoint); "" when not parked. pausedAfter distinguishes a pause taken
+	// after that node completed from one taken before it ran (derived, see
+	// checkpointState). parentCheckpointID chains the next checkpoint to the one
+	// we restored. resumedPast records nodes whose pause has already been
+	// satisfied by a resume this delivery, so the walk executes them instead of
+	// re-pausing.
 	interrupted := ""
+	pausedAfter := false
+	var parentCheckpointID int64
 	resumedPast := map[string]bool{}
 
-	_, raw, found, lerr := r.cl.LatestCheckpoint(ctx, cmd.ThreadID, cmd.RunID)
+	restored, found, lerr := r.cl.LatestCheckpoint(ctx, cmd.ThreadID, cmd.RunID)
 	if lerr != nil {
 		return false, epoch, lerr // transient — Nak, redeliver
 	}
-	if found && len(raw) > 0 {
+	if found && len(restored.State) > 0 {
 		var cp checkpointState
-		if uerr := json.Unmarshal(raw, &cp); uerr != nil {
+		if uerr := json.Unmarshal(restored.State, &cp); uerr != nil {
 			return false, epoch, fmt.Errorf("runner: decode checkpoint state: %w", uerr)
 		}
 		if cp.Channels != nil {
@@ -293,6 +336,8 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		}
 		frontier = cp.Frontier
 		interrupted = cp.Interrupted
+		pausedAfter = cp.pausedAfter()
+		parentCheckpointID = restored.ID
 	} else {
 		// Fresh run: seed channels from the command input, frontier from the
 		// graph's entry nodes.
@@ -327,8 +372,55 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		for k, v := range command.Update {
 			channels[k] = v
 		}
+		// Expand the routing that was deferred at a pause-after, now that the
+		// human's patch is merged: the paused node's edges are evaluated
+		// against the UPDATED channels, which is what lets a conditional edge
+		// out of that node depend on the answer. Prepended so this branch
+		// continues ahead of anything queued from a parallel branch.
+		if pausedAfter {
+			succs, serr := graph.successors(interrupted, channels)
+			if serr != nil {
+				return r.failRun(ctx, cmd.RunID, epoch, serr.Error())
+			}
+			frontier = append(succs, frontier...)
+		}
+		// A pause taken AFTER the node ran needs no resumedPast entry (the node
+		// is already in completedSet), but recording it is harmless and keeps
+		// the two phases symmetric.
 		resumedPast[interrupted] = true
 		interrupted = ""
+		pausedAfter = false
+	}
+
+	// Still parked: the restored checkpoint carries a pause this delivery did
+	// not clear — no resume command arrived, or one arrived for a run that is
+	// not paused. Re-announce and ack rather than walking on.
+	//
+	// This is what closes the gap between WriteCheckpoint and RequiresAction. A
+	// transient RequiresAction failure Naks; on redelivery RunStarted still
+	// succeeds (the status flip never happened, so the run is
+	// in_progress, not requires_action) and the walk would otherwise resume —
+	// harmlessly for a pause-BEFORE, whose node is not in completedSet and so
+	// re-triggers in the loop below, but incorrectly for a pause-AFTER, whose
+	// node IS completed and would be skipped straight past its own interrupt.
+	//
+	// Re-announcing is safe under redelivery: the server's interrupt INSERT is
+	// guarded by NOT EXISTS on an unresolved (run_id, node_id) and its status
+	// UPDATE tolerates a run already in requires_action (workers.go
+	// requiresActionRun).
+	if interrupted != "" {
+		reason, toolCalls := r.pauseAnnouncement(graph, interrupted, pausedAfter, channels)
+		channelsJSON, merr := json.Marshal(channels)
+		if merr != nil {
+			return false, epoch, fmt.Errorf("runner: encode parked state: %w", merr)
+		}
+		if aerr := r.cl.RequiresAction(ctx, cmd.RunID, epoch, interrupted, reason, channelsJSON, toolCalls); aerr != nil {
+			if errors.Is(aerr, ErrStaleLease) {
+				return true, epoch, nil // superseded — stop, ack
+			}
+			return false, epoch, aerr // transient — Nak, redeliver
+		}
+		return true, epoch, nil // still parked — ack, await run.resumed
 	}
 
 	maxIter := graph.maxIterations()
@@ -368,26 +460,31 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		// cmd.Resume set (handled before the loop).
 		if node.interruptsBefore() && !resumedPast[nodeID] {
 			pauseFrontier := append([]string{nodeID}, frontier...)
-			channelsJSON, merr := json.Marshal(channels)
-			if merr != nil {
-				return false, epoch, fmt.Errorf("runner: encode interrupt state: %w", merr)
-			}
+			// Node is the boundary node — the one that last completed, NOT the
+			// node we are pausing before. Interrupted != Node is exactly what
+			// marks this as a pause-BEFORE on restore.
 			pauseJSON, merr := json.Marshal(checkpointState{
-				Channels:       channels,
-				CompletedNodes: completed,
-				Frontier:       pauseFrontier,
-				Interrupted:    nodeID,
+				Channels:           channels,
+				CompletedNodes:     completed,
+				Frontier:           pauseFrontier,
+				Node:               lastNode(completed),
+				ParentCheckpointID: parentCheckpointID,
+				Interrupted:        nodeID,
 			})
 			if merr != nil {
 				return false, epoch, fmt.Errorf("runner: encode pause checkpoint: %w", merr)
 			}
-			if werr := r.cl.WriteCheckpoint(ctx, cmd.ThreadID, cmd.RunID, epoch, len(completed), pauseJSON); werr != nil {
+			channelsJSON, merr := json.Marshal(channels)
+			if merr != nil {
+				return false, epoch, fmt.Errorf("runner: encode interrupt state: %w", merr)
+			}
+			if _, werr := r.cl.WriteCheckpoint(ctx, cmd.ThreadID, cmd.RunID, epoch, len(completed), pauseJSON); werr != nil {
 				if errors.Is(werr, ErrStaleLease) {
 					return true, epoch, nil // superseded — stop, ack
 				}
 				return false, epoch, werr // transient — Nak, redeliver
 			}
-			if aerr := r.cl.RequiresAction(ctx, cmd.RunID, epoch, nodeID, node.interruptReason(), channelsJSON); aerr != nil {
+			if aerr := r.cl.RequiresAction(ctx, cmd.RunID, epoch, nodeID, node.interruptReason(), channelsJSON, nil); aerr != nil {
 				if errors.Is(aerr, ErrStaleLease) {
 					return true, epoch, nil
 				}
@@ -413,32 +510,80 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		completed = append(completed, nodeID)
 		completedSet[nodeID] = true
 
-		succs, serr := graph.successors(nodeID, channels)
-		if serr != nil {
-			return r.failRun(ctx, cmd.RunID, epoch, serr.Error())
+		// HITL post-execution triggers (interrupt_after / requires_human /
+		// pending tool_calls). The node has run and its writes are merged, so it
+		// is already in completed — the pause boundary sits between it and its
+		// successors. Fold the marker into the checkpoint this node boundary
+		// writes anyway, so the pause is ONE atomic write rather than two.
+		// Interrupted == Node marks it a pause-AFTER on restore.
+		pauseAfter, pauseReason := node.pausesAfter(writes)
+		markInterrupted := ""
+
+		if pauseAfter {
+			// ROUTING IS DEFERRED across a pause-after. Evaluating this node's
+			// edges now would decide the route from PRE-approval state — but the
+			// entire point of pausing after a node is that a human then changes
+			// that state, and a conditional edge out of the paused node is
+			// exactly the state they are being asked about. Expanding here would
+			// silently drop such an edge (its condition is false until the
+			// human answers) and the run would resume with nothing to walk.
+			// Successors are expanded on resume instead, against patched
+			// channels. Any OTHER branch already on the frontier stays queued.
+			markInterrupted = nodeID
+		} else {
+			succs, serr := graph.successors(nodeID, channels)
+			if serr != nil {
+				return r.failRun(ctx, cmd.RunID, epoch, serr.Error())
+			}
+			frontier = append(frontier, succs...)
 		}
-		frontier = append(frontier, succs...)
 
 		stateJSON, merr := json.Marshal(checkpointState{
-			Channels:       channels,
-			CompletedNodes: completed,
-			Frontier:       frontier,
-			Interrupted:    interrupted, // "" here — executing past a resumed node clears the marker
+			Channels:           channels,
+			CompletedNodes:     completed,
+			Frontier:           frontier,
+			Node:               nodeID,
+			ParentCheckpointID: parentCheckpointID,
+			Interrupted:        markInterrupted,
 		})
 		if merr != nil {
 			return false, epoch, fmt.Errorf("runner: encode checkpoint state: %w", merr)
 		}
-		if werr := r.cl.WriteCheckpoint(ctx, cmd.ThreadID, cmd.RunID, epoch, len(completed), stateJSON); werr != nil {
+		ckptID, werr := r.cl.WriteCheckpoint(ctx, cmd.ThreadID, cmd.RunID, epoch, len(completed), stateJSON)
+		if werr != nil {
 			if errors.Is(werr, ErrStaleLease) {
 				return true, epoch, nil // superseded by a newer lease — stop, ack
 			}
 			return false, epoch, werr // transient — Nak, redeliver
 		}
+		parentCheckpointID = ckptID
 		if nerr := r.cl.NodeCompleted(ctx, cmd.RunID, epoch, node.ID, node.Type); nerr != nil {
 			if errors.Is(nerr, ErrStaleLease) {
 				return true, epoch, nil
 			}
 			return false, epoch, nerr
+		}
+
+		// Announce the pause only after NodeCompleted, so execution_history
+		// records that the node genuinely ran before the run parked.
+		if pauseAfter {
+			channelsJSON, merr := json.Marshal(channels)
+			if merr != nil {
+				return false, epoch, fmt.Errorf("runner: encode interrupt state: %w", merr)
+			}
+			var toolCalls []byte
+			if calls := node.toolCalls(writes); len(calls) > 0 {
+				if toolCalls, merr = json.Marshal(calls); merr != nil {
+					return false, epoch, fmt.Errorf("runner: encode tool_calls: %w", merr)
+				}
+			}
+			if aerr := r.cl.RequiresAction(ctx, cmd.RunID, epoch, nodeID, pauseReason, channelsJSON, toolCalls); aerr != nil {
+				if errors.Is(aerr, ErrStaleLease) {
+					return true, epoch, nil
+				}
+				return false, epoch, aerr // transient — Nak, redeliver
+			}
+			return true, epoch, nil // parked after this node — ack, await run.resumed
 		}
 	}
 
@@ -449,6 +594,54 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		return false, epoch, cerr
 	}
 	return true, epoch, nil
+}
+
+// lastNode returns the most recently completed node id, or "" when nothing has
+// completed yet. That is the "boundary node that created this checkpoint" of
+// graph-engine.d2 §4.
+func lastNode(completed []string) string {
+	if len(completed) == 0 {
+		return ""
+	}
+	return completed[len(completed)-1]
+}
+
+// pauseAnnouncement recovers the interrupts.reason and tool_calls payload for a
+// run that is being RE-announced from a restored checkpoint (the pause was
+// checkpointed but its announce did not land). The trigger inputs themselves
+// are not stored — they are recomputed from the parked node and the channel
+// state:
+//
+//   - pause-AFTER: the node's writes were merged into channels before the
+//     checkpoint, so re-running the pausesAfter precedence over channels yields
+//     the same reason and tool_calls it did originally. The one imprecision is
+//     that a tool_calls or requires_human value arriving in the RUN'S INPUT
+//     would be attributed to the node here; that only affects which reason
+//     label a re-announce writes, and only in the window where no interrupts
+//     row exists yet (once it does, the server's NOT EXISTS guard ignores what
+//     we send).
+//   - pause-BEFORE: nothing has been computed by the node yet, so the reason is
+//     its configured one.
+//
+// An unknown node (the graph changed under a parked run) degrades to
+// approval_required rather than failing the run — the run IS parked, and
+// re-announcing that fact is strictly better than dropping it.
+func (r *Runner) pauseAnnouncement(graph GraphDefinition, nodeID string, pausedAfter bool, channels map[string]any) (reason string, toolCalls []byte) {
+	node, ok := graph.node(nodeID)
+	if !ok {
+		return reasonApprovalRequired, nil
+	}
+	if !pausedAfter {
+		return node.interruptReason(), nil
+	}
+	_, reason = node.pausesAfter(channels)
+	if reason == "" {
+		reason = node.interruptReason()
+	}
+	if calls := node.toolCalls(channels); len(calls) > 0 {
+		toolCalls, _ = json.Marshal(calls)
+	}
+	return reason, toolCalls
 }
 
 // failRun records a deterministic (poison) failure as run.failed and returns

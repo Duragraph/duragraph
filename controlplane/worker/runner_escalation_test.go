@@ -30,12 +30,12 @@ func (c *stubEscalationClient) LoadGraph(ctx context.Context, runID uuid.UUID) (
 	return GraphDefinition{Nodes: []Node{{ID: "A", Type: "tool"}}}, nil
 }
 
-func (c *stubEscalationClient) LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (int, []byte, bool, error) {
-	return 0, nil, false, nil
+func (c *stubEscalationClient) LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (Checkpoint, bool, error) {
+	return Checkpoint{}, false, nil
 }
 
-func (c *stubEscalationClient) WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) error {
-	return errors.New("transient: write checkpoint boom")
+func (c *stubEscalationClient) WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) (int64, error) {
+	return 0, errors.New("transient: write checkpoint boom")
 }
 
 func (c *stubEscalationClient) NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error {
@@ -52,7 +52,7 @@ func (c *stubEscalationClient) RunFailed(ctx context.Context, runID uuid.UUID, e
 	return nil
 }
 
-func (c *stubEscalationClient) RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state []byte) error {
+func (c *stubEscalationClient) RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state, toolCalls []byte) error {
 	return nil
 }
 

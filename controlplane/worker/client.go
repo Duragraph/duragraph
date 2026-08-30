@@ -110,42 +110,63 @@ func (c *Client) RunFailed(ctx context.Context, runID uuid.UUID, epoch int, reas
 // RequiresAction suspends runID for human-in-the-loop, fenced on epoch: the
 // server flips the run to requires_action and records the interrupt row. nodeID
 // is the node the run paused at, reason is one of the interrupts.reason CHECK
-// values (tool_call|approval_required|input_needed), and state is the
-// checkpointed channel state at the pause point.
-func (c *Client) RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state []byte) error {
-	body := eventsRequest{Events: []workerEvent{{
+// values (tool_call|approval_required|input_needed), state is the checkpointed
+// channel state at the pause point, and toolCalls is the optional pending
+// tool-call payload persisted to interrupts.tool_calls (hitl.d2 on_interrupt
+// step 2 "INSERT interrupt: run_id, node_id, reason, tool_calls"). A nil
+// toolCalls is omitted from the request, leaving the column NULL.
+func (c *Client) RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state, toolCalls []byte) error {
+	ev := workerEvent{
 		Type:       "run.requires_action",
 		LeaseEpoch: epoch,
 		NodeID:     nodeID,
 		Reason:     reason,
 		State:      json.RawMessage(state),
-	}}}
-	_, err := c.doJSON(ctx, http.MethodPost, c.eventsPath(runID), body, nil)
+	}
+	if len(toolCalls) > 0 {
+		ev.ToolCalls = json.RawMessage(toolCalls)
+	}
+	_, err := c.doJSON(ctx, http.MethodPost, c.eventsPath(runID), eventsRequest{Events: []workerEvent{ev}}, nil)
 	return err
 }
 
-// WriteCheckpoint upserts a run snapshot, fenced on epoch.
-// POST /api/v1/threads/{tid}/checkpoints.
-func (c *Client) WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) error {
+// WriteCheckpoint upserts a run snapshot, fenced on epoch, and returns the
+// snapshot's id. The caller threads that id into the NEXT checkpoint's
+// parent_checkpoint_id, which is what gives the checkpoint chain its lineage
+// (graph-engine.d2 §4 checkpoint_mgr.metadata).
+// POST /api/v1/threads/{tid}/checkpoints -> {checkpoint_id}.
+func (c *Client) WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) (int64, error) {
 	body := checkpointWriteRequest{RunID: runID, LeaseEpoch: epoch, Version: version, State: json.RawMessage(state)}
-	_, err := c.doJSON(ctx, http.MethodPost, "/api/v1/threads/"+threadID.String()+"/checkpoints", body, nil)
-	return err
+	var resp checkpointWriteResponse
+	if _, err := c.doJSON(ctx, http.MethodPost, "/api/v1/threads/"+threadID.String()+"/checkpoints", body, &resp); err != nil {
+		return 0, err
+	}
+	return resp.CheckpointID, nil
+}
+
+// Checkpoint is a restored run snapshot: the snapshots row id (which becomes
+// the parent_checkpoint_id of the next checkpoint written), its version, and
+// the raw state jsonb carrying the checkpointState envelope.
+type Checkpoint struct {
+	ID      int64
+	Version int
+	State   []byte
 }
 
 // LatestCheckpoint fetches the highest-version snapshot for runID, for worker
 // resume. GET /api/v1/threads/{tid}/checkpoints/latest?run_id={rid}. A 404
 // (no checkpoint yet) is not an error: found is false, err is nil.
-func (c *Client) LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (version int, state []byte, found bool, err error) {
+func (c *Client) LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (cp Checkpoint, found bool, err error) {
 	path := "/api/v1/threads/" + threadID.String() + "/checkpoints/latest?run_id=" + runID.String()
 	var resp checkpointResponse
 	status, err := c.doJSON(ctx, http.MethodGet, path, nil, &resp)
 	if err != nil {
 		if status == http.StatusNotFound {
-			return 0, nil, false, nil
+			return Checkpoint{}, false, nil
 		}
-		return 0, nil, false, err
+		return Checkpoint{}, false, err
 	}
-	return resp.Version, []byte(resp.State), true, nil
+	return Checkpoint{ID: resp.CheckpointID, Version: resp.Version, State: []byte(resp.State)}, true, nil
 }
 
 // LoadGraph fetches the GraphDefinition the worker must execute for runID: the
