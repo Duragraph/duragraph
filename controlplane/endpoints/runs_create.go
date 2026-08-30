@@ -94,7 +94,7 @@ func (s *Server) RunsCreateOnThread(c echo.Context) error {
 	}
 	// Validate the run-level interrupt spec BEFORE the write, so a malformed
 	// one 422s without appending an event that would have to be rolled back.
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
 	if err != nil {
 		return interruptSpecHTTPError(err)
 	}
@@ -132,7 +132,7 @@ func (s *Server) RunsCreateStateless(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
 	if err != nil {
 		return interruptSpecHTTPError(err)
 	}

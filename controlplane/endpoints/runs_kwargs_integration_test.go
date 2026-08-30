@@ -114,6 +114,89 @@ func TestRunCreatePersistsInterruptSpec(t *testing.T) {
 	}
 }
 
+// TestRunCreatePersistsCommand proves RunCreate.command survives create. It is
+// declared on RunCreateStateful/RunCreateStateless and was in the generated
+// types all along, but no handler read it, so it vanished behind a 201.
+func TestRunCreatePersistsCommand(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, "TRUNCATE threads, runs, snapshots, assistants, events, outbox, event_streams CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	e := newTestServerWithTenantWrites()
+	aid := seedAssistantGraph(t, ctx, "agent", "a", "2020-01-01T00:00:00Z")
+
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs", bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := post(fmt.Sprintf(
+		`{"assistant_id":%q,"command":{"goto":"b","update":{"x":1}}}`, aid))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create with command: want 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var run Run
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var raw []byte
+	if err := testPool.QueryRow(ctx, `SELECT kwargs FROM runs WHERE id=$1`, run.RunId).Scan(&raw); err != nil {
+		t.Fatalf("select kwargs: %v", err)
+	}
+	var kw struct {
+		Command map[string]any `json:"command"`
+	}
+	if err := json.Unmarshal(raw, &kw); err != nil {
+		t.Fatalf("decode kwargs: %v", err)
+	}
+	if kw.Command["goto"] != "b" {
+		t.Errorf("kwargs.command.goto: want b, got %v", kw.Command["goto"])
+	}
+	if upd, _ := kw.Command["update"].(map[string]any); upd["x"] != float64(1) {
+		t.Errorf("kwargs.command.update: want {x:1}, got %v", kw.Command["update"])
+	}
+
+	// An empty command stores nothing, so the run is indistinguishable from one
+	// created without the field at all.
+	rec = post(fmt.Sprintf(`{"assistant_id":%q,"command":{}}`, aid))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("empty command: want 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT kwargs FROM runs WHERE id=$1`, run.RunId).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "{}" {
+		t.Errorf("empty command must store nothing, got kwargs %s", raw)
+	}
+
+	// A value that is not an object violates the schema (Command is
+	// type: object) and is rejected.
+	for _, bad := range []string{
+		`{"assistant_id":%q,"command":"not-an-object"}`,
+		`{"assistant_id":%q,"command":[1,2]}`,
+		`{"assistant_id":%q,"command":7}`,
+	} {
+		if rec := post(fmt.Sprintf(bad, aid)); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: want 422, got %d: %s", bad, rec.Code, rec.Body.String())
+		}
+	}
+
+	// An UNKNOWN field is accepted, not rejected: the Command schema does not
+	// set additionalProperties: false, so refusing it would be stricter than the
+	// contract and would break a client using a newer Command field. It is
+	// stored verbatim and is inert at execution.
+	rec = post(fmt.Sprintf(`{"assistant_id":%q,"command":{"future_field":true}}`, aid))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("unknown command field: want 201 (additionalProperties permitted), got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestRunCreateRejectsBadInterruptSpec pins that a value which parses as JSON
 // but violates the schema's anyOf is 422 (unprocessable), not a 500 and not a
 // silent drop — and that the rejection happens BEFORE any write, so no run and

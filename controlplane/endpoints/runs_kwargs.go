@@ -35,8 +35,49 @@ var errInterruptSpecInvalid = errors.New("invalid interrupt spec")
 // runKwargs is the persisted shape of runs.kwargs. Fields are omitted when
 // absent so a run created without them stores {} rather than a bag of nulls.
 type runKwargs struct {
-	InterruptBefore any `json:"interrupt_before,omitempty"`
-	InterruptAfter  any `json:"interrupt_after,omitempty"`
+	InterruptBefore any             `json:"interrupt_before,omitempty"`
+	InterruptAfter  any             `json:"interrupt_after,omitempty"`
+	Command         json.RawMessage `json:"command,omitempty"`
+}
+
+// normalizeCommand validates RunCreate.command — a LangGraph Command supplied
+// at CREATE time rather than at resume. The schema is `anyOf: [Command, null]`,
+// so the only structural requirement is that it be a JSON object; its fields
+// (update / resume / goto) are the worker's contract and are decoded there
+// (worker/command.go), which is also where an unknown goto target is caught
+// against the actual graph.
+//
+// Validating shape here rather than semantics keeps the split honest: the
+// server knows the wire schema, only the worker knows the graph.
+func normalizeCommand(v any) (json.RawMessage, error) {
+	if v == nil {
+		return nil, nil
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: command: want an object, got %T", errInterruptSpecInvalid, v)
+	}
+	if len(obj) == 0 {
+		// An empty command is inert; store nothing rather than an empty object
+		// so the run looks identical to one created without a command.
+		return nil, nil
+	}
+	// Unknown fields are deliberately ACCEPTED and stored, not rejected. The
+	// Command schema does not set additionalProperties: false, and in OpenAPI an
+	// absent additionalProperties means extra properties are permitted — so
+	// 422ing them would be stricter than the contract and would break a client
+	// written against a later Command with a field we do not know yet. They are
+	// inert: the worker decodes only update/resume/goto (worker/command.go).
+	//
+	// The cost is that a typo such as {"resmue": ...} is silently ineffective.
+	// That is the contract's tradeoff to make, not this handler's — contrast
+	// interrupt_before, where rejection IS schema-mandated because its string
+	// branch is an explicit single-value enum.
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("%w: command: %s", errInterruptSpecInvalid, err)
+	}
+	return b, nil
 }
 
 // normalizeInterruptSpec validates one run-level interrupt field and returns
@@ -75,11 +116,11 @@ func normalizeInterruptSpec(field string, v any) (any, error) {
 	}
 }
 
-// buildRunKwargs validates the run-level interrupt fields and renders the
-// runs.kwargs jsonb. Absent on both sides yields "{}" — the column default —
-// so a run that sets neither is indistinguishable from one created before this
-// slice existed.
-func buildRunKwargs(interruptBefore, interruptAfter any) ([]byte, error) {
+// buildRunKwargs validates the run-level LangGraph fields and renders the
+// runs.kwargs jsonb. All absent yields "{}" — the column default — so a run
+// that sets none is indistinguishable from one created before these fields
+// were honored.
+func buildRunKwargs(interruptBefore, interruptAfter, command any) ([]byte, error) {
 	before, err := normalizeInterruptSpec("interrupt_before", interruptBefore)
 	if err != nil {
 		return nil, err
@@ -88,10 +129,14 @@ func buildRunKwargs(interruptBefore, interruptAfter any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if before == nil && after == nil {
+	cmd, err := normalizeCommand(command)
+	if err != nil {
+		return nil, err
+	}
+	if before == nil && after == nil && cmd == nil {
 		return []byte("{}"), nil
 	}
-	b, err := json.Marshal(runKwargs{InterruptBefore: before, InterruptAfter: after})
+	b, err := json.Marshal(runKwargs{InterruptBefore: before, InterruptAfter: after, Command: cmd})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", errInterruptSpecInvalid, err)
 	}

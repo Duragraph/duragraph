@@ -296,7 +296,7 @@ func (s *Server) RunsCreateAndStream(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
 	if err != nil {
 		return interruptSpecHTTPError(err)
 	}
@@ -322,7 +322,7 @@ func (s *Server) RunsStatelessStream(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
 	if err != nil {
 		return interruptSpecHTTPError(err)
 	}
@@ -439,7 +439,7 @@ func (s *Server) RunsStatelessWait(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
 	if err != nil {
 		return interruptSpecHTTPError(err)
 	}

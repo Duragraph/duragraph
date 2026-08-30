@@ -367,6 +367,34 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 			}
 		}
 		frontier = graph.entryNodes()
+
+		// RunCreate.command: a LangGraph Command supplied at CREATE time. It is
+		// applied ONLY on a fresh walk — inside this branch, so a redelivery
+		// that restores a checkpoint cannot re-apply it and re-seed state the
+		// walk has since moved past.
+		//
+		// Applied AFTER input seeding so an explicit command.update wins over
+		// the same key in input, and its goto replaces the graph's entry nodes
+		// (start this run at a named node instead of the beginning) rather than
+		// adding to them.
+		if raw := decodeCreateCommand(cmd.Kwargs); raw != nil {
+			var create resumeCommand
+			if uerr := json.Unmarshal(raw, &create); uerr != nil {
+				return false, epoch, fmt.Errorf("runner: decode create command: %w", uerr)
+			}
+			targets, aerr := create.apply(channels)
+			if aerr != nil {
+				return r.failRun(ctx, cmd.RunID, epoch, aerr.Error())
+			}
+			if len(targets.Nodes) > 0 {
+				for _, n := range targets.Nodes {
+					if _, ok := graph.node(n); !ok {
+						return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("command.goto names unknown node %q", n))
+					}
+				}
+				frontier = targets.Nodes
+			}
+		}
 	}
 
 	// HITL resume: a run.resumed dispatch carries cmd.Resume, the LangGraph

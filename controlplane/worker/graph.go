@@ -126,6 +126,27 @@ func contains(list []string, s string) bool {
 	return false
 }
 
+// decodeCreateCommand reads RunCreate.command out of the run-kwargs bag — a
+// LangGraph Command supplied at CREATE time rather than at resume. Returns nil
+// when the run carried none. The server validated its shape at create
+// (endpoints normalizeCommand); its fields are decoded by resumeCommand, the
+// same type the resume path uses, so create and resume cannot drift.
+func decodeCreateCommand(kwargs json.RawMessage) json.RawMessage {
+	if len(kwargs) == 0 {
+		return nil
+	}
+	var bag struct {
+		Command json.RawMessage `json:"command,omitempty"`
+	}
+	if err := json.Unmarshal(kwargs, &bag); err != nil {
+		return nil
+	}
+	if len(bag.Command) == 0 || string(bag.Command) == "null" {
+		return nil
+	}
+	return bag.Command
+}
+
 // decodeInterruptPolicy reads the run-kwargs bag into an interruptPolicy. A
 // malformed bag is NOT an error: the server validated the spec at create time,
 // so anything unreadable here is a corrupt or hand-edited row, and dropping a
