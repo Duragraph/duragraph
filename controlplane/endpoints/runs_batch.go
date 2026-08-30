@@ -29,13 +29,22 @@ func (s *Server) RunsBatchCreate(c echo.Context) error {
 
 	// Resolve every assistant reference (UUID or graph name) up front so an
 	// unknown graph fails the whole batch before any event is appended.
+	// Run-level interrupt specs are validated in the same up-front pass, so one
+	// malformed member rejects the whole batch atomically — matching how an
+	// unknown graph already behaves — rather than half-writing it.
 	assistantIDs := make([]uuid.UUID, len(req))
+	kwargs := make([][]byte, len(req))
 	for i, r := range req {
 		aid, err := s.resolveAssistantRef(ctx, r.AssistantId)
 		if err != nil {
 			return assistantRefHTTPError(err)
 		}
 		assistantIDs[i] = aid
+		kw, err := buildRunKwargs(r.InterruptBefore, r.InterruptAfter)
+		if err != nil {
+			return interruptSpecHTTPError(err)
+		}
+		kwargs[i] = kw
 	}
 
 	// Pre-mint an id per run so the run.created events (built before the TX
@@ -55,9 +64,9 @@ func (s *Server) RunsBatchCreate(c echo.Context) error {
 	out := make([]Run, 0, len(req))
 	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
 		for i, r := range req {
-			rows, err := tx.Query(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata)
-VALUES ($1, $2, 'queued', $3, $4)
-RETURNING `+runReturningColumns, ids[i], assistantIDs[i], mustJSON(r.Input), mustJSON(r.Metadata))
+			rows, err := tx.Query(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata, kwargs)
+VALUES ($1, $2, 'queued', $3, $4, $5)
+RETURNING `+runReturningColumns, ids[i], assistantIDs[i], mustJSON(r.Input), mustJSON(r.Metadata), kwargs[i])
 			if err != nil {
 				return err
 			}

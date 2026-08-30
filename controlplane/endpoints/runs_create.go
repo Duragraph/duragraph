@@ -92,6 +92,12 @@ func (s *Server) RunsCreateOnThread(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
+	// Validate the run-level interrupt spec BEFORE the write, so a malformed
+	// one 422s without appending an event that would have to be rolled back.
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
 
 	aggID := uuid.New()
 	events := []Event{
@@ -99,10 +105,10 @@ func (s *Server) RunsCreateOnThread(c echo.Context) error {
 	}
 	var row runRow
 	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata)
-VALUES ($1, $2, $3, 'queued', $4, $5)
+		rows, err := tx.Query(ctx, `INSERT INTO runs (id, thread_id, assistant_id, status, input, metadata, kwargs)
+VALUES ($1, $2, $3, 'queued', $4, $5, $6)
 RETURNING `+runReturningColumns,
-			aggID, pathID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata))
+			aggID, pathID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata), kwargs)
 		if err != nil {
 			return err
 		}
@@ -126,6 +132,10 @@ func (s *Server) RunsCreateStateless(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
 
 	aggID := uuid.New()
 	events := []Event{
@@ -133,10 +143,10 @@ func (s *Server) RunsCreateStateless(c echo.Context) error {
 	}
 	var row runRow
 	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata)
-VALUES ($1, $2, 'queued', $3, $4)
+		rows, err := tx.Query(ctx, `INSERT INTO runs (id, assistant_id, status, input, metadata, kwargs)
+VALUES ($1, $2, 'queued', $3, $4, $5)
 RETURNING `+runReturningColumns,
-			aggID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata))
+			aggID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata), kwargs)
 		if err != nil {
 			return err
 		}

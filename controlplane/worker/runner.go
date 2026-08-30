@@ -139,6 +139,13 @@ type GraphCommand struct {
 	GraphID     string          `json:"graph_id,omitempty"`
 	Input       json.RawMessage `json:"input,omitempty"`
 
+	// Kwargs is the run's LangGraph run-kwargs bag (runs.kwargs), carrying the
+	// knobs the CALLER set at create time rather than the ones the graph author
+	// baked into the node config — currently interrupt_before / interrupt_after.
+	// Absent when the run set none. See interruptPolicy (graph.go) for how the
+	// two axes combine.
+	Kwargs json.RawMessage `json:"kwargs,omitempty"`
+
 	// Resume is the LangGraph-style resume command carried by a run.resumed
 	// dispatch (nats.RunProcessor sets it from the run.resumed event payload's
 	// `command`). Present only when continuing a run that was paused at an
@@ -306,6 +313,10 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		// to run.failed via ackDecision.
 		return false, epoch, gerr
 	}
+
+	// Run-level interrupt spec from the caller's RunCreate, unioned with each
+	// node's own config during the walk (see graph.go interruptPolicy).
+	policy := decodeInterruptPolicy(cmd.Kwargs)
 
 	// Restore the walk state from the latest checkpoint, or start fresh.
 	channels := map[string]any{}
@@ -480,7 +491,7 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		// run to requires_action (+ record the interrupt), then park (ack). The
 		// run continues when a run.resumed redelivers this command with
 		// cmd.Resume set (handled before the loop).
-		if node.interruptsBefore() && !resumedPast[nodeID] {
+		if (node.interruptsBefore() || policy.interruptsBefore(nodeID)) && !resumedPast[nodeID] {
 			pauseFrontier := append([]string{nodeID}, frontier...)
 			// Node is the boundary node — the one that last completed, NOT the
 			// node we are pausing before. Interrupted != Node is exactly what
@@ -539,6 +550,11 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		// writes anyway, so the pause is ONE atomic write rather than two.
 		// Interrupted == Node marks it a pause-AFTER on restore.
 		pauseAfter, pauseReason := node.pausesAfter(writes)
+		if !pauseAfter && policy.interruptsAfter(nodeID) {
+			// The caller named this node on the run, even though the graph
+			// definition did not mark it.
+			pauseAfter, pauseReason = true, node.interruptReason()
+		}
 		markInterrupted := ""
 
 		if pauseAfter {
@@ -658,6 +674,9 @@ func (r *Runner) pauseAnnouncement(graph GraphDefinition, nodeID string, pausedA
 	}
 	_, reason = node.pausesAfter(channels)
 	if reason == "" {
+		// Either the trigger was the run-level spec (which carries no reason of
+		// its own) or the recomputation came up empty; the node's configured
+		// reason is the right fallback for both.
 		reason = node.interruptReason()
 	}
 	if calls := node.toolCalls(channels); len(calls) > 0 {

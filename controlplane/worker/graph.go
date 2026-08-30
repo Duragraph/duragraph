@@ -18,6 +18,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -84,6 +85,87 @@ func (n Node) interruptsAfter() bool {
 	v, _ := n.Config["interrupt_after"].(bool)
 	return v
 }
+
+// interruptPolicy is the RUN-LEVEL interrupt spec, from the caller's
+// RunCreate.interrupt_before / interrupt_after (persisted to runs.kwargs and
+// forwarded on GraphCommand.Kwargs). It is a second, independent axis from the
+// per-node config above: the graph author marks nodes in the definition, while
+// a caller names nodes for one run only. Neither overrides the other — a node
+// pauses if EITHER says so, because both are affirmative statements that a
+// human should see this node, and honouring only one would silently discard the
+// other party's intent.
+//
+// Each field is nil (unset), the "*" wildcard, or an explicit node list, per the
+// OpenAPI anyOf. Validation happens server-side at create (endpoints
+// normalizeInterruptSpec), so anything arriving here has already been checked.
+type interruptPolicy struct {
+	Before []string
+	After  []string
+	// AllBefore/AllAfter record the "*" wildcard, which matches every node —
+	// distinct from an empty list, which matches none.
+	AllBefore bool
+	AllAfter  bool
+}
+
+// interruptsBefore reports whether the run-level spec names this node.
+func (p interruptPolicy) interruptsBefore(nodeID string) bool {
+	return p.AllBefore || contains(p.Before, nodeID)
+}
+
+// interruptsAfter reports whether the run-level spec names this node.
+func (p interruptPolicy) interruptsAfter(nodeID string) bool {
+	return p.AllAfter || contains(p.After, nodeID)
+}
+
+func contains(list []string, s string) bool {
+	for _, e := range list {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
+// decodeInterruptPolicy reads the run-kwargs bag into an interruptPolicy. A
+// malformed bag is NOT an error: the server validated the spec at create time,
+// so anything unreadable here is a corrupt or hand-edited row, and dropping a
+// run on it would be worse than executing with no run-level interrupts.
+func decodeInterruptPolicy(kwargs json.RawMessage) interruptPolicy {
+	var p interruptPolicy
+	if len(kwargs) == 0 {
+		return p
+	}
+	var bag struct {
+		Before json.RawMessage `json:"interrupt_before,omitempty"`
+		After  json.RawMessage `json:"interrupt_after,omitempty"`
+	}
+	if err := json.Unmarshal(kwargs, &bag); err != nil {
+		return p
+	}
+	p.AllBefore, p.Before = decodeNodeSelector(bag.Before)
+	p.AllAfter, p.After = decodeNodeSelector(bag.After)
+	return p
+}
+
+// decodeNodeSelector collapses one interrupt_before/interrupt_after value into
+// (wildcard, node list) — the two shapes the OpenAPI anyOf allows.
+func decodeNodeSelector(raw json.RawMessage) (all bool, nodes []string) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err == nil {
+		return false, names
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil && s == interruptAllNodes {
+		return true, nil
+	}
+	return false, nil
+}
+
+// interruptAllNodes is the wildcard form of a run-level interrupt spec.
+const interruptAllNodes = "*"
 
 // pausesAfter reports whether the walk must suspend AFTER this node has run,
 // and with which interrupts.reason. It folds the two post-execution triggers

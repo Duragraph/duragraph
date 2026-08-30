@@ -191,8 +191,13 @@ func (r runRow) toAPI() Run {
 	if r.ThreadID != nil {
 		run.ThreadId = *r.ThreadID
 	}
+	// Target is run.Kwargs, NOT r.Kwargs: unmarshalling into the source []byte
+	// both discards the result and cannot succeed (encoding/json decodes into a
+	// []byte from a base64 STRING, not from an object), so this silently
+	// returned kwargs {} for every run. Latent until runs.kwargs was actually
+	// populated — see runs_kwargs.go.
 	if len(r.Kwargs) > 0 {
-		_ = json.Unmarshal(r.Kwargs, &r.Kwargs)
+		_ = json.Unmarshal(r.Kwargs, &run.Kwargs)
 	}
 	if len(r.Metadata) > 0 {
 		_ = json.Unmarshal(r.Metadata, &run.Metadata)
