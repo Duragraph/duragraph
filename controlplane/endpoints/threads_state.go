@@ -23,7 +23,10 @@ import (
 // chronological key. GET /threads/{id}/state -> 200 ThreadState / 404.
 func (s *Server) ThreadsGetState(c echo.Context) error {
 	ctx := c.Request().Context()
-	tid := c.Param("id")
+	tid, err := pathUUID(c, "id")
+	if err != nil {
+		return err
+	}
 	rows, err := s.Tenant.Query(ctx, `
 		SELECT id, stream_id, aggregate_id, version, state, created_at
 		FROM snapshots
@@ -48,8 +51,14 @@ func (s *Server) ThreadsGetState(c echo.Context) error {
 // GET /threads/{id}/state/{checkpoint_id} -> 200 ThreadState / 404.
 func (s *Server) ThreadsGetCheckpointState(c echo.Context) error {
 	ctx := c.Request().Context()
-	tid := c.Param("id")
-	ckpt := c.Param("checkpoint_id")
+	tid, err := pathUUID(c, "id")
+	if err != nil {
+		return err
+	}
+	ckpt, err := parseCheckpointID(c.Param("checkpoint_id"))
+	if err != nil {
+		return err
+	}
 	rows, err := s.Tenant.Query(ctx, `
 		SELECT id, stream_id, aggregate_id, version, state, created_at
 		FROM snapshots
@@ -79,22 +88,29 @@ func (s *Server) ThreadsGetCheckpointState(c echo.Context) error {
 // POST /threads/{id}/state/checkpoint -> 200 ThreadState / 404.
 func (s *Server) ThreadsCreateCheckpoint(c echo.Context) error {
 	ctx := c.Request().Context()
-	tid := c.Param("id")
+	tid, err := pathUUID(c, "id")
+	if err != nil {
+		return err
+	}
 	var req ThreadStateCheckpointRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	var (
-		rows pgx.Rows
-		err  error
-	)
+	var rows pgx.Rows
 	if req.Checkpoint.CheckpointId != nil && *req.Checkpoint.CheckpointId != "" {
+		// Body-carried twin of the path param, so it needs the same guard: a
+		// CheckpointConfig.checkpoint_id that is not a checkpoint identifier is
+		// a validation error, not a 500 from the driver.
+		ckpt, perr := parseCheckpointID(*req.Checkpoint.CheckpointId)
+		if perr != nil {
+			return perr
+		}
 		rows, err = s.Tenant.Query(ctx, `
 			SELECT id, stream_id, aggregate_id, version, state, created_at
 			FROM snapshots
 			WHERE id = $1 AND aggregate_id IN (SELECT id FROM runs WHERE thread_id = $2)`,
-			*req.Checkpoint.CheckpointId, tid)
+			ckpt, tid)
 	} else {
 		rows, err = s.Tenant.Query(ctx, `
 			SELECT id, stream_id, aggregate_id, version, state, created_at
@@ -121,7 +137,10 @@ func (s *Server) ThreadsCreateCheckpoint(c echo.Context) error {
 // per-stream). GET /threads/{id}/history -> 200 []ThreadState.
 func (s *Server) ThreadsGetHistory(c echo.Context) error {
 	ctx := c.Request().Context()
-	tid := c.Param("id")
+	tid, err := pathUUID(c, "id")
+	if err != nil {
+		return err
+	}
 	rows, err := s.Tenant.Query(ctx, `
 		SELECT id, stream_id, aggregate_id, version, state, created_at
 		FROM snapshots
