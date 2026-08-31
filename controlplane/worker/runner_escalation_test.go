@@ -34,6 +34,10 @@ func (c *stubEscalationClient) LatestCheckpoint(ctx context.Context, threadID, r
 	return Checkpoint{}, false, nil
 }
 
+func (c *stubEscalationClient) CheckpointByID(ctx context.Context, threadID uuid.UUID, checkpointID int64) (Checkpoint, bool, error) {
+	return Checkpoint{}, false, nil
+}
+
 func (c *stubEscalationClient) WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) (int64, error) {
 	return 0, errors.New("transient: write checkpoint boom")
 }

@@ -92,11 +92,21 @@ func (s *Server) RunsCreateOnThread(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	// Validate the run-level interrupt spec BEFORE the write, so a malformed
-	// one 422s without appending an event that would have to be rolled back.
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
+	// Validate the run-level knobs BEFORE the write, so a malformed one 422s
+	// without appending an event that would have to be rolled back.
+	checkpoint, err := normalizeCheckpoint(req.Checkpoint, pathID)
 	if err != nil {
 		return interruptSpecHTTPError(err)
+	}
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command, checkpoint)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
+	// Resolve the checkpoint against this thread up front: an unusable
+	// reference must 404 here rather than become a queued run its worker can
+	// only fail.
+	if err := s.verifyCheckpointOwned(ctx, checkpoint, pathID); err != nil {
+		return checkpointHTTPError(err)
 	}
 
 	aggID := uuid.New()
@@ -132,7 +142,7 @@ func (s *Server) RunsCreateStateless(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command, nil)
 	if err != nil {
 		return interruptSpecHTTPError(err)
 	}

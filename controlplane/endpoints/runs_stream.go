@@ -296,9 +296,16 @@ func (s *Server) RunsCreateAndStream(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
+	checkpoint, err := normalizeCheckpoint(req.Checkpoint, threadID)
 	if err != nil {
 		return interruptSpecHTTPError(err)
+	}
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command, checkpoint)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
+	if err := s.verifyCheckpointOwned(ctx, checkpoint, threadID); err != nil {
+		return checkpointHTTPError(err)
 	}
 	rid, err := s.createRun(ctx, &threadID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata), kwargs)
 	if err != nil {
@@ -322,7 +329,7 @@ func (s *Server) RunsStatelessStream(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command, nil)
 	if err != nil {
 		return interruptSpecHTTPError(err)
 	}
@@ -439,7 +446,7 @@ func (s *Server) RunsStatelessWait(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command)
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command, nil)
 	if err != nil {
 		return interruptSpecHTTPError(err)
 	}

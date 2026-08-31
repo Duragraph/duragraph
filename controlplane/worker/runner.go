@@ -88,6 +88,7 @@ type runClient interface {
 	RunStarted(ctx context.Context, runID uuid.UUID) (int, error)
 	LoadGraph(ctx context.Context, runID uuid.UUID) (GraphDefinition, error)
 	LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (Checkpoint, bool, error)
+	CheckpointByID(ctx context.Context, threadID uuid.UUID, checkpointID int64) (Checkpoint, bool, error)
 	WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) (int64, error)
 	NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error
 	RunCompleted(ctx context.Context, runID uuid.UUID, epoch int) error
@@ -355,6 +356,59 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		interrupted = cp.Interrupted
 		pausedAfter = cp.pausedAfter()
 		parentCheckpointID = restored.ID
+	} else if seedID := decodeSeedCheckpointID(cmd.Kwargs); seedID != 0 {
+		// RunCreate.checkpoint: this run resumes from a checkpoint written by a
+		// PREVIOUS run on the same thread, so it cannot be found by this run's
+		// own id (snapshots.aggregate_id is a run id). Fetch it by id; the
+		// server proved the thread owns it at create time.
+		seed, found, serr := r.cl.CheckpointByID(ctx, cmd.ThreadID, seedID)
+		if serr != nil {
+			return false, epoch, serr // transient — Nak, redeliver
+		}
+		if !found {
+			// It existed at create and does not now (the source run was
+			// deleted). Deterministic — redelivery cannot help.
+			return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("checkpoint %d no longer exists", seedID))
+		}
+		var cp checkpointState
+		if uerr := json.Unmarshal(seed.State, &cp); uerr != nil {
+			return false, epoch, fmt.Errorf("runner: decode seed checkpoint state: %w", uerr)
+		}
+		if cp.Channels != nil {
+			channels = cp.Channels
+		}
+		// completed_nodes is inherited: the nodes the source run already
+		// executed are not re-run, which is what "resume from" means. This run's
+		// execution_history therefore records only what IT ran; the full picture
+		// is reconstructed across runs through parent_checkpoint_id, which the
+		// first checkpoint below sets to the seed.
+		completed = cp.CompletedNodes
+		for _, id := range completed {
+			completedSet[id] = true
+		}
+		frontier = cp.Frontier
+		parentCheckpointID = seed.ID
+
+		// The pause marker is deliberately NOT inherited. Carrying it would park
+		// this run against an interrupts row owned by the SOURCE run, and the
+		// resume endpoint requires an unresolved interrupt for THIS run — so the
+		// run would be permanently unresumable. Clearing it does not skip the
+		// gate either: the walk re-evaluates it, and any node whose config (or
+		// this run's own interrupt policy) still calls for a pause parks again
+		// with an interrupt row of its own.
+		//
+		// A source checkpoint taken AFTER its node ran is the one case that
+		// needs help: that node is already in completedSet and its successors
+		// were never expanded (routing is deferred across a pause-after), so the
+		// frontier is empty and the walk would finish immediately. Expand them
+		// now, exactly as a resume with an empty command would.
+		if cp.pausedAfter() {
+			succs, serr := graph.successors(cp.Node, channels)
+			if serr != nil {
+				return r.failRun(ctx, cmd.RunID, epoch, serr.Error())
+			}
+			frontier = append(succs, frontier...)
+		}
 	} else {
 		// Fresh run: seed channels from the command input, frontier from the
 		// graph's entry nodes.

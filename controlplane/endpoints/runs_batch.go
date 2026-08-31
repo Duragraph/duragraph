@@ -40,7 +40,7 @@ func (s *Server) RunsBatchCreate(c echo.Context) error {
 			return assistantRefHTTPError(err)
 		}
 		assistantIDs[i] = aid
-		kw, err := buildRunKwargs(r.InterruptBefore, r.InterruptAfter, r.Command)
+		kw, err := buildRunKwargs(r.InterruptBefore, r.InterruptAfter, r.Command, nil)
 		if err != nil {
 			return interruptSpecHTTPError(err)
 		}
