@@ -147,6 +147,24 @@ func decodeCreateCommand(kwargs json.RawMessage) json.RawMessage {
 	return bag.Command
 }
 
+// decodeSeedCheckpointID reads RunCreate.checkpoint out of the run-kwargs bag:
+// the id of a checkpoint, written by a PREVIOUS run on the same thread, that
+// this run resumes from. Returns 0 when the run carried none. The server
+// validated the id and proved the thread owns it at create time
+// (endpoints normalizeCheckpoint + verifyCheckpointOwned).
+func decodeSeedCheckpointID(kwargs json.RawMessage) int64 {
+	if len(kwargs) == 0 {
+		return 0
+	}
+	var bag struct {
+		CheckpointID int64 `json:"checkpoint_id,omitempty"`
+	}
+	if err := json.Unmarshal(kwargs, &bag); err != nil {
+		return 0
+	}
+	return bag.CheckpointID
+}
+
 // decodeInterruptPolicy reads the run-kwargs bag into an interruptPolicy. A
 // malformed bag is NOT an error: the server validated the spec at create time,
 // so anything unreadable here is a corrupt or hand-edited row, and dropping a

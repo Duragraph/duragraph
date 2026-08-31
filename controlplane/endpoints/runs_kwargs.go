@@ -17,11 +17,14 @@
 package endpoints
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -37,6 +40,7 @@ var errInterruptSpecInvalid = errors.New("invalid interrupt spec")
 type runKwargs struct {
 	InterruptBefore any             `json:"interrupt_before,omitempty"`
 	InterruptAfter  any             `json:"interrupt_after,omitempty"`
+	Checkpoint      json.RawMessage `json:"checkpoint_id,omitempty"`
 	Command         json.RawMessage `json:"command,omitempty"`
 }
 
@@ -116,11 +120,58 @@ func normalizeInterruptSpec(field string, v any) (any, error) {
 	}
 }
 
+// normalizeCheckpoint validates RunCreate.checkpoint — the checkpoint a new run
+// resumes from, which was written by a PREVIOUS run on the same thread
+// (snapshots.aggregate_id is a run id, so a checkpoint belongs to a run, and the
+// thread is reached by joining through runs).
+//
+// Two of CheckpointConfig's four fields are REJECTED rather than ignored:
+//
+//   - checkpoint_ns is LangGraph's subgraph namespacing, and this engine has no
+//     subgraph concept at all — GraphDefinition does not nest, and sub-worker
+//     delegation is still TARGET in graph-engine.d2 §8. Storing a namespace we
+//     cannot honor would be the silent-drop bug this whole line of work exists
+//     to remove; adding a column for it would bake in a field with no defined
+//     semantics. An explicit 422 says what is true: not supported yet.
+//   - checkpoint_map ("checkpoint-specific data") likewise has no defined
+//     meaning here.
+//
+// checkpoint_id is REQUIRED when a checkpoint config is supplied. The schema
+// marks it optional, but the field means "the checkpoint to resume from" — with
+// no id there is no checkpoint, and quietly treating the config as absent would
+// again be a silent drop. This is a judgment call in favour of an explicit
+// error over an inert request.
+//
+// thread_id, if supplied, must agree with the run's own thread; a contradiction
+// is rejected rather than silently resolved in favour of one of them.
+func normalizeCheckpoint(cfg *CheckpointConfig, threadID uuid.UUID) (json.RawMessage, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	if cfg.CheckpointNs != nil && *cfg.CheckpointNs != "" {
+		return nil, fmt.Errorf("%w: checkpoint.checkpoint_ns is not supported: this engine has no subgraphs", errInterruptSpecInvalid)
+	}
+	if cfg.CheckpointMap != nil && len(*cfg.CheckpointMap) > 0 {
+		return nil, fmt.Errorf("%w: checkpoint.checkpoint_map is not supported", errInterruptSpecInvalid)
+	}
+	if cfg.ThreadId != nil && *cfg.ThreadId != "" && *cfg.ThreadId != threadID.String() {
+		return nil, fmt.Errorf("%w: checkpoint.thread_id %q does not match the run's thread %s", errInterruptSpecInvalid, *cfg.ThreadId, threadID)
+	}
+	if cfg.CheckpointId == nil || *cfg.CheckpointId == "" {
+		return nil, fmt.Errorf("%w: checkpoint.checkpoint_id is required to resume from a checkpoint", errInterruptSpecInvalid)
+	}
+	id, err := parseCheckpointID(*cfg.CheckpointId)
+	if err != nil {
+		return nil, fmt.Errorf("%w: checkpoint.checkpoint_id must be a checkpoint identifier", errInterruptSpecInvalid)
+	}
+	return json.RawMessage(strconv.FormatInt(id, 10)), nil
+}
+
 // buildRunKwargs validates the run-level LangGraph fields and renders the
 // runs.kwargs jsonb. All absent yields "{}" — the column default — so a run
 // that sets none is indistinguishable from one created before these fields
 // were honored.
-func buildRunKwargs(interruptBefore, interruptAfter, command any) ([]byte, error) {
+func buildRunKwargs(interruptBefore, interruptAfter, command any, checkpoint json.RawMessage) ([]byte, error) {
 	before, err := normalizeInterruptSpec("interrupt_before", interruptBefore)
 	if err != nil {
 		return nil, err
@@ -133,14 +184,54 @@ func buildRunKwargs(interruptBefore, interruptAfter, command any) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	if before == nil && after == nil && cmd == nil {
+	if before == nil && after == nil && cmd == nil && len(checkpoint) == 0 {
 		return []byte("{}"), nil
 	}
-	b, err := json.Marshal(runKwargs{InterruptBefore: before, InterruptAfter: after, Command: cmd})
+	b, err := json.Marshal(runKwargs{InterruptBefore: before, InterruptAfter: after, Command: cmd, Checkpoint: checkpoint})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", errInterruptSpecInvalid, err)
 	}
 	return b, nil
+}
+
+// errCheckpointNotFound marks a checkpoint that does not exist, or exists but
+// belongs to another thread's run — the two collapse deliberately, so probing
+// ids cannot distinguish "no such checkpoint" from "not yours".
+var errCheckpointNotFound = errors.New("checkpoint not found")
+
+// verifyCheckpointOwned resolves the checkpoint against the run's thread BEFORE
+// the run is written, so an unusable reference fails as a clean 404 instead of
+// producing a queued run that its worker can only fail. Scoping mirrors
+// WorkersReadCheckpoint and threads_state.go: a snapshot is reachable only
+// through the thread's own runs.
+func (s *Server) verifyCheckpointOwned(ctx context.Context, checkpoint json.RawMessage, threadID uuid.UUID) error {
+	if len(checkpoint) == 0 {
+		return nil
+	}
+	id, err := strconv.ParseInt(string(checkpoint), 10, 64)
+	if err != nil {
+		return errCheckpointNotFound
+	}
+	var exists bool
+	if err := s.Tenant.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM snapshots
+			WHERE id = $1 AND aggregate_id IN (SELECT id FROM runs WHERE thread_id = $2))`,
+		id, threadID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return errCheckpointNotFound
+	}
+	return nil
+}
+
+// checkpointHTTPError maps a verifyCheckpointOwned failure to 404.
+func checkpointHTTPError(err error) error {
+	if errors.Is(err, errCheckpointNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "no such checkpoint for this thread")
+	}
+	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 }
 
 // interruptSpecHTTPError maps a buildRunKwargs failure to 422. The value parsed

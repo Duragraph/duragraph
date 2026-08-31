@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 )
@@ -158,6 +159,25 @@ type Checkpoint struct {
 // (no checkpoint yet) is not an error: found is false, err is nil.
 func (c *Client) LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (cp Checkpoint, found bool, err error) {
 	path := "/api/v1/threads/" + threadID.String() + "/checkpoints/latest?run_id=" + runID.String()
+	var resp checkpointResponse
+	status, err := c.doJSON(ctx, http.MethodGet, path, nil, &resp)
+	if err != nil {
+		if status == http.StatusNotFound {
+			return Checkpoint{}, false, nil
+		}
+		return Checkpoint{}, false, err
+	}
+	return Checkpoint{ID: resp.CheckpointID, Version: resp.Version, State: []byte(resp.State)}, true, nil
+}
+
+// CheckpointByID fetches one checkpoint by its id, scoped to threadID. Used
+// when a run was created with RunCreate.checkpoint — the checkpoint it resumes
+// from belongs to a PREVIOUS run on the same thread, so it cannot be found by
+// this run's own id. GET /api/v1/threads/{tid}/checkpoints/{ckpt}. A 404 (no
+// such checkpoint, or one belonging to another thread — the server collapses
+// the two) is not an error: found is false, err is nil.
+func (c *Client) CheckpointByID(ctx context.Context, threadID uuid.UUID, checkpointID int64) (cp Checkpoint, found bool, err error) {
+	path := "/api/v1/threads/" + threadID.String() + "/checkpoints/" + strconv.FormatInt(checkpointID, 10)
 	var resp checkpointResponse
 	status, err := c.doJSON(ctx, http.MethodGet, path, nil, &resp)
 	if err != nil {
