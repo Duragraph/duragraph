@@ -81,14 +81,56 @@ func (c *Client) RunStarted(ctx context.Context, runID uuid.UUID) (int, error) {
 	return resp.LeaseEpoch, nil
 }
 
-// NodeCompleted records a completed node execution, fenced on epoch.
-func (c *Client) NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error {
+// NodeStarted opens a node's execution_history row before the node runs, fenced
+// on epoch. The completing call (NodeCompleted / NodeFailed) transitions that
+// same row rather than adding another — see the server's nodeEvent.
+//
+// Announcing the start is what makes an in-flight node visible: without it a
+// node that is slow, wedged, or killed mid-execution leaves no trace at all, so
+// "where is this run" is unanswerable from execution_history.
+func (c *Client) NodeStarted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error {
+	body := eventsRequest{Events: []workerEvent{{
+		Type:       "execution.node_started",
+		LeaseEpoch: epoch,
+		NodeID:     nodeID,
+		NodeType:   nodeType,
+		NodeStatus: "started",
+	}}}
+	_, err := c.doJSON(ctx, http.MethodPost, c.eventsPath(runID), body, nil)
+	return err
+}
+
+// NodeCompleted closes a node's execution_history row as succeeded, fenced on
+// epoch. durationMs is the worker's own measurement of the node's execution;
+// the server falls back to now()-started_at when it is nil.
+func (c *Client) NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string, durationMs *int) error {
 	body := eventsRequest{Events: []workerEvent{{
 		Type:       "execution.node_completed",
 		LeaseEpoch: epoch,
 		NodeID:     nodeID,
 		NodeType:   nodeType,
 		NodeStatus: "completed",
+		DurationMs: durationMs,
+	}}}
+	_, err := c.doJSON(ctx, http.MethodPost, c.eventsPath(runID), body, nil)
+	return err
+}
+
+// NodeFailed closes a node's execution_history row as failed, recording which
+// node died and why, fenced on epoch.
+//
+// Without it a poison node produced run.failed and nothing else: the error text
+// landed on runs.error and execution_history held no row naming the node, so the
+// run's own audit trail could not say where it died.
+func (c *Client) NodeFailed(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType, reason string, durationMs *int) error {
+	body := eventsRequest{Events: []workerEvent{{
+		Type:       "execution.node_failed",
+		LeaseEpoch: epoch,
+		NodeID:     nodeID,
+		NodeType:   nodeType,
+		NodeStatus: "failed",
+		Error:      &reason,
+		DurationMs: durationMs,
 	}}}
 	_, err := c.doJSON(ctx, http.MethodPost, c.eventsPath(runID), body, nil)
 	return err

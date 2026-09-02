@@ -150,24 +150,70 @@ func (s *Server) leaseRun(ctx context.Context, rid, wid string) (int, error) {
 // so a stale worker's event is never committed.
 var errStaleLease = errors.New("stale lease_epoch")
 
-// nodeEvent records a node execution row + emits the execution.node_* event.
-// The epoch guard is ATOMIC (conditional INSERT), not a separate read.
+// nodeEvent records a node execution + emits the execution.node_* event.
+//
+// execution_history is "one row per node execution" (003_run.up.sql), and its
+// columns say the same: started_at NOT NULL, completed_at and duration_ms
+// nullable. So a node's lifecycle TRANSITIONS one row rather than appending
+// several — execution.node_started INSERTs it, and node_completed/node_failed
+// UPDATE that row in place. Appending on every event would give two rows per
+// node and turn "how many times did N run" into a question about event counts.
+//
+// The completing UPDATE targets the newest still-'started' row for (run_id,
+// node_id), so a node that runs more than once (a cycle) closes its own
+// attempt rather than an earlier one. If no started row exists the write falls
+// back to an INSERT: a worker that reports only completion — as every worker
+// did before node_started was emitted — still records its execution.
+//
+// The epoch guard is ATOMIC in both paths (a conditional INSERT, and a join to
+// runs in the UPDATE), never a separate read.
 func (s *Server) nodeEvent(ctx context.Context, rid string, ev WorkerEvent) error {
 	return s.writeTxOrHTTP(ctx, rid, ev.Type, ev, func(tx pgx.Tx) error {
+		if ev.NodeStatus == "started" {
+			return insertNodeExecution(ctx, tx, rid, ev)
+		}
 		ct, err := tx.Exec(ctx, `
-			INSERT INTO execution_history (run_id, node_id, node_type, status, input, output, error, duration_ms, completed_at)
-			SELECT $1,$2,$3,$4::varchar,$5,$6,$7,$8, CASE WHEN $4::varchar <> 'started' THEN now() END
-			WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1 AND lease_epoch=$9)`,
-			rid, ev.NodeID, ev.NodeType, ev.NodeStatus,
-			jsonOrEmpty(ev.Input), jsonOrEmpty(ev.Output), ev.Error, ev.DurationMs, ev.LeaseEpoch)
+			UPDATE execution_history h
+			SET status = $3::varchar, output = $4, error = $5,
+			    duration_ms = COALESCE($6, (EXTRACT(EPOCH FROM (now() - h.started_at)) * 1000)::integer),
+			    completed_at = now()
+			WHERE h.id = (
+			    SELECT id FROM execution_history
+			    WHERE run_id = $1 AND node_id = $2 AND status = 'started'
+			    ORDER BY id DESC LIMIT 1)
+			  AND EXISTS (SELECT 1 FROM runs WHERE id = $1 AND lease_epoch = $7)`,
+			rid, ev.NodeID, ev.NodeStatus,
+			jsonOrEmpty(ev.Output), ev.Error, ev.DurationMs, ev.LeaseEpoch)
 		if err != nil {
 			return err
 		}
-		if ct.RowsAffected() == 0 {
-			return errStaleLease
+		if ct.RowsAffected() > 0 {
+			return nil
 		}
-		return nil
+		// No open attempt to close. Either the run is fenced, or the worker
+		// never announced a start — insert so the execution is still recorded,
+		// and let the epoch guard inside decide which of the two it was.
+		return insertNodeExecution(ctx, tx, rid, ev)
 	})
+}
+
+// insertNodeExecution writes a new execution_history row, epoch-fenced.
+// completed_at is set for any terminal status so a fallback insert (a worker
+// reporting only completion) is not left looking perpetually in-flight.
+func insertNodeExecution(ctx context.Context, tx pgx.Tx, rid string, ev WorkerEvent) error {
+	ct, err := tx.Exec(ctx, `
+		INSERT INTO execution_history (run_id, node_id, node_type, status, input, output, error, duration_ms, completed_at)
+		SELECT $1,$2,$3,$4::varchar,$5,$6,$7,$8, CASE WHEN $4::varchar <> 'started' THEN now() END
+		WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1 AND lease_epoch=$9)`,
+		rid, ev.NodeID, ev.NodeType, ev.NodeStatus,
+		jsonOrEmpty(ev.Input), jsonOrEmpty(ev.Output), ev.Error, ev.DurationMs, ev.LeaseEpoch)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return errStaleLease
+	}
+	return nil
 }
 
 // terminalRun marks the run completed/failed + emits the event. Epoch guarded

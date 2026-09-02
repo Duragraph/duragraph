@@ -45,14 +45,14 @@ func TestClientLifecycleAndCheckpoints(t *testing.T) {
 	if cp.ID != ckptID {
 		t.Errorf("LatestCheckpoint id: want %d (the row WriteCheckpoint created), got %d", ckptID, cp.ID)
 	}
-	if err := cl.NodeCompleted(ctx, rid, epoch, "A", "tool"); err != nil {
+	if err := cl.NodeCompleted(ctx, rid, epoch, "A", "tool", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := cl.RunCompleted(ctx, rid, epoch); err != nil {
 		t.Fatal(err)
 	}
 	// stale lease surfaces as ErrStaleLease
-	if err := cl.NodeCompleted(ctx, rid, 999, "B", "tool"); err != worker.ErrStaleLease {
+	if err := cl.NodeCompleted(ctx, rid, 999, "B", "tool", nil); err != worker.ErrStaleLease {
 		t.Fatalf("stale lease: want ErrStaleLease, got %v", err)
 	}
 }

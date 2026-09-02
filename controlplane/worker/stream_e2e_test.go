@@ -183,10 +183,17 @@ func TestStreamEndToEnd(t *testing.T) {
 
 	url := sseSrv.URL + "/api/v1/threads/" + uuid.Nil.String() + "/runs/" + rid.String() + "/stream"
 	done := make(chan []sseFrame, 1)
-	go func() { done <- readSSE(t, url, 4, 15*time.Second) }()
+	// Each node now streams a start AND a completion, so a consumer can see a
+	// node enter execution rather than only learning it finished.
+	go func() { done <- readSSE(t, url, 6, 15*time.Second) }()
 
 	frames := <-done
-	want := []string{"run.started", "execution.node_completed", "execution.node_completed", "run.completed"}
+	want := []string{
+		"run.started",
+		"execution.node_started", "execution.node_completed", // A
+		"execution.node_started", "execution.node_completed", // B
+		"run.completed",
+	}
 	if len(frames) != len(want) {
 		t.Fatalf("want %d frames, got %d: %+v", len(want), len(frames), frames)
 	}

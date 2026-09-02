@@ -42,7 +42,15 @@ func (c *stubEscalationClient) WriteCheckpoint(ctx context.Context, threadID, ru
 	return 0, errors.New("transient: write checkpoint boom")
 }
 
-func (c *stubEscalationClient) NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error {
+func (c *stubEscalationClient) NodeStarted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error {
+	return nil
+}
+
+func (c *stubEscalationClient) NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string, durationMs *int) error {
+	return nil
+}
+
+func (c *stubEscalationClient) NodeFailed(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType, reason string, durationMs *int) error {
 	return nil
 }
 
