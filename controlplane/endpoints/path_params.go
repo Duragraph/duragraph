@@ -43,6 +43,19 @@ func pathUUID(c echo.Context, name string) (uuid.UUID, error) {
 	return id, nil
 }
 
+// pathUUIDString is pathUUID for the handlers whose downstream helpers take the
+// id as a string (the worker lease/event path). Returning the PARSED value's
+// String() rather than the raw parameter also canonicalises the accepted
+// spellings — uuid.Parse takes the braced and urn: forms — so what reaches the
+// query is always the plain 36-character form.
+func pathUUIDString(c echo.Context, name string) (string, error) {
+	id, err := pathUUID(c, name)
+	if err != nil {
+		return "", err
+	}
+	return id.String(), nil
+}
+
 // parseCheckpointID parses a checkpoint identifier. The OpenAPI types
 // checkpoint_id as a STRING (CheckpointConfig.checkpoint_id), but a checkpoint
 // is a snapshots row and snapshots.id is BIGSERIAL — so the string must denote

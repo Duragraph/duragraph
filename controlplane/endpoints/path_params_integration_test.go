@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 )
 
 // TestMalformedIdentifiersAreValidationErrors pins the API boundary for the
@@ -92,5 +94,107 @@ func TestWellFormedIdentifiersStillResolve(t *testing.T) {
 				t.Errorf("want %d, got %d: %s", tc.want, rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestWorkerPathParamsAreValidated extends the boundary to the worker and
+// checkpoint routes, which kept the raw-parameter pattern after the thread
+// state paths were fixed. Every one of these answered 500 with the driver text:
+//
+//	{"message":"ERROR: invalid input syntax for type uuid: \"not-a-uuid\" (SQLSTATE 22P02)"}
+//
+// These routes are internal (absent from the public OpenAPI), so no declared
+// response set forces the code — 422 is chosen to match the thread paths rather
+// than invent a second convention for the same class of mistake.
+func TestWorkerPathParamsAreValidated(t *testing.T) {
+	ctx := context.Background()
+	e := newTestServerWithWorkers()
+
+	var aid string
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO assistants (name) VALUES ('pp-worker') RETURNING id`).Scan(&aid); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ name, method, path, body string }{
+		{"heartbeat: malformed worker id", "POST", "/api/v1/workers/not-a-uuid/heartbeat", `{"status":"idle","active_runs":0}`},
+		{"deregister: malformed worker id", "POST", "/api/v1/workers/not-a-uuid/deregister", ""},
+		{"events: malformed worker id", "POST", "/api/v1/workers/not-a-uuid/runs/" + aid + "/events", `{"events":[]}`},
+		{"events: malformed run id", "POST", "/api/v1/workers/" + aid + "/runs/not-a-uuid/events", `{"events":[]}`},
+		{"read checkpoint: malformed thread id", "GET", "/api/v1/threads/not-a-uuid/checkpoints/1", ""},
+		{"read checkpoint: malformed checkpoint id", "GET", "/api/v1/threads/" + aid + "/checkpoints/not-a-bigint", ""},
+		{"load graph: malformed run id", "GET", "/api/v1/workers/runs/not-a-uuid/graph", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(tc.body)))
+			req.Header.Set("Content-Type", "application/json")
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Errorf("want 422, got %d: %s", rec.Code, rec.Body.String())
+			}
+			for _, leak := range []string{"SQLSTATE", "invalid input syntax", "bigint", "uuid:", "snapshots", "workers"} {
+				if strings.Contains(rec.Body.String(), leak) {
+					t.Errorf("response leaks internals (%q): %s", leak, rec.Body.String())
+				}
+			}
+		})
+	}
+}
+
+// TestAssistantGraphAcceptsGraphIdOrAssistantId covers the one path parameter in
+// this group that must NOT be rejected when it isn't a UUID.
+//
+// The OpenAPI types assistant_id on /assistants/{assistant_id}/graph as
+// anyOf[{format: uuid, "Assistant ID"}, {string, "Graph ID"}] — so a non-UUID is
+// a legal request selecting the graph by name. The handler interpolated it raw
+// into `WHERE assistant_id = $1` (a uuid column), so the legal form 500ed with
+// SQLSTATE 22P02. Validating it as a UUID would have been the WRONG fix: it
+// would turn a supported request into a 422.
+func TestAssistantGraphAcceptsGraphIdOrAssistantId(t *testing.T) {
+	ctx := context.Background()
+	e := echo.New()
+	(&Server{Tenant: testPool}).RegisterAssistants(e.Group("/api/v1"))
+
+	var aid string
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO assistants (name) VALUES ('pp-graph') RETURNING id`).Scan(&aid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO graphs (assistant_id, name, version, nodes, edges)
+		 VALUES ($1, 'named-graph', '1', '[{"id":"A"}]'::jsonb, '[]'::jsonb)`, aid); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both arms of the anyOf must resolve the SAME graph.
+	for _, tc := range []struct{ name, id string }{
+		{"by assistant uuid", aid},
+		{"by graph name", "named-graph"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/api/v1/assistants/"+tc.id+"/graph", nil)
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"A"`) {
+				t.Errorf("want the seeded graph's node, got: %s", rec.Body.String())
+			}
+		})
+	}
+
+	// A name matching nothing is a miss, not a validation error or a 500.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/assistants/no-such-graph/graph", nil)
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown graph name: want 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "SQLSTATE") {
+		t.Errorf("response leaks the driver error: %s", rec.Body.String())
 	}
 }
