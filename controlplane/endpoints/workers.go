@@ -36,7 +36,10 @@ func (s *Server) WorkersRegister(c echo.Context) error {
 // WorkersHeartbeat renews the worker lease. POST /workers/{id}/heartbeat -> 200.
 func (s *Server) WorkersHeartbeat(c echo.Context) error {
 	ctx := c.Request().Context()
-	wid := c.Param("id")
+	wid, err := pathUUIDString(c, "id")
+	if err != nil {
+		return err
+	}
 	var req WorkerHeartbeatRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -60,7 +63,10 @@ func (s *Server) WorkersHeartbeat(c echo.Context) error {
 // POST /workers/{id}/deregister -> 204.
 func (s *Server) WorkersDeregister(c echo.Context) error {
 	ctx := c.Request().Context()
-	wid := c.Param("id")
+	wid, err := pathUUIDString(c, "id")
+	if err != nil {
+		return err
+	}
 	tx, err := s.Tenant.Begin(ctx)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -86,8 +92,14 @@ func (s *Server) WorkersDeregister(c echo.Context) error {
 // doc "events endpoint". runs has no lease_expires_at — fence on epoch only.
 func (s *Server) WorkersStreamEvents(c echo.Context) error {
 	ctx := c.Request().Context()
-	wid := c.Param("id")
-	rid := c.Param("rid")
+	wid, err := pathUUIDString(c, "id")
+	if err != nil {
+		return err
+	}
+	rid, err := pathUUIDString(c, "rid")
+	if err != nil {
+		return err
+	}
 	var req WorkerEventsRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -334,8 +346,14 @@ func (s *Server) WorkersWriteCheckpoint(c echo.Context) error {
 // GET /threads/{tid}/checkpoints/{ckpt} -> 200 / 404.
 func (s *Server) WorkersReadCheckpoint(c echo.Context) error {
 	ctx := c.Request().Context()
-	tid := c.Param("tid")
-	ckpt := c.Param("ckpt")
+	tid, err := pathUUIDString(c, "tid")
+	if err != nil {
+		return err
+	}
+	ckpt, err := parseCheckpointID(c.Param("ckpt"))
+	if err != nil {
+		return err
+	}
 	rows, err := s.Tenant.Query(ctx, `
 		SELECT id, stream_id, aggregate_id, version, state, created_at
 		FROM snapshots
@@ -384,7 +402,10 @@ func (s *Server) WorkersLatestCheckpoint(c echo.Context) error {
 // -> 200 WorkerGraphResponse / 404 (unknown run, or assistant with no graph).
 func (s *Server) WorkersLoadGraph(c echo.Context) error {
 	ctx := c.Request().Context()
-	rid := c.Param("rid")
+	rid, err := pathUUIDString(c, "rid")
+	if err != nil {
+		return err
+	}
 	var resp WorkerGraphResponse
 	// Latest graph for the run's assistant. Ordered by created_at, NOT version:
 	// version is VARCHAR(50), so `ORDER BY version DESC` sorts lexicographically
@@ -392,7 +413,7 @@ func (s *Server) WorkersLoadGraph(c echo.Context) error {
 	// one version. Slice-1 assumes one graph per assistant; created_at keeps
 	// "latest wins" correct if that assumption is ever relaxed. (Selecting by
 	// graph_id/name is a separate TARGET — see graph-engine.d2 loader.)
-	err := s.Tenant.QueryRow(ctx, `
+	err = s.Tenant.QueryRow(ctx, `
 		SELECT nodes, edges, config FROM graphs
 		WHERE assistant_id = (SELECT assistant_id FROM runs WHERE id = $1)
 		ORDER BY created_at DESC LIMIT 1`, rid).Scan(&resp.Nodes, &resp.Edges, &resp.Config)
