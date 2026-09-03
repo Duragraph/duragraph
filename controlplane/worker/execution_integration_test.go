@@ -152,7 +152,7 @@ func TestDurableResume(t *testing.T) {
 
 	// The dead worker (still holding epoch 1) can no longer write: the live
 	// lease is now epoch 2, so its event is fenced off as stale.
-	if err := cl1.NodeCompleted(ctx, rid, 1, "B", "tool"); !errors.Is(err, worker.ErrStaleLease) {
+	if err := cl1.NodeCompleted(ctx, rid, 1, "B", "tool", nil); !errors.Is(err, worker.ErrStaleLease) {
 		t.Errorf("dead worker's replayed write: want ErrStaleLease, got %v", err)
 	}
 }
@@ -191,7 +191,25 @@ func TestGraphErrorMarksRunFailed(t *testing.T) {
 
 	assertRunStatus(t, ctx, pool, rid, "failed")
 	assertNodeCount(t, ctx, pool, rid, "A", 1)
-	assertNodeCount(t, ctx, pool, rid, "B", 0)
+
+	// B is the poison node. It used to leave NO execution_history row, so the
+	// run's audit trail could not say where it died — only runs.error carried
+	// the text. It now leaves exactly ONE row (started, then transitioned in
+	// place to failed) naming the node and carrying the reason.
+	assertNodeCount(t, ctx, pool, rid, "B", 1)
+	var status string
+	var errText *string
+	if err := pool.QueryRow(ctx,
+		`SELECT status, error FROM execution_history WHERE run_id=$1 AND node_id='B'`,
+		rid).Scan(&status, &errText); err != nil {
+		t.Fatalf("select execution_history[B]: %v", err)
+	}
+	if status != "failed" {
+		t.Errorf("execution_history[B].status: want failed, got %q", status)
+	}
+	if errText == nil || *errText == "" {
+		t.Error("execution_history[B].error: want the failure reason recorded, got empty")
+	}
 
 	var nOutbox int
 	if err := pool.QueryRow(ctx,

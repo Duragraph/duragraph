@@ -51,6 +51,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
@@ -90,7 +91,9 @@ type runClient interface {
 	LatestCheckpoint(ctx context.Context, threadID, runID uuid.UUID) (Checkpoint, bool, error)
 	CheckpointByID(ctx context.Context, threadID uuid.UUID, checkpointID int64) (Checkpoint, bool, error)
 	WriteCheckpoint(ctx context.Context, threadID, runID uuid.UUID, epoch, version int, state []byte) (int64, error)
-	NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error
+	NodeStarted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error
+	NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string, durationMs *int) error
+	NodeFailed(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType, reason string, durationMs *int) error
 	RunCompleted(ctx context.Context, runID uuid.UUID, epoch int) error
 	RunFailed(ctx context.Context, runID uuid.UUID, epoch int, reason string) error
 	RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state, toolCalls []byte) error
@@ -613,9 +616,29 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 			return r.failRun(ctx, cmd.RunID, epoch, fmt.Sprintf("no executor for node type %q", node.Type))
 		}
 
+		// Announce the start before executing, so a node that is slow or dies
+		// mid-execution is still visible in execution_history. A stale lease
+		// here means a newer worker owns the run — stop and ack.
+		if serr := r.cl.NodeStarted(ctx, cmd.RunID, epoch, node.ID, node.Type); serr != nil {
+			if errors.Is(serr, ErrStaleLease) {
+				return true, epoch, nil
+			}
+			return false, epoch, serr // transient — Nak, redeliver
+		}
+
+		startedAt := time.Now()
 		writes, xerr := exec.Execute(ctx, node, channels)
+		elapsed := msSince(startedAt)
 		if xerr != nil {
 			// Poison node — deterministic failure, redelivery cannot help.
+			// Record WHICH node died before failing the run, so the audit trail
+			// names it rather than leaving only the error text on runs.error.
+			if nerr := r.cl.NodeFailed(ctx, cmd.RunID, epoch, node.ID, node.Type, xerr.Error(), elapsed); nerr != nil {
+				if errors.Is(nerr, ErrStaleLease) {
+					return true, epoch, nil
+				}
+				return false, epoch, nerr // transient — Nak so the record is retried
+			}
 			return r.failRun(ctx, cmd.RunID, epoch, xerr.Error())
 		}
 		for k, v := range writes {
@@ -677,7 +700,7 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 			return false, epoch, werr // transient — Nak, redeliver
 		}
 		parentCheckpointID = ckptID
-		if nerr := r.cl.NodeCompleted(ctx, cmd.RunID, epoch, node.ID, node.Type); nerr != nil {
+		if nerr := r.cl.NodeCompleted(ctx, cmd.RunID, epoch, node.ID, node.Type, elapsed); nerr != nil {
 			if errors.Is(nerr, ErrStaleLease) {
 				return true, epoch, nil
 			}
@@ -714,6 +737,19 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		return false, epoch, cerr
 	}
 	return true, epoch, nil
+}
+
+// msSince renders a node's wall-clock execution time for execution_history's
+// duration_ms (an INTEGER). Measured by the worker rather than derived from
+// now()-started_at server-side so it reflects the node itself, not the node plus
+// two round trips. Clamped at zero: a backwards clock must not write a negative
+// duration.
+func msSince(start time.Time) *int {
+	ms := int(time.Since(start).Milliseconds())
+	if ms < 0 {
+		ms = 0
+	}
+	return &ms
 }
 
 // lastNode returns the most recently completed node id, or "" when nothing has
