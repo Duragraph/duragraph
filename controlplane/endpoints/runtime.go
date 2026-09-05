@@ -25,6 +25,15 @@ type Server struct {
 	Tenant   *pgxpool.Pool
 	Platform *pgxpool.Pool
 
+	// Auth carries the session/JWT settings for the platform surface
+	// (/api/auth, /api/platform, /api/admin). See session.go.
+	Auth AuthConfig
+
+	// OAuth is the provider-exchange seam used by the /api/auth callback.
+	// Nil means the real goth-backed exchanger; tests inject a stub because an
+	// OAuth round trip cannot run in-process. See auth.go.
+	OAuth oauthExchanger
+
 	// Subscriber tails NATS for SSE/wait endpoints. Nil when NATS is disabled
 	// (those endpoints then return 503). Set by the server composition root.
 	Subscriber *nats.Subscriber
@@ -59,6 +68,40 @@ func (s *Server) writeTx(ctx context.Context, pool *pgxpool.Pool, events []Event
 		}
 	}
 	// NotifyOutbox — visible to LISTENers only on commit.
+	if _, err := tx.Exec(ctx, `SELECT pg_notify('outbox_new', '')`); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// writeTxDeferred is writeTx for the case where the events are not known until
+// the write has run — a guarded `UPDATE ... WHERE status = $from RETURNING ...`
+// decides both WHETHER anything changed and WHAT the event should say, so the
+// events cannot be built before the transaction opens.
+//
+// Same guarantee as writeTx: the projection, the events, the outbox rows and
+// the notify all commit together or not at all. The only difference is
+// ordering inside the transaction (projection first, events second), which is
+// invisible outside it.
+//
+// Returning no events is legitimate and not a no-op: a transition the spec
+// marks outbox:false (AdminResume) still has to commit its row change.
+func (s *Server) writeTxDeferred(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) ([]Event, error)) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	events, err := fn(tx)
+	if err != nil {
+		return err
+	}
+	for _, e := range events {
+		if err := eventstore.Append(ctx, tx, e); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_notify('outbox_new', '')`); err != nil {
 		return err
 	}

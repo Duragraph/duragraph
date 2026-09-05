@@ -208,7 +208,12 @@ func toView(g group) groupView {
 		if !e.Custom {
 			gv.NeedsHTTP = true // generated body uses http.Status*
 		}
-		if ev.IsWrite && e.Outbox {
+		// A custom endpoint gets a route and a pointer comment, no body — so it
+		// contributes no imports. Without the !e.Custom guard, marking a write
+		// endpoint custom left pgx and uuid imported and unused, and Go makes
+		// that a compile error for the whole FILE. Nothing a hand-written
+		// handler can do about it: imports are file-scoped.
+		if ev.IsWrite && e.Outbox && !e.Custom {
 			gv.NeedsPgx = true
 			gv.NeedsUUID = true
 			ev.ProjectionSteps = e.Steps
