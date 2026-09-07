@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/duragraph/duragraph/controlplane/nats"
 	"github.com/google/uuid"
@@ -30,6 +31,14 @@ type relayEnvelope struct {
 	EventType   string          `json:"event_type"`
 	Payload     json.RawMessage `json:"payload"`
 }
+
+// heartbeatInterval is the SSE keepalive period. api.d2 declares
+// "Event: heartbeat — keepalive (30s)"; the value matters because it must sit
+// comfortably under the idle timeout of whatever proxy is in front of the API.
+//
+// A var, not a const, solely so a test can shorten it — observing a keepalive
+// otherwise means waiting 30s of real time per test.
+var heartbeatInterval = 30 * time.Second
 
 func isTerminalEvent(t string) bool {
 	return t == "run.completed" || t == "run.failed" || t == "run.cancelled"
@@ -156,11 +165,26 @@ func (s *Server) streamRun(c echo.Context, runIDs map[uuid.UUID]bool, closeOnTer
 	}
 
 	// 3. Live: stream new events for the watched runs, deduped.
+	//
+	// The heartbeat is not cosmetic. A run can sit silent for minutes — a slow
+	// node, or a pause waiting on a human — and an idle connection is exactly
+	// what proxies, load balancers and browsers reap. Without a periodic frame
+	// the client is disconnected mid-run and cannot tell that from the run
+	// having ended. api.d2 declares "Event: heartbeat — keepalive (30s)".
+	beat := time.NewTicker(heartbeatInterval)
+	defer beat.Stop()
+
 	for {
 		var msg *nats.SubscriptionMsg
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-beat.C:
+			// A failed write means the client is gone; stop rather than spin.
+			if writeSSEFrame(c, "heartbeat", nil) != nil {
+				return nil
+			}
+			continue
 		case msg = <-runsCh:
 		case msg = <-execCh:
 		}
@@ -456,3 +480,9 @@ func (s *Server) RunsStatelessWait(c echo.Context) error {
 	}
 	return s.waitForRun(c, rid)
 }
+
+// HeartbeatInterval reports the SSE keepalive period; SetHeartbeatInterval
+// overrides it for tests. Restore the original when done.
+func HeartbeatInterval() time.Duration { return heartbeatInterval }
+
+func SetHeartbeatInterval(d time.Duration) { heartbeatInterval = d }

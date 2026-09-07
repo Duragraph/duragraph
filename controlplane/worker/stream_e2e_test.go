@@ -205,3 +205,93 @@ func TestStreamEndToEnd(t *testing.T) {
 
 	waitForRunStatus(t, ctx, pool, rid, "completed", 10*time.Second)
 }
+
+// TestSSEHeartbeatKeepsConnectionAlive: a run can sit silent for minutes — a
+// slow node, or a pause waiting on a human — and an idle connection is exactly
+// what proxies, load balancers and browsers reap. api.d2 declares
+// "Event: heartbeat — keepalive (30s)"; nothing emitted one, so a client
+// watching a quiet run was disconnected mid-run and could not tell that from
+// the run having ended.
+//
+// The interval is shortened for the test — waiting 30s of real time to observe
+// a keepalive would be its own kind of bug — but the DEFAULT is asserted too,
+// since that value is what has to sit under a proxy's idle timeout.
+//
+// Reads with its own cancelable request rather than readSSE: this stream never
+// reaches a terminal event, so the handler runs until the client goes away, and
+// httptest.Server.Close() blocks on outstanding handlers. The request context
+// must be canceled before the deferred Close, or the test deadlocks.
+func TestSSEHeartbeatKeepsConnectionAlive(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := newPool(t)
+
+	if endpoints.HeartbeatInterval() != 30*time.Second {
+		t.Errorf("api.d2 specifies a 30s keepalive, got %s", endpoints.HeartbeatInterval())
+	}
+	endpoints.SetHeartbeatInterval(150 * time.Millisecond)
+	defer endpoints.SetHeartbeatInterval(30 * time.Second)
+
+	nc, _, err := dnats.Connect(ctx, natsURL)
+	if err != nil {
+		t.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Drain() //nolint:errcheck
+
+	// A run that exists but produces NOTHING — the quiet case the keepalive is
+	// for. No worker and no relay are started.
+	tid, _, rid := seedThreadAssistantRun(t, ctx, pool)
+
+	e := echo.New()
+	(&endpoints.Server{Tenant: pool, Subscriber: dnats.NewSubscriberFromConn(nc)}).RegisterRuns(e.Group("/api/v1"))
+	sseSrv := httptest.NewServer(e)
+
+	reqCtx, reqCancel := context.WithCancel(ctx)
+	url := sseSrv.URL + "/api/v1/threads/" + tid.String() + "/runs/" + rid.String() + "/stream"
+	req, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		reqCancel()
+		sseSrv.Close()
+		t.Fatalf("sse connect: %v", err)
+	}
+
+	events := make(chan string, 8)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			if line := sc.Text(); strings.HasPrefix(line, "event: ") {
+				select {
+				case events <- strings.TrimPrefix(line, "event: "):
+				default:
+				}
+			}
+		}
+	}()
+
+	var got []string
+	deadline := time.After(10 * time.Second)
+collect:
+	for len(got) < 2 {
+		select {
+		case ev := <-events:
+			got = append(got, ev)
+		case <-deadline:
+			break collect
+		}
+	}
+
+	// Release the handler before Close, which waits on outstanding requests.
+	reqCancel()
+	_ = resp.Body.Close()
+	sseSrv.Close()
+
+	if len(got) < 2 {
+		t.Fatalf("want at least 2 keepalive frames on a silent run, got %d: %v", len(got), got)
+	}
+	for i, ev := range got {
+		if ev != "heartbeat" {
+			t.Errorf("frame %d: want heartbeat on a silent run, got %q", i, ev)
+		}
+	}
+}
