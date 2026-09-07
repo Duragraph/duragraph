@@ -162,6 +162,23 @@ func (c *Client) NodeFailed(ctx context.Context, runID uuid.UUID, epoch int, nod
 	return err
 }
 
+// RunCompletedWithOutput marks runID completed AND freezes the run's result,
+// fenced on epoch.
+//
+// Without an output a finished run answered nothing: runs.output stayed NULL,
+// so a caller polling or streaming the run learned that it succeeded and never
+// what it produced. graph-engine.d2's end executor is "freeze output channel ->
+// run.output"; this is the wire half of that.
+func (c *Client) RunCompletedWithOutput(ctx context.Context, runID uuid.UUID, epoch int, output json.RawMessage) error {
+	body := eventsRequest{Events: []workerEvent{{
+		Type:       "run.completed",
+		LeaseEpoch: epoch,
+		Output:     output,
+	}}}
+	_, err := c.doJSON(ctx, http.MethodPost, c.eventsPath(runID), body, nil)
+	return err
+}
+
 // RunCompleted marks runID completed, fenced on epoch.
 func (c *Client) RunCompleted(ctx context.Context, runID uuid.UUID, epoch int) error {
 	body := eventsRequest{Events: []workerEvent{{Type: "run.completed", LeaseEpoch: epoch}}}

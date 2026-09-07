@@ -346,6 +346,21 @@ func (r snapshotRow) toAPI() CheckpointResponse {
 // populated here (the row alone doesn't carry it — see DIVERGENCES).
 // Interrupts/ParentCheckpoint/Tasks/Metadata/Next have no snapshots-table
 // source and stay zero/empty.
+// toThreadState renders a snapshot as the LangGraph ThreadState.
+//
+// UNWRAPPING MATTERS. snapshots.state holds the worker's checkpoint ENVELOPE —
+// {channels, completed_nodes, frontier, node, parent_checkpoint_id,
+// interrupted} — which is execution bookkeeping, not the user's state. Returned
+// verbatim it put the caller's actual values one level down under `channels`
+// and published the walk's internals as though they were the graph's data. So
+// the envelope is unwrapped here: `values` is the channel values, and `next` is
+// the frontier — the nodes that would run next, which is exactly what
+// ThreadState.next means and which was previously hardcoded to empty even
+// though the checkpoint knew the answer.
+//
+// A snapshot with no `channels` key is passed through unchanged. That is the
+// pre-envelope shape (and anything a non-worker writer produces), and guessing
+// at its interior would be worse than returning it as-is.
 func (r snapshotRow) toThreadState() ThreadState {
 	cid := strconv.FormatInt(r.ID, 10)
 	ts := ThreadState{
@@ -357,6 +372,31 @@ func (r snapshotRow) toThreadState() ThreadState {
 	var v interface{} = map[string]interface{}{}
 	if len(r.State) > 0 {
 		_ = json.Unmarshal(r.State, &v)
+	}
+	if env, ok := v.(map[string]interface{}); ok {
+		if channels, has := env["channels"]; has {
+			v = channels
+			if v == nil { // an explicit null channels is still "no values"
+				v = map[string]interface{}{}
+			}
+			if frontier, ok := env["frontier"].([]interface{}); ok {
+				next := make([]string, 0, len(frontier))
+				for _, n := range frontier {
+					if s, ok := n.(string); ok {
+						next = append(next, s)
+					}
+				}
+				ts.Next = next
+			}
+			// parent_checkpoint_id is part of the checkpoint's identity, not
+			// the state, so it belongs on Checkpoint rather than in values.
+			// ParentCheckpoint is typed as a free-form object in the OpenAPI,
+			// so it carries the same checkpoint_id key CheckpointConfig uses.
+			if pid, ok := env["parent_checkpoint_id"].(float64); ok && pid > 0 {
+				parent := map[string]interface{}{"checkpoint_id": strconv.FormatInt(int64(pid), 10)}
+				ts.ParentCheckpoint = &parent
+			}
+		}
 	}
 	ts.Values = v
 	return ts

@@ -306,9 +306,18 @@ func (s *Server) terminalRun(ctx context.Context, rid string, ev WorkerEvent) er
 		status = "failed"
 	}
 	return s.writeTxOrHTTP(ctx, rid, ev.Type, ev, func(tx pgx.Tx) error {
+		// Freeze the run's result alongside its terminal status. runs.output was
+		// declared (postgres.d2 run_ctx) and written by nothing, so a finished
+		// run reported that it had succeeded and never what it produced — the
+		// caller got status='success' and output=null.
+		//
+		// COALESCE keeps a previously-recorded output rather than blanking it:
+		// a failure path that carries no output must not erase a partial result
+		// already frozen, and only a non-NULL new value overwrites.
 		ct, err := tx.Exec(ctx,
-			`UPDATE runs SET status=$2, completed_at=now(), error=$3 WHERE id=$1 AND lease_epoch=$4`,
-			rid, status, ev.Error, ev.LeaseEpoch)
+			`UPDATE runs SET status=$2, completed_at=now(), error=$3, output=COALESCE($5, output)
+			 WHERE id=$1 AND lease_epoch=$4`,
+			rid, status, ev.Error, ev.LeaseEpoch, nullableJSON(ev.Output))
 		if err != nil {
 			return err
 		}

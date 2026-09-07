@@ -94,7 +94,7 @@ type runClient interface {
 	NodeStarted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string) error
 	NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string, durationMs *int) error
 	NodeFailed(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType, reason string, durationMs *int) error
-	RunCompleted(ctx context.Context, runID uuid.UUID, epoch int) error
+	RunCompletedWithOutput(ctx context.Context, runID uuid.UUID, epoch int, output json.RawMessage) error
 	RunFailed(ctx context.Context, runID uuid.UUID, epoch int, reason string) error
 	RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state, toolCalls []byte) error
 }
@@ -730,13 +730,85 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		}
 	}
 
-	if cerr := r.cl.RunCompleted(ctx, cmd.RunID, epoch); cerr != nil {
+	if cerr := r.cl.RunCompletedWithOutput(ctx, cmd.RunID, epoch, freezeOutput(graph, channels)); cerr != nil {
 		if errors.Is(cerr, ErrStaleLease) {
 			return true, epoch, nil
 		}
 		return false, epoch, cerr
 	}
 	return true, epoch, nil
+}
+
+// freezeOutput renders the run's result from the final channel values —
+// graph-engine.d2's end executor, "freeze output channel → run.output".
+//
+// By default the WHOLE channel map is the result. A graph can narrow that by
+// declaring an output projection on its end node:
+//
+//	{"id":"END","type":"end","config":{"output":"answer"}}     → {"answer": ...}
+//	{"id":"END","type":"end","config":{"output":["a","b"]}}    → {"a":..., "b":...}
+//
+// Narrowing is opt-in rather than required because a graph with no end node, or
+// an end node with no config, must still return something: answering with the
+// full state is always more useful than answering null, which is what every
+// completed run did before this existed.
+//
+// A named channel that never got written is omitted rather than emitted as
+// null, so "the key is absent" means "the graph never produced it".
+func freezeOutput(graph GraphDefinition, channels map[string]any) json.RawMessage {
+	if channels == nil {
+		channels = map[string]any{}
+	}
+	out := channels
+
+	if keys := outputKeys(graph); len(keys) > 0 {
+		projected := make(map[string]any, len(keys))
+		for _, k := range keys {
+			if v, ok := channels[k]; ok {
+				projected[k] = v
+			}
+		}
+		out = projected
+	}
+
+	b, err := json.Marshal(out)
+	if err != nil {
+		// A channel value that will not marshal must not lose the run: it
+		// already completed. Report an empty object rather than failing the
+		// terminal write and driving the run into redelivery.
+		return json.RawMessage(`{}`)
+	}
+	return b
+}
+
+// outputKeys reads the output projection declared on the graph's end node(s).
+// Returns nil when none is declared, meaning "emit everything".
+func outputKeys(graph GraphDefinition) []string {
+	var keys []string
+	for _, n := range graph.Nodes {
+		if n.Type != "end" || len(n.Config) == 0 {
+			continue
+		}
+		raw, ok := n.Config["output"]
+		if !ok {
+			continue
+		}
+		// Accept both a single channel name and a list of them. The list
+		// arrives as []any because Config is decoded generically.
+		switch v := raw.(type) {
+		case string:
+			if v != "" {
+				keys = append(keys, v)
+			}
+		case []any:
+			for _, item := range v {
+				if s, ok := item.(string); ok && s != "" {
+					keys = append(keys, s)
+				}
+			}
+		}
+	}
+	return keys
 }
 
 // msSince renders a node's wall-clock execution time for execution_history's
