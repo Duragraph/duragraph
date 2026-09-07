@@ -14,6 +14,33 @@ type WorkerRegisterRequest struct {
 	WorkerID uuid.UUID `json:"worker_id"`
 	Graphs   []string  `json:"graphs"`
 	Capacity int       `json:"capacity"`
+
+	// GraphDefinitions carries the actual graph bodies the worker can run.
+	//
+	// system-architecture.d2 routes graph_entity.graph_def to this endpoint —
+	// "SDK registers graph definition" — and it is the ONLY declared way a
+	// definition enters the system: nothing else in the API writes to `graphs`
+	// (the two graph routes are both GETs). Without it a graph could only be
+	// installed with direct SQL, so a user with nothing but the HTTP API could
+	// create an assistant, a thread and a run, and the run could never execute.
+	//
+	// Optional and additive: `graphs` (names only) still registers a worker for
+	// graphs that already exist, which is what an executor-only worker does.
+	GraphDefinitions []GraphDefinitionInput `json:"graph_definitions,omitempty"`
+}
+
+// GraphDefinitionInput is one graph body as the SDK registers it. The shape
+// mirrors the graphs table (name, version, description, nodes, edges, config)
+// and WorkerGraphResponse, which is what the worker reads back at execution
+// time — the same definition making a round trip.
+type GraphDefinitionInput struct {
+	Name        string          `json:"name"`
+	Version     string          `json:"version,omitempty"`
+	Description string          `json:"description,omitempty"`
+	AssistantID *uuid.UUID      `json:"assistant_id,omitempty"`
+	Nodes       json.RawMessage `json:"nodes"`
+	Edges       json.RawMessage `json:"edges"`
+	Config      json.RawMessage `json:"config,omitempty"`
 }
 
 type WorkerRegisterResponse struct {

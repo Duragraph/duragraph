@@ -31,8 +31,9 @@ import (
 // Both are populated by TestMain and shared across every test in this
 // package.
 var (
-	testPool *pgxpool.Pool
-	testNATS *natsgo.Conn
+	testPool     *pgxpool.Pool
+	testPlatform *pgxpool.Pool
+	testNATS     *natsgo.Conn
 )
 
 func TestMain(m *testing.M) {
@@ -119,7 +120,29 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "migrate: %v\n", err)
 		os.Exit(1)
 	}
+
+	// --- platform database (same container, separate DB) ---
+	// The platform surface (auth, admin, /me) targets its own database
+	// (endpoints.yaml: db: platform), with its own users/tenants tables AND its
+	// own eventstore. A separate DB in the same container keeps the two schemas
+	// genuinely distinct — a handler that reaches for the wrong pool fails here
+	// rather than silently finding a table that only exists per-tenant.
+	if _, err := testPool.Exec(ctx, "CREATE DATABASE platform"); err != nil {
+		fmt.Fprintf(os.Stderr, "create platform db: %v\n", err)
+		os.Exit(1)
+	}
+	platDSN := strings.Replace(dsn, "/tenant?", "/platform?", 1)
+	testPlatform, err = pgxpool.New(ctx, platDSN)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "platform pool: %v\n", err)
+		os.Exit(1)
+	}
+	if err := applyMigrations(ctx, testPlatform, "platform"); err != nil {
+		fmt.Fprintf(os.Stderr, "platform migrate: %v\n", err)
+		os.Exit(1)
+	}
 	code := m.Run()
+	testPlatform.Close()
 	testPool.Close()
 	_ = pg.Terminate(ctx)
 	os.Exit(code)
@@ -137,8 +160,16 @@ func freeTCPPort() (int, error) {
 }
 
 // applyTenantMigrations runs every tenant *.up.sql in order against the pool.
+// applyTenantMigrations applies the tenant migration set.
 func applyTenantMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	dir := filepath.Join("..", "db", "migrations", "tenant")
+	return applyMigrations(ctx, pool, "tenant")
+}
+
+// applyMigrations applies every *.up.sql in db/migrations/<set> in filename
+// order. Globbed rather than listed so a new migration is picked up by the
+// suite the moment it lands.
+func applyMigrations(ctx context.Context, pool *pgxpool.Pool, set string) error {
+	dir := filepath.Join("..", "db", "migrations", set)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err

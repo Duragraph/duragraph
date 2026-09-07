@@ -672,6 +672,7 @@ groups:
       - name: claim
         method: POST
         path: /workers/{id}/runs/claim
+        custom: true
         kind: write
         outbox: true
         events: [run.started]
@@ -737,12 +738,14 @@ groups:
       - name: login
         method: GET
         path: /api/auth/{provider}/login
+        custom: true
         kind: special
         outbox: false
         steps: ["Set goth CSRF state cookie", "302 redirect to provider authorization URL"]
       - name: callback
         method: GET
         path: /api/auth/{provider}/callback
+        custom: true
         kind: write
         outbox: true
         events: [user.signed_up, user.promoted_to_admin, user.approved, tenant.pending, tenant.provisioning]
@@ -762,12 +765,14 @@ groups:
       - name: logout
         method: POST
         path: /api/auth/logout
+        custom: true
         kind: special
         outbox: false
         steps: ["Clear cookie: Set-Cookie duragraph_session=; Max-Age=0"]
       - name: refresh
         method: POST
         path: /api/auth/refresh
+        custom: true
         kind: special
         outbox: false
         steps: ["Validate current JWT (signature + expiry)", "Mint new JWT (same claims, new exp)"]
@@ -779,6 +784,7 @@ groups:
       - name: me
         method: GET
         path: /api/platform/me
+        custom: true
         kind: read
         outbox: false
         steps:
@@ -792,6 +798,7 @@ groups:
       - name: list_users
         method: GET
         path: /api/admin/users
+        custom: true
         kind: read
         outbox: false
         steps:
@@ -800,6 +807,7 @@ groups:
       - name: approve
         method: POST
         path: /api/admin/users/{id}/approve
+        custom: true
         kind: write
         outbox: true
         events: [user.approved, tenant.provisioning]
@@ -815,6 +823,7 @@ groups:
       - name: reject
         method: POST
         path: /api/admin/users/{id}/reject
+        custom: true
         kind: write
         outbox: true
         events: [user.rejected]
@@ -828,6 +837,7 @@ groups:
       - name: suspend
         method: POST
         path: /api/admin/users/{id}/suspend
+        custom: true
         kind: write
         outbox: true
         events: [user.suspended, tenant.suspended]
@@ -842,6 +852,7 @@ groups:
       - name: resume
         method: POST
         path: /api/admin/users/{id}/resume
+        custom: true
         kind: write
         outbox: false
         steps:
@@ -852,6 +863,7 @@ groups:
       - name: retry_migration
         method: POST
         path: /api/admin/tenants/{id}/retry-migration
+        custom: true
         kind: write
         outbox: true
         events: [tenant.provisioning]
@@ -865,6 +877,7 @@ groups:
       - name: metrics
         method: GET
         path: /api/admin/metrics
+        custom: true
         kind: read
         outbox: false
         backend: mimir
@@ -872,6 +885,7 @@ groups:
       - name: metrics_tenant
         method: GET
         path: /api/admin/metrics/{tenant_id}
+        custom: true
         kind: read
         outbox: false
         backend: mimir

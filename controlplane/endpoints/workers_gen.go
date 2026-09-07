@@ -4,10 +4,6 @@
 package endpoints
 
 import (
-	"net/http"
-
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 )
 
@@ -30,38 +26,7 @@ func (s *Server) RegisterWorkers(g *echo.Group) {
 
 // WorkersDeregister — POST /workers/{id}/deregister  (kind: write) — hand-written in workers.go
 
-// WorkersClaim — POST /workers/{id}/runs/claim  (kind: write)
-//   - SELECT runs WHERE status='queued' AND graph_id IN (worker graphs) ORDER BY priority DESC, created_at FOR UPDATE SKIP LOCKED LIMIT :max_runs
-//   - SELECT snapshots: latest checkpoint_id per run (if resuming)
-//   - UPDATE runs SET status='in_progress', worker_id=:id, lease_epoch=lease_epoch+1, started_at=now(), version=version+1
-//   - INSERT events: event_type='run.started' for each claimed run
-//   - INSERT outbox (same TX)
-//   - pg_notify('outbox_new',”)
-func (s *Server) WorkersClaim(c echo.Context) error {
-	ctx := c.Request().Context()
-	_ = ctx
-	var req map[string]any // TODO: bind OpenAPI type (WorkersClaim request schema)
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	aggID := uuid.New() // TODO: new id for create; parse from path param for update/cancel/etc.
-	events := []Event{
-		{AggregateType: "Run", AggregateID: aggID, EventType: "run.started"},
-	}
-	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
-		// TODO projection write:
-		//   SELECT runs WHERE status='queued' AND graph_id IN (worker graphs) ORDER BY priority DESC, created_at FOR UPDATE SKIP LOCKED LIMIT :max_runs
-		//   SELECT snapshots: latest checkpoint_id per run (if resuming)
-		//   UPDATE runs SET status='in_progress', worker_id=:id, lease_epoch=lease_epoch+1, started_at=now(), version=version+1
-		//   INSERT events: event_type='run.started' for each claimed run
-		//   INSERT outbox (same TX)
-		//   pg_notify('outbox_new','')
-		return nil
-	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, map[string]any{}) // TODO: return OpenAPI response type
-}
+// WorkersClaim — POST /workers/{id}/runs/claim  (kind: write) — hand-written in workers.go
 
 // WorkersStreamEvents — POST /workers/{id}/runs/{rid}/events  (kind: write) — hand-written in workers.go
 

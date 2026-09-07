@@ -9,19 +9,44 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 )
 
-// WorkersRegister upserts a worker as online. POST /workers/register -> 200.
+// WorkersRegister upserts a worker as online and installs any graph
+// definitions it brought with it. POST /workers/register -> 200.
+//
+// Registering the DEFINITIONS here is what system-architecture.d2 prescribes
+// ("SDK registers graph definition" -> workers_ep.register), and it is the only
+// declared route by which a graph body enters the system: every other graph
+// endpoint is a GET. The two halves are one transaction because they are one
+// claim — "I can run these graphs, and here is what they are". Registering the
+// worker while failing to install its graphs would advertise capacity for
+// something unrunnable, and the claim endpoint would hand it work it cannot
+// load.
 func (s *Server) WorkersRegister(c echo.Context) error {
 	ctx := c.Request().Context()
 	var req WorkerRegisterRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if _, err := s.Tenant.Exec(ctx, `
+	for i, g := range req.GraphDefinitions {
+		if strings.TrimSpace(g.Name) == "" {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity,
+				"graph_definitions["+strconv.Itoa(i)+"]: name is required")
+		}
+	}
+
+	tx, err := s.Tenant.Begin(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO workers (worker_id, graphs, capacity, status, lease_expires_at, last_heartbeat_at)
 		VALUES ($1, $2, $3, 'online', now() + interval '60 seconds', now())
 		ON CONFLICT (worker_id) DO UPDATE
@@ -30,13 +55,61 @@ func (s *Server) WorkersRegister(c echo.Context) error {
 		req.WorkerID, req.Graphs, req.Capacity); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+
+	for _, g := range req.GraphDefinitions {
+		// Re-registering is the NORMAL case — every worker restart replays its
+		// definitions — so a repeat must update in place rather than pile up
+		// duplicate rows that WorkersLoadGraph would then have to choose
+		// between. There is no unique constraint on graphs(name) to hang an
+		// ON CONFLICT on, so the upsert is done explicitly: update the newest
+		// row for the name, insert only when nothing matched.
+		ct, err := tx.Exec(ctx, `
+			UPDATE graphs SET
+			    assistant_id = COALESCE($2, assistant_id),
+			    version      = COALESCE(NULLIF($3,''), version),
+			    description  = COALESCE(NULLIF($4,''), description),
+			    nodes = $5, edges = $6, config = $7, updated_at = now()
+			WHERE id = (SELECT id FROM graphs WHERE name = $1 ORDER BY created_at DESC LIMIT 1)`,
+			g.Name, g.AssistantID, g.Version, g.Description,
+			jsonOrEmptyArray(g.Nodes), jsonOrEmptyArray(g.Edges), jsonOrEmpty(g.Config))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		if ct.RowsAffected() > 0 {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO graphs (assistant_id, name, version, description, nodes, edges, config)
+			VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7)`,
+			g.AssistantID, g.Name, g.Version, g.Description,
+			jsonOrEmptyArray(g.Nodes), jsonOrEmptyArray(g.Edges), jsonOrEmpty(g.Config)); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 	return c.JSON(http.StatusOK, WorkerRegisterResponse{WorkerID: req.WorkerID, Status: "online"})
+}
+
+// jsonOrEmptyArray defaults absent nodes/edges to [] rather than {}: both
+// columns are jsonb holding ARRAYS (Node[] / Edge[] per postgres.d2), and an
+// object there would fail to decode in the worker's graph loader.
+func jsonOrEmptyArray(b []byte) []byte {
+	if len(b) == 0 {
+		return []byte("[]")
+	}
+	return b
 }
 
 // WorkersHeartbeat renews the worker lease. POST /workers/{id}/heartbeat -> 200.
 func (s *Server) WorkersHeartbeat(c echo.Context) error {
 	ctx := c.Request().Context()
-	wid := c.Param("id")
+	wid, err := pathUUIDString(c, "id")
+	if err != nil {
+		return err
+	}
 	var req WorkerHeartbeatRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -60,7 +133,10 @@ func (s *Server) WorkersHeartbeat(c echo.Context) error {
 // POST /workers/{id}/deregister -> 204.
 func (s *Server) WorkersDeregister(c echo.Context) error {
 	ctx := c.Request().Context()
-	wid := c.Param("id")
+	wid, err := pathUUIDString(c, "id")
+	if err != nil {
+		return err
+	}
 	tx, err := s.Tenant.Begin(ctx)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -86,8 +162,14 @@ func (s *Server) WorkersDeregister(c echo.Context) error {
 // doc "events endpoint". runs has no lease_expires_at — fence on epoch only.
 func (s *Server) WorkersStreamEvents(c echo.Context) error {
 	ctx := c.Request().Context()
-	wid := c.Param("id")
-	rid := c.Param("rid")
+	wid, err := pathUUIDString(c, "id")
+	if err != nil {
+		return err
+	}
+	rid, err := pathUUIDString(c, "rid")
+	if err != nil {
+		return err
+	}
 	var req WorkerEventsRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -334,8 +416,14 @@ func (s *Server) WorkersWriteCheckpoint(c echo.Context) error {
 // GET /threads/{tid}/checkpoints/{ckpt} -> 200 / 404.
 func (s *Server) WorkersReadCheckpoint(c echo.Context) error {
 	ctx := c.Request().Context()
-	tid := c.Param("tid")
-	ckpt := c.Param("ckpt")
+	tid, err := pathUUIDString(c, "tid")
+	if err != nil {
+		return err
+	}
+	ckpt, err := parseCheckpointID(c.Param("ckpt"))
+	if err != nil {
+		return err
+	}
 	rows, err := s.Tenant.Query(ctx, `
 		SELECT id, stream_id, aggregate_id, version, state, created_at
 		FROM snapshots
@@ -384,7 +472,10 @@ func (s *Server) WorkersLatestCheckpoint(c echo.Context) error {
 // -> 200 WorkerGraphResponse / 404 (unknown run, or assistant with no graph).
 func (s *Server) WorkersLoadGraph(c echo.Context) error {
 	ctx := c.Request().Context()
-	rid := c.Param("rid")
+	rid, err := pathUUIDString(c, "rid")
+	if err != nil {
+		return err
+	}
 	var resp WorkerGraphResponse
 	// Latest graph for the run's assistant. Ordered by created_at, NOT version:
 	// version is VARCHAR(50), so `ORDER BY version DESC` sorts lexicographically
@@ -392,10 +483,33 @@ func (s *Server) WorkersLoadGraph(c echo.Context) error {
 	// one version. Slice-1 assumes one graph per assistant; created_at keeps
 	// "latest wins" correct if that assumption is ever relaxed. (Selecting by
 	// graph_id/name is a separate TARGET — see graph-engine.d2 loader.)
-	err := s.Tenant.QueryRow(ctx, `
-		SELECT nodes, edges, config FROM graphs
-		WHERE assistant_id = (SELECT assistant_id FROM runs WHERE id = $1)
-		ORDER BY created_at DESC LIMIT 1`, rid).Scan(&resp.Nodes, &resp.Edges, &resp.Config)
+	// Resolve the graph by EITHER binding postgres.d2 declares:
+	//
+	//	graphs_t.assistant_id -> assistants_t.id  "bound via graph_id name match"
+	//	assistants_t.graph_id -> graphs_t.name    "resolves by name"
+	//
+	// Only the first was implemented, and that made a graph registered by NAME
+	// invisible: the SDK registers a definition under its graph_id (from
+	// langgraph.json) with no assistant attached, so graphs.assistant_id is
+	// NULL and the assistant-id lookup found nothing. Every such run failed
+	// with 404 "no graph for run", burned its redeliveries, and died — the
+	// only graphs that ever worked were ones written straight into Postgres
+	// with an assistant_id already set.
+	//
+	// The direct binding is preferred when both match (an assistant with its
+	// own pinned graph beats a shared one of the same name); created_at breaks
+	// the remaining tie, NOT version — version is VARCHAR(50), so ordering by
+	// it sorts '10' before '2'.
+	err = s.Tenant.QueryRow(ctx, `
+		SELECT g.nodes, g.edges, g.config
+		FROM runs r
+		LEFT JOIN assistants a ON a.id = r.assistant_id
+		JOIN graphs g
+		  ON g.assistant_id = r.assistant_id
+		  OR (a.graph_id IS NOT NULL AND a.graph_id <> '' AND g.name = a.graph_id)
+		WHERE r.id = $1
+		ORDER BY (g.assistant_id = r.assistant_id) DESC NULLS LAST, g.created_at DESC
+		LIMIT 1`, rid).Scan(&resp.Nodes, &resp.Edges, &resp.Config)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "no graph for run")

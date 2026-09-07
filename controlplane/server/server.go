@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/duragraph/duragraph/controlplane/cron"
 	"github.com/duragraph/duragraph/controlplane/endpoints"
 	"github.com/duragraph/duragraph/controlplane/nats"
 	"github.com/duragraph/duragraph/controlplane/reaper"
@@ -53,6 +54,27 @@ type Config struct {
 	// groups return 500, but the rest still works for a single-tenant
 	// bootstrap.
 	PlatformDSN string
+
+	// JWTSecret is the HMAC key for platform session tokens. Empty leaves
+	// the platform surface (/api/auth, /api/platform, /api/admin) unable
+	// to mint or verify sessions: auth answers 503 and /me answers 401,
+	// rather than signing with an empty key that any other unconfigured
+	// deployment could forge. Read from DURAGRAPH_JWT_SECRET when unset.
+	JWTSecret []byte
+
+	// BaseURL is the canonical external origin (scheme + host), used for
+	// the logout CSRF origin check. Read from DURAGRAPH_BASE_URL.
+	BaseURL string
+
+	// CookieDomain scopes the session cookie; empty means host-only,
+	// which is the correct default in dev. Read from
+	// DURAGRAPH_COOKIE_DOMAIN.
+	CookieDomain string
+
+	// CookieSecure sets the Secure attribute on the session cookie. Must
+	// be true wherever the platform is served over https. Read from
+	// DURAGRAPH_COOKIE_SECURE.
+	CookieSecure bool
 
 	// NATSURL is the JetStream URL for the outbox relay + SSE
 	// subscriber. Empty disables the relay (read endpoints still work).
@@ -106,12 +128,14 @@ type Server struct {
 	cleanup      *nats.CleanupWorker
 	runProcessor *nats.RunProcessor
 	reaper       *reaper.RunReaper
+	cronSched    *cron.Scheduler
 	echo         *echo.Echo
 
 	relayDone   chan error
 	cleanupDone chan error
 	rpDone      chan error
 	reaperDone  chan error
+	cronDone    chan error
 
 	closeOnce sync.Once
 }
@@ -134,6 +158,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		cleanupDone: make(chan error, 1),
 		rpDone:      make(chan error, 1),
 		reaperDone:  make(chan error, 1),
+		cronDone:    make(chan error, 1),
 	}
 
 	// --- pgxpools ---
@@ -151,9 +176,13 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		s.plat = platformPool
 	}
 
-	// --- run reaper (needs only the tenant pool, not NATS) ---
+	// --- run reaper + cron scheduler (need only the tenant pool, not NATS) ---
 	if s.tenant != nil {
 		s.reaper = reaper.NewRunReaper(s.tenant, reaper.Config{})
+		// Fires due crons by creating runs through the same event-sourced
+		// path as the API, so a scheduled run is dispatched exactly like a
+		// requested one.
+		s.cronSched = cron.NewScheduler(s.tenant, cron.Config{})
 	}
 
 	// --- migrations ---
@@ -226,10 +255,41 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	e.Server.IdleTimeout = 60 * time.Second
 	s.echo = e
 
+	// Environment fallbacks for the platform session settings. Config wins when
+	// set explicitly (tests, embedding); the env vars are the deployment path.
+	jwtSecret := cfg.JWTSecret
+	if len(jwtSecret) == 0 {
+		jwtSecret = []byte(os.Getenv("DURAGRAPH_JWT_SECRET"))
+	}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = os.Getenv("DURAGRAPH_BASE_URL")
+	}
+	cookieDomain := cfg.CookieDomain
+	if cookieDomain == "" {
+		cookieDomain = os.Getenv("DURAGRAPH_COOKIE_DOMAIN")
+	}
+	cookieSecure := cfg.CookieSecure
+	if !cookieSecure {
+		cookieSecure = os.Getenv("DURAGRAPH_COOKIE_SECURE") == "true"
+	}
+	if len(jwtSecret) == 0 {
+		// Loud, because the failure mode is otherwise silent: every login
+		// answers 503 and it looks like the provider is down.
+		slog.Warn("platform session secret is not set; /api/auth, /api/platform and /api/admin " +
+			"cannot establish sessions (set DURAGRAPH_JWT_SECRET)")
+	}
+
 	ep := &endpoints.Server{
 		Tenant:     s.tenant,
 		Platform:   s.plat,
 		Subscriber: subscriber,
+		Auth: endpoints.AuthConfig{
+			JWTSecret:    jwtSecret,
+			BaseURL:      baseURL,
+			CookieDomain: cookieDomain,
+			CookieSecure: cookieSecure,
+		},
 	}
 	g := e.Group("/api/v1")
 	ep.RegisterAssistants(g)
@@ -238,9 +298,18 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	ep.RegisterCrons(g)
 	ep.RegisterStore(g)
 	ep.RegisterWorkers(g)
-	ep.RegisterAuth(g)
-	ep.RegisterPlatform(g)
-	ep.RegisterAdmin(g)
+
+	// The platform surface is NOT under /api/v1. endpoints.yaml declares these
+	// with absolute paths (/api/auth/..., /api/platform/..., /api/admin/...)
+	// because api.d2 puts them on their own surface — "Platform surface:
+	// /api/auth/*, /api/platform/*, /api/admin/*". Mounting them on the v1
+	// group concatenated the two and served /api/v1/api/admin/users, which is
+	// in no diagram and no spec. They mount at the root instead.
+	root := e.Group("")
+	ep.RegisterAuth(root)
+	ep.RegisterPlatform(root)
+	ep.RegisterAdmin(root)
+
 	ep.RegisterSystem(e) // root-level: /ok, /info, /metrics
 
 	return s, nil
@@ -263,6 +332,9 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	if s.reaper != nil && s.cfg.Relays {
 		go func() { s.reaperDone <- s.reaper.Start(ctx) }()
+	}
+	if s.cronSched != nil && s.cfg.Relays {
+		go func() { s.cronDone <- s.cronSched.Start(ctx) }()
 	}
 
 	// --- HTTP ---
@@ -314,6 +386,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.reaper != nil {
 		s.reaper.Stop()
+	}
+	if s.cronSched != nil {
+		s.cronSched.Stop()
 	}
 	// Wait for those goroutines to exit (bounded by DrainTimeout).
 	select {
