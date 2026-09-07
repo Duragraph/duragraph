@@ -43,11 +43,37 @@ func NewClient(baseURL string, workerID uuid.UUID, httpClient *http.Client) *Cli
 // Register upserts this worker as online, advertising the graphs it can run
 // and its concurrency capacity. POST /api/v1/workers/register.
 func (c *Client) Register(ctx context.Context, graphs []string, capacity int) error {
+	return c.RegisterWithGraphs(ctx, graphs, capacity, nil)
+}
+
+// GraphDefinition0 is one graph body as the SDK hands it to the control plane
+// at registration. Named to avoid colliding with the worker's own
+// GraphDefinition (the decoded form it executes); this is the wire shape.
+type GraphDefinition0 struct {
+	Name        string          `json:"name"`
+	Version     string          `json:"version,omitempty"`
+	Description string          `json:"description,omitempty"`
+	AssistantID *uuid.UUID      `json:"assistant_id,omitempty"`
+	Nodes       json.RawMessage `json:"nodes"`
+	Edges       json.RawMessage `json:"edges"`
+	Config      json.RawMessage `json:"config,omitempty"`
+}
+
+// RegisterWithGraphs registers the worker AND installs the graph definitions it
+// can run, in one call.
+//
+// This is the path system-architecture.d2 describes as "SDK registers graph
+// definition". It matters because nothing else in the API writes graphs: before
+// it existed, a graph could only be installed with direct SQL, so a user
+// holding only the HTTP API could create an assistant, a thread and a run, and
+// the run would never execute for want of a graph to load.
+func (c *Client) RegisterWithGraphs(ctx context.Context, graphs []string, capacity int, defs []GraphDefinition0) error {
 	req := struct {
-		WorkerID uuid.UUID `json:"worker_id"`
-		Graphs   []string  `json:"graphs"`
-		Capacity int       `json:"capacity"`
-	}{WorkerID: c.workerID, Graphs: graphs, Capacity: capacity}
+		WorkerID         uuid.UUID          `json:"worker_id"`
+		Graphs           []string           `json:"graphs"`
+		Capacity         int                `json:"capacity"`
+		GraphDefinitions []GraphDefinition0 `json:"graph_definitions,omitempty"`
+	}{WorkerID: c.workerID, Graphs: graphs, Capacity: capacity, GraphDefinitions: defs}
 	_, err := c.doJSON(ctx, http.MethodPost, "/api/v1/workers/register", req, nil)
 	return err
 }
