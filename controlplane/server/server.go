@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/duragraph/duragraph/controlplane/cron"
 	"github.com/duragraph/duragraph/controlplane/endpoints"
 	"github.com/duragraph/duragraph/controlplane/nats"
 	"github.com/duragraph/duragraph/controlplane/reaper"
@@ -127,12 +128,14 @@ type Server struct {
 	cleanup      *nats.CleanupWorker
 	runProcessor *nats.RunProcessor
 	reaper       *reaper.RunReaper
+	cronSched    *cron.Scheduler
 	echo         *echo.Echo
 
 	relayDone   chan error
 	cleanupDone chan error
 	rpDone      chan error
 	reaperDone  chan error
+	cronDone    chan error
 
 	closeOnce sync.Once
 }
@@ -155,6 +158,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		cleanupDone: make(chan error, 1),
 		rpDone:      make(chan error, 1),
 		reaperDone:  make(chan error, 1),
+		cronDone:    make(chan error, 1),
 	}
 
 	// --- pgxpools ---
@@ -172,9 +176,13 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		s.plat = platformPool
 	}
 
-	// --- run reaper (needs only the tenant pool, not NATS) ---
+	// --- run reaper + cron scheduler (need only the tenant pool, not NATS) ---
 	if s.tenant != nil {
 		s.reaper = reaper.NewRunReaper(s.tenant, reaper.Config{})
+		// Fires due crons by creating runs through the same event-sourced
+		// path as the API, so a scheduled run is dispatched exactly like a
+		// requested one.
+		s.cronSched = cron.NewScheduler(s.tenant, cron.Config{})
 	}
 
 	// --- migrations ---
@@ -325,6 +333,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.reaper != nil && s.cfg.Relays {
 		go func() { s.reaperDone <- s.reaper.Start(ctx) }()
 	}
+	if s.cronSched != nil && s.cfg.Relays {
+		go func() { s.cronDone <- s.cronSched.Start(ctx) }()
+	}
 
 	// --- HTTP ---
 	httpErr := make(chan error, 1)
@@ -375,6 +386,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.reaper != nil {
 		s.reaper.Stop()
+	}
+	if s.cronSched != nil {
+		s.cronSched.Stop()
 	}
 	// Wait for those goroutines to exit (bounded by DrainTimeout).
 	select {

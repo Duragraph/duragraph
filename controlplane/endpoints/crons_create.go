@@ -13,10 +13,13 @@ package endpoints
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
+
+	"github.com/duragraph/duragraph/controlplane/cron"
 )
 
 // cronReturningColumns is the full cronRow column set, shared by the create
@@ -39,10 +42,25 @@ func (s *Server) CronsCreate(c echo.Context) error {
 	if err != nil {
 		return assistantRefHTTPError(err)
 	}
-	rows, err := s.Tenant.Query(ctx, `INSERT INTO crons (thread_id, assistant_id, schedule, input, config, metadata, end_time)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+
+	// Reject an unparseable schedule at creation. Stored unvalidated it would
+	// look accepted and simply never fire, which is the worst failure mode
+	// available: silent and permanent.
+	if err := cron.Validate(req.Schedule); err != nil {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity,
+			"invalid schedule: must be a 5-field cron expression (minute hour day-of-month month day-of-week)")
+	}
+	// next_run_at is what the scheduler polls. Nothing set it before, so every
+	// cron ever created was inert regardless of the rest of the machinery.
+	next, err := cron.NextRun(req.Schedule, time.Now().UTC())
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "invalid schedule")
+	}
+
+	rows, err := s.Tenant.Query(ctx, `INSERT INTO crons (thread_id, assistant_id, schedule, input, config, metadata, end_time, next_run_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING `+cronReturningColumns, pathID, assistantID, req.Schedule,
-		mustJSON(req.Input), jsonbObjectOrEmpty(req.Config), jsonbObjectOrEmpty(req.Metadata), req.EndTime)
+		mustJSON(req.Input), jsonbObjectOrEmpty(req.Config), jsonbObjectOrEmpty(req.Metadata), req.EndTime, next)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
