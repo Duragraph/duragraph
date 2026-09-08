@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // defaultMaxIterations bounds the super-step loop when a graph's config does
@@ -410,13 +411,26 @@ type NodeExecutor interface {
 // hits the "no executor for node type" guard and fails the run outright on the
 // delivery that resumes past the interrupt.
 func defaultExecutors() map[string]NodeExecutor {
+	return executorsWithInvoker(nil)
+}
+
+// executorsWithInvoker builds the executor table, delegating llm/tool to
+// sub-workers when an Invoker is available (graph-engine.d2 §8:
+// "isolate provider latency/limits from the graph loop").
+//
+// The timeouts match the ack_wait on each consumer in
+// controlplane/nats/consumers.go — llm 2m, tool 1m. They have to: a graph
+// worker that gave up sooner than the sub-worker is allowed to take would fail
+// nodes that were about to succeed, and one that waited longer would hold the
+// graph command past its own redelivery window.
+func executorsWithInvoker(inv Invoker) map[string]NodeExecutor {
 	return map[string]NodeExecutor{
 		"start":       passthroughExecutor{},
 		"end":         passthroughExecutor{},
 		"conditional": passthroughExecutor{},
 		nodeTypeHuman: passthroughExecutor{},
-		"llm":         configExecutor{},
-		"tool":        configExecutor{},
+		"llm":         delegatingExecutor{subject: SubjectLLMInvoke, timeout: 2 * time.Minute, inv: inv},
+		"tool":        delegatingExecutor{subject: SubjectToolExecute, timeout: 1 * time.Minute, inv: inv},
 	}
 }
 

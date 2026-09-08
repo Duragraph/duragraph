@@ -132,6 +132,14 @@ func NewRunner(js jetstream.JetStream, cl runClient, maxDeliver int) *Runner {
 	return &Runner{js: js, cl: cl, execs: defaultExecutors(), MaxDeliver: maxDeliver, StopAfterNode: -1}
 }
 
+// NewRunnerWithInvoker builds a Runner whose llm/tool nodes delegate to
+// sub-workers over inv (graph-engine.d2 §8). Without an Invoker those node
+// types can only run their declarative `set`/`fail` forms — enough for a
+// deterministic graph, not enough to call a model.
+func NewRunnerWithInvoker(js jetstream.JetStream, cl runClient, maxDeliver int, inv Invoker) *Runner {
+	return &Runner{js: js, cl: cl, execs: executorsWithInvoker(inv), MaxDeliver: maxDeliver, StopAfterNode: -1}
+}
+
 // GraphCommand is the worker.graph.execute payload shape, matching what
 // nats.RunProcessor.dispatch publishes (run_id, thread_id, assistant_id,
 // graph_id, input, resume). Exported so tests can construct/decode commands
@@ -627,7 +635,10 @@ func (r *Runner) ProcessOne(ctx context.Context, cmd GraphCommand) (acked bool, 
 		}
 
 		startedAt := time.Now()
-		writes, xerr := exec.Execute(ctx, node, channels)
+		// The run id rides in the context so a delegated call can name the run
+		// it belongs to, without widening NodeExecutor for the one executor
+		// that needs it.
+		writes, xerr := exec.Execute(withRunID(ctx, cmd.RunID.String()), node, channels)
 		elapsed := msSince(startedAt)
 		if xerr != nil {
 			// Poison node — deterministic failure, redelivery cannot help.
