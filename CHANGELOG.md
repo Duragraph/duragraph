@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-09
+
+The control plane is rebuilt against the structural specification, and a
+single user can now drive a graph end to end over the HTTP API alone:
+install a graph, create an assistant and thread, start a run, watch it
+stream, pause it for human input, resume it, and read the result back.
+
+Note: this entry resumes a changelog that had gone quiet — 0.7.1 through
+0.7.7 were tagged and released without entries here. Their contents are
+in the GitHub release notes for those tags.
+
+### Added
+
+- **Control-plane rebuild** — layers 1–4, event store, and system
+  endpoints, replacing the previous implementation.
+- **Graph execution engine** — edge-driven walk over nodes, with durable
+  checkpoints and resume after redelivery.
+- **Graph installation over the API.** `POST /workers/register` accepts
+  `graph_definitions` and upserts them in the same transaction. Before
+  this there was no way to install a graph over HTTP at all — both graph
+  routes were reads.
+- **Human-in-the-loop interrupts.** `interrupt_before` / `interrupt_after`
+  (graph-level and per-run), plus `requires_human`, `human`, and
+  `tool_calls` triggers. Resume applies the full `Command` (`resume` and
+  `goto`), not just a state update.
+- **Run streaming (SSE) and wait.** All twelve stream events the API
+  specification declares are now emitted: `run.*`, `execution.node_started`
+  / `node_completed` / `node_failed`, `checkpoint.saved`, `tool.call`,
+  `tool.result`, `llm.completion`, `llm.token`, and a periodic
+  `heartbeat` so idle streams survive intermediary timeouts.
+- **`llm.token` streams over an ephemeral path** — at-most-once, never
+  persisted, no replay. Tokens are superseded by the completion seconds
+  later, so persisting one row per token would multiply write volume by
+  the length of every generation to store data nobody reads twice. The
+  durable events endpoint rejects the type outright to keep it that way.
+- **LLM and tool nodes delegate to sub-workers** over NATS request/reply,
+  behind a provider seam. Streaming is an optional provider capability;
+  providers that cannot stream need no changes.
+- **Run results.** `runs.output` is frozen from the final channels when a
+  run completes, and `GET /threads/{id}/state` now unwraps the worker
+  checkpoint envelope, so `values` holds the channels and `next` reports
+  where a paused run will resume.
+- **Cron scheduling** that actually fires — a ticker with
+  `FOR UPDATE SKIP LOCKED`, one transaction per cron. Invalid schedules
+  are rejected at create time and retired at fire time.
+- **Assistant version history** — versions are snapshotted on create and
+  update, with read and rollback endpoints.
+- **Idempotent creates.** `assistant_id` / `thread_id` with `if_exists`,
+  and graph-name resolution for `assistant_id` on run and cron create.
+- **Tenant CRUD** and the platform surface (auth, admin, users).
+- **Run reaper** — runs stuck past the redelivery window are failed
+  rather than left hanging.
+- **Direct NATS + JetStream** replaces watermill, with a transactional
+  outbox in application code driven by `LISTEN`/`NOTIFY`.
+- **Simplified Chinese README** (`README.zh-CN.md`).
+
+### Fixed
+
+- Worker reliability — a relay shutdown race, and dead-letter and
+  graph-error paths that failed to mark the run failed.
+- Thread and checkpoint identifiers are validated at the API boundary,
+  returning 422 rather than surfacing a database error.
+- A graph registered by name was invisible to lookup, which resolved only
+  by assistant binding. Both bindings the schema declares are now honored.
+- `execution_history.node_type` accepts `human`.
+
+### Testing
+
+- Integration tests run against real Postgres and NATS via testcontainers,
+  in CI as well as locally, plus a Tier-2 regression suite over the real
+  engine.
+
 ### Email + Password Authentication (Phase A)
 
 - **`POST /api/auth/register`** — email + password signup. Returns 201 on
@@ -137,5 +209,6 @@ The 5 source repos are now archived (don't delete — history preserved server-s
 - Canonical Apache 2.0 license
 - Panic on short model names in LLM provider routing
 
+[0.8.0]: https://github.com/Duragraph/duragraph/releases/tag/v0.8.0
 [0.7.0]: https://github.com/Duragraph/duragraph/releases/tag/v0.7.0
 [0.2.0]: https://github.com/Duragraph/duragraph/releases/tag/v0.2.0
