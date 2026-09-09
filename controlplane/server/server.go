@@ -13,11 +13,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -34,7 +34,6 @@ import (
 const (
 	DefaultAddr         = ":8081"
 	DefaultDrainTimeout = 15 * time.Second
-	DefaultMigrateDir   = "controlplane/db/migrations"
 )
 
 // Config carries the runtime knobs the composition root needs. Zero
@@ -86,9 +85,13 @@ type Config struct {
 	// pooler-fronted production deploy.
 	ListenerDSN string
 
-	// MigrateDir is the parent dir holding tenant/ + platform/
-	// subdirectories of *.up.sql migrations. Default
-	// controlplane/db/migrations (resolved relative to CWD at runtime).
+	// MigrateDir overrides where migrations are read from: a parent dir
+	// holding tenant/ + platform/ subdirectories of *.up.sql files.
+	//
+	// EMPTY IS THE NORMAL CASE and means the migrations embedded in the
+	// binary (controlplane/db). This used to default to a source-tree
+	// path resolved against the process working directory, which meant an
+	// installed binary could not migrate at all.
 	MigrateDir string
 
 	// Migrate controls whether ApplyMigrations runs on startup. Default
@@ -111,9 +114,6 @@ func (c *Config) defaults() {
 	}
 	if c.DrainTimeout == 0 {
 		c.DrainTimeout = DefaultDrainTimeout
-	}
-	if c.MigrateDir == "" {
-		c.MigrateDir = DefaultMigrateDir
 	}
 }
 
@@ -187,14 +187,22 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 
 	// --- migrations ---
 	if cfg.Migrate {
-		tenantDir := filepath.Join(cfg.MigrateDir, "tenant")
-		if err := ApplyMigrations(ctx, s.tenant, tenantDir); err != nil {
+		root, err := migrationRoot(cfg.MigrateDir)
+		if err != nil {
+			s.Close()
+			return nil, fmt.Errorf("server: migrations: %w", err)
+		}
+		tenantFS, err := fs.Sub(root, "tenant")
+		if err != nil {
 			s.Close()
 			return nil, fmt.Errorf("server: tenant migrations: %w", err)
 		}
-		platDir := filepath.Join(cfg.MigrateDir, "platform")
-		if _, err := os.Stat(platDir); err == nil && s.plat != nil {
-			if err := ApplyMigrations(ctx, s.plat, platDir); err != nil {
+		if err := ApplyMigrationsFS(ctx, s.tenant, tenantFS); err != nil {
+			s.Close()
+			return nil, fmt.Errorf("server: tenant migrations: %w", err)
+		}
+		if platFS, err := fs.Sub(root, "platform"); err == nil && s.plat != nil {
+			if err := ApplyMigrationsFS(ctx, s.plat, platFS); err != nil {
 				s.Close()
 				return nil, fmt.Errorf("server: platform migrations: %w", err)
 			}

@@ -83,6 +83,20 @@ func runServe(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// The rebuilt control plane is a separate composition root
+	// (controlplane/server) rather than a variation on the wiring below,
+	// so the branch is here at the top and the two share only config.
+	// See serve_controlplane.go for why this is opt-in.
+	which, err := selectedControlPlane()
+	if err != nil {
+		return err
+	}
+	if which == controlPlaneV2 {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		return runServeV2(ctx, cfg)
+	}
+
 	slog.Info("DuraGraph server starting",
 		"addr", cfg.ServerAddr(),
 		"db_host", cfg.Database.Host,
