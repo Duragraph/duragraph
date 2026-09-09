@@ -72,6 +72,21 @@ type delegatingExecutor struct {
 	subject string
 	timeout time.Duration
 	inv     Invoker
+
+	// emit records the in-node observability events api.d2 declares
+	// (llm.completion, tool.call, tool.result). Optional: a nil emitter means
+	// the node still runs, it is just not narrated. These events must never be
+	// able to fail the node that produced them.
+	emit func(ctx context.Context, eventType, nodeID string, input, output json.RawMessage, durationMs *int)
+}
+
+// narrate emits an observability event if an emitter is wired, swallowing any
+// failure. A node must not fail because its narration did.
+func (d delegatingExecutor) narrate(ctx context.Context, eventType, nodeID string, input, output json.RawMessage, durationMs *int) {
+	if d.emit == nil {
+		return
+	}
+	d.emit(ctx, eventType, nodeID, input, output, durationMs)
 }
 
 func (d delegatingExecutor) Execute(ctx context.Context, node Node, channels map[string]any) (map[string]any, error) {
@@ -94,6 +109,14 @@ func (d delegatingExecutor) Execute(ctx context.Context, node Node, channels map
 		return configExecutor{}.Execute(ctx, node, channels)
 	}
 
+	// tool.call is emitted BEFORE the tool runs: a tool invocation is a side
+	// effect on the outside world, and a caller watching the stream needs to
+	// see that it was attempted even if it never returns.
+	if node.Type == "tool" {
+		d.narrate(ctx, "tool.call", node.ID, mustJSONRaw(node.Config), nil, nil)
+	}
+
+	startedAt := time.Now()
 	resp, err := d.inv.Invoke(ctx, d.subject, InvokeRequest{
 		RunID:    runIDFromContext(ctx),
 		NodeID:   node.ID,
@@ -101,6 +124,15 @@ func (d delegatingExecutor) Execute(ctx context.Context, node Node, channels map
 		Config:   node.Config,
 		Channels: channels,
 	}, d.timeout)
+	elapsed := int(time.Since(startedAt).Milliseconds())
+	if err == nil && resp.Error == "" {
+		// llm.completion / tool.result — the provider answered.
+		eventType := "llm.completion"
+		if node.Type == "tool" {
+			eventType = "tool.result"
+		}
+		d.narrate(ctx, eventType, node.ID, nil, mustJSONRaw(resp.Writes), &elapsed)
+	}
 	if err != nil {
 		// A transport failure is NOT a poison node: the provider may simply be
 		// slow or briefly unreachable, and failing the run would discard work
@@ -188,4 +220,18 @@ func outputKeyFrom(cfg map[string]any) string {
 		return k
 	}
 	return "completion"
+}
+
+// mustJSONRaw marshals a value for an observability payload. A value that will
+// not marshal becomes null rather than failing: narration must never break the
+// node it describes.
+func mustJSONRaw(v any) json.RawMessage {
+	if v == nil {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
 }

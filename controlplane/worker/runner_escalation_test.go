@@ -119,3 +119,7 @@ func TestEscalationWiring(t *testing.T) {
 		t.Errorf("RunFailed: want epoch=1, got %d", cl.failedEpoch)
 	}
 }
+
+func (c *stubEscalationClient) StreamDetail(ctx context.Context, runID uuid.UUID, eventType, nodeID string, input, output json.RawMessage, durationMs *int) error {
+	return nil
+}

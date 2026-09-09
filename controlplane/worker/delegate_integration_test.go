@@ -320,3 +320,94 @@ func TestDeclarativeNodesStillWorkWithAFleet(t *testing.T) {
 		t.Errorf("declarative write lost: %v", state.Values)
 	}
 }
+
+// TestDelegationEmitsStreamEvents: api.d2's SSE catalogue declares
+// tool.call ("tool invoked"), tool.result ("tool returned") and
+// llm.completion ("LLM generation done"). Nothing emitted any of them — before
+// delegation existed there was no provider call to narrate.
+//
+// Asserted at the events table rather than over SSE: these reach a subscriber
+// through the ordinary outbox → relay → NATS path already proven by
+// TestStreamEndToEnd, and asserting the durable record keeps this test about
+// whether they are PRODUCED, not about transport.
+func TestDelegationEmitsStreamEvents(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := newPool(t)
+
+	llm := &recordingLLM{}
+	api, tid, aid := delegationHarness(t, ctx, llm, mapTool{},
+		`[{"id":"T","type":"tool","config":{"tool":"search","args":{"q":"x"},"output_key":"r"}},
+		  {"id":"L","type":"llm","config":{"model":"m","prompt":"p","output_key":"a"}}]`,
+		`[{"source":"T","target":"L"}]`)
+
+	var run struct {
+		RunID string `json:"run_id"`
+	}
+	api.mustDo("POST", "/api/v1/threads/"+tid+"/runs", map[string]any{"assistant_id": aid}, &run, http.StatusCreated)
+	rid := uuid.MustParse(run.RunID)
+	waitForRunStatus(t, ctx, pool, rid, "completed", 30*time.Second)
+
+	for _, want := range []string{"tool.call", "tool.result", "llm.completion", "checkpoint.saved"} {
+		var n int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM events WHERE aggregate_id=$1 AND event_type=$2`, rid, want).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			t.Errorf("api.d2 declares %q in the SSE catalogue, but none was emitted", want)
+		}
+	}
+
+	// tool.call must name the node, or a subscriber cannot tell which step of
+	// the graph reached out to the world.
+	var payload []byte
+	if err := pool.QueryRow(ctx,
+		`SELECT payload FROM events WHERE aggregate_id=$1 AND event_type='tool.call' LIMIT 1`,
+		rid).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["node_id"] != "T" {
+		t.Errorf("tool.call must identify the node, got %s", payload)
+	}
+}
+
+// TestStreamDetailEventsCannotAlterRunState: these events are observability
+// only. A stale worker emitting one must be harmless noise — never able to move
+// a run — which is why they take no epoch guard and touch no run row.
+func TestStreamDetailEventsCannotAlterRunState(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := newPool(t)
+
+	_, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	_ = aid
+	seedCounterGraph(t, ctx, pool, aid, false)
+
+	cl := worker.NewClient(serverURL, uuid.New(), nil)
+	if err := cl.Register(ctx, []string{"counter"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cl.RunStarted(ctx, rid); err != nil {
+		t.Fatal(err)
+	}
+
+	var before string
+	if err := pool.QueryRow(ctx, `SELECT status FROM runs WHERE id=$1`, rid).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.StreamDetail(ctx, rid, "tool.call", "A", nil, nil, nil); err != nil {
+		t.Fatalf("StreamDetail: %v", err)
+	}
+	var after string
+	if err := pool.QueryRow(ctx, `SELECT status FROM runs WHERE id=$1`, rid).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Errorf("an observability event changed run status: %s -> %s", before, after)
+	}
+}

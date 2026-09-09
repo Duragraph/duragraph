@@ -424,15 +424,25 @@ func defaultExecutors() map[string]NodeExecutor {
 // nodes that were about to succeed, and one that waited longer would hold the
 // graph command past its own redelivery window.
 func executorsWithInvoker(inv Invoker) map[string]NodeExecutor {
+	return executorsWithInvokerAndEmitter(inv, nil)
+}
+
+// executorsWithInvokerAndEmitter additionally narrates delegated calls with the
+// in-node events api.d2's SSE catalogue declares (llm.completion, tool.call,
+// tool.result).
+func executorsWithInvokerAndEmitter(inv Invoker, emit detailEmitter) map[string]NodeExecutor {
 	return map[string]NodeExecutor{
 		"start":       passthroughExecutor{},
 		"end":         passthroughExecutor{},
 		"conditional": passthroughExecutor{},
 		nodeTypeHuman: passthroughExecutor{},
-		"llm":         delegatingExecutor{subject: SubjectLLMInvoke, timeout: 2 * time.Minute, inv: inv},
-		"tool":        delegatingExecutor{subject: SubjectToolExecute, timeout: 1 * time.Minute, inv: inv},
+		"llm":         delegatingExecutor{subject: SubjectLLMInvoke, timeout: 2 * time.Minute, inv: inv, emit: emit},
+		"tool":        delegatingExecutor{subject: SubjectToolExecute, timeout: 1 * time.Minute, inv: inv, emit: emit},
 	}
 }
+
+// detailEmitter records an in-node observability event.
+type detailEmitter func(ctx context.Context, eventType, nodeID string, input, output json.RawMessage, durationMs *int)
 
 // passthroughExecutor writes nothing and never fails.
 type passthroughExecutor struct{}

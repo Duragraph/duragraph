@@ -7,11 +7,14 @@ package endpoints
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 )
@@ -193,6 +196,15 @@ func (s *Server) WorkersStreamEvents(c echo.Context) error {
 			}
 		case "execution.node_started", "execution.node_completed", "execution.node_failed":
 			if err := s.nodeEvent(ctx, rid, ev); err != nil {
+				return err
+			}
+		case "llm.completion", "tool.call", "tool.result":
+			// Observability only (api.d2's SSE catalogue). These describe what
+			// happened INSIDE a node; the node's own lifecycle and its writes
+			// are carried by execution.node_* and the checkpoint, so these
+			// change no run state and take no epoch guard beyond the one the
+			// events endpoint already applied to the run.
+			if err := s.streamDetailEvent(ctx, rid, ev); err != nil {
 				return err
 			}
 		default:
@@ -418,6 +430,31 @@ func (s *Server) WorkersWriteCheckpoint(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+
+	// checkpoint.saved (api.d2 SSE catalogue: "state checkpointed"). Emitted
+	// AFTER the snapshot commits, and deliberately not inside its transaction:
+	// the snapshot write is the epoch-fenced thing that must not be disturbed,
+	// and announcing a checkpoint that then failed to exist would be worse than
+	// a checkpoint that exists without an announcement. A failure here is
+	// logged rather than returned, because the checkpoint IS saved — failing
+	// the call would make the worker retry a write that already succeeded.
+	//
+	// The payload carries the checkpoint id, not the state: a subscriber that
+	// wants the state can fetch it, and streaming full graph state on every
+	// node boundary would put the entire execution history through NATS twice.
+	if err := s.writeTx(ctx, s.Tenant, []Event{{
+		AggregateType: "Run",
+		AggregateID:   req.RunID,
+		EventType:     "checkpoint.saved",
+		Payload: mustJSON(map[string]any{
+			"run_id":        rid,
+			"checkpoint_id": id,
+			"version":       req.Version,
+		}),
+	}}, nil); err != nil {
+		slog.Warn("checkpoint saved but checkpoint.saved not emitted",
+			"run_id", rid, "checkpoint_id", id, "err", err)
+	}
 	return c.JSON(http.StatusOK, CheckpointWriteResponse{CheckpointID: id})
 }
 
@@ -526,4 +563,38 @@ func (s *Server) WorkersLoadGraph(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// streamDetailEvent records an in-node observability event (llm.completion,
+// tool.call, tool.result) so it reaches subscribers through the normal outbox →
+// relay → NATS → SSE path.
+//
+// It writes an event and NOTHING else: no run row is touched, so there is no
+// state to fence. That is deliberate — these events must never be able to alter
+// a run, only describe it. A stale worker emitting one is harmless noise,
+// whereas letting it move run state would not be.
+func (s *Server) streamDetailEvent(ctx context.Context, rid string, ev WorkerEvent) error {
+	runID, err := uuid.Parse(rid)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "invalid run id")
+	}
+	payload := map[string]any{
+		"run_id":  rid,
+		"node_id": ev.NodeID,
+	}
+	if len(ev.Output) > 0 {
+		payload["output"] = json.RawMessage(ev.Output)
+	}
+	if len(ev.Input) > 0 {
+		payload["input"] = json.RawMessage(ev.Input)
+	}
+	if ev.DurationMs != nil {
+		payload["duration_ms"] = *ev.DurationMs
+	}
+	return s.writeTx(ctx, s.Tenant, []Event{{
+		AggregateType: "Run",
+		AggregateID:   runID,
+		EventType:     ev.Type,
+		Payload:       mustJSON(payload),
+	}}, nil)
 }

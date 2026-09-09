@@ -95,6 +95,7 @@ type runClient interface {
 	NodeCompleted(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType string, durationMs *int) error
 	NodeFailed(ctx context.Context, runID uuid.UUID, epoch int, nodeID, nodeType, reason string, durationMs *int) error
 	RunCompletedWithOutput(ctx context.Context, runID uuid.UUID, epoch int, output json.RawMessage) error
+	StreamDetail(ctx context.Context, runID uuid.UUID, eventType, nodeID string, input, output json.RawMessage, durationMs *int) error
 	RunFailed(ctx context.Context, runID uuid.UUID, epoch int, reason string) error
 	RequiresAction(ctx context.Context, runID uuid.UUID, epoch int, nodeID, reason string, state, toolCalls []byte) error
 }
@@ -137,7 +138,23 @@ func NewRunner(js jetstream.JetStream, cl runClient, maxDeliver int) *Runner {
 // types can only run their declarative `set`/`fail` forms — enough for a
 // deterministic graph, not enough to call a model.
 func NewRunnerWithInvoker(js jetstream.JetStream, cl runClient, maxDeliver int, inv Invoker) *Runner {
-	return &Runner{js: js, cl: cl, execs: executorsWithInvoker(inv), MaxDeliver: maxDeliver, StopAfterNode: -1}
+	r := &Runner{js: js, cl: cl, MaxDeliver: maxDeliver, StopAfterNode: -1}
+	// The emitter closes over the client so delegated calls can narrate
+	// themselves (llm.completion, tool.call, tool.result). Failures are logged,
+	// never returned: a node must not fail because its narration did.
+	emit := func(ctx context.Context, eventType, nodeID string, input, output json.RawMessage, durationMs *int) {
+		runID := runIDFromContext(ctx)
+		id, err := uuid.Parse(runID)
+		if err != nil {
+			return
+		}
+		if derr := cl.StreamDetail(ctx, id, eventType, nodeID, input, output, durationMs); derr != nil {
+			slog.Warn("worker: stream detail event not recorded",
+				"event", eventType, "run_id", runID, "node_id", nodeID, "err", derr)
+		}
+	}
+	r.execs = executorsWithInvokerAndEmitter(inv, emit)
+	return r
 }
 
 // GraphCommand is the worker.graph.execute payload shape, matching what

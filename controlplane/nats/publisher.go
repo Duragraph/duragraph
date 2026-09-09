@@ -129,6 +129,17 @@ func categoryFor(eventType string) string {
 	switch prefix {
 	case "execution":
 		return "executions"
+	// llm.*, tool.* and checkpoint.* are execution-level detail — they describe
+	// what happened INSIDE a node — so they ride the EXECUTION stream rather
+	// than getting streams of their own. That also puts them where the SSE
+	// bridge already looks (it subscribes to duragraph.executions.>), which is
+	// the whole reason api.d2 lists them in the SSE catalogue.
+	//
+	// Without this they fell to the "events" default, and NO stream captures
+	// duragraph.events.> — publishing produced "no response from stream" and
+	// the event was retried forever in the outbox.
+	case "llm", "tool", "checkpoint":
+		return "executions"
 	case "run":
 		return "runs"
 	case "worker":

@@ -107,6 +107,22 @@ func (c *Client) RunStarted(ctx context.Context, runID uuid.UUID) (int, error) {
 	return resp.LeaseEpoch, nil
 }
 
+// StreamDetail emits an in-node observability event — llm.completion,
+// tool.call or tool.result (api.d2's SSE catalogue). These describe what
+// happened inside a node; they carry no run state, so a failure to record one
+// must never fail the node that produced it.
+func (c *Client) StreamDetail(ctx context.Context, runID uuid.UUID, eventType, nodeID string, input, output json.RawMessage, durationMs *int) error {
+	body := eventsRequest{Events: []workerEvent{{
+		Type:       eventType,
+		NodeID:     nodeID,
+		Input:      input,
+		Output:     output,
+		DurationMs: durationMs,
+	}}}
+	_, err := c.doJSON(ctx, http.MethodPost, c.eventsPath(runID), body, nil)
+	return err
+}
+
 // NodeStarted opens a node's execution_history row before the node runs, fenced
 // on epoch. The completing call (NodeCompleted / NodeFailed) transitions that
 // same row rather than adding another — see the server's nodeEvent.
