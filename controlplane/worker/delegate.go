@@ -176,6 +176,23 @@ type LLMProvider interface {
 	Complete(ctx context.Context, model, prompt string, cfg map[string]any) (string, error)
 }
 
+// StreamingLLMProvider is an OPTIONAL capability on top of LLMProvider: a
+// provider that can deliver a generation token by token implements it, and the
+// LLM sub-worker then emits api.d2's llm.token as they arrive.
+//
+// Kept separate from LLMProvider rather than widening it, so a provider that
+// cannot stream — or a deployment that does not want to — needs no change and
+// no stub method. The sub-worker type-asserts for it.
+//
+// onToken is called synchronously for each token, so an implementation must not
+// block in it. The final return is still the complete text: the caller needs
+// the whole completion for the node's writes regardless of whether anyone was
+// watching the tokens.
+type StreamingLLMProvider interface {
+	LLMProvider
+	CompleteStream(ctx context.Context, model, prompt string, cfg map[string]any, onToken func(string)) (string, error)
+}
+
 // ToolProvider executes a named tool.
 type ToolProvider interface {
 	Execute(ctx context.Context, name string, args map[string]any) (any, error)

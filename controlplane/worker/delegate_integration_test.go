@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/duragraph/duragraph/controlplane/endpoints"
 	dnats "github.com/duragraph/duragraph/controlplane/nats"
@@ -409,5 +411,250 @@ func TestStreamDetailEventsCannotAlterRunState(t *testing.T) {
 	}
 	if before != after {
 		t.Errorf("an observability event changed run status: %s -> %s", before, after)
+	}
+}
+
+// streamingLLM implements the optional StreamingLLMProvider capability.
+type streamingLLM struct{ tokens []string }
+
+func (s streamingLLM) Complete(_ context.Context, _, _ string, _ map[string]any) (string, error) {
+	return strings.Join(s.tokens, ""), nil
+}
+
+func (s streamingLLM) CompleteStream(_ context.Context, _, _ string, _ map[string]any, onToken func(string)) (string, error) {
+	for _, tok := range s.tokens {
+		onToken(tok)
+	}
+	return strings.Join(s.tokens, ""), nil
+}
+
+// TestLLMTokensStreamEphemerally is api.d2's llm.token — "single token
+// (streaming)".
+//
+// The transport is the point. Every other stream event is durable: an events
+// row, an outbox row, a relay hop, and replay on reconnect. A token is
+// superseded by the completion seconds later, so persisting one row per token
+// would multiply write volume by the length of every generation to store data
+// nobody reads twice. Tokens therefore take a separate at-most-once path with
+// no persistence — and this test asserts BOTH halves: they reach a live
+// subscriber, and they leave nothing behind.
+func TestLLMTokensStreamEphemerally(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := newPool(t)
+
+	nc, js, err := dnats.Connect(ctx, natsURL)
+	if err != nil {
+		t.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Drain() //nolint:errcheck
+	if err := dnats.EnsureConsumers(ctx, js); err != nil {
+		t.Fatal(err)
+	}
+	purgeStream(t, ctx, js, "RUNS")
+	purgeStream(t, ctx, js, "WORKER_COMMANDS")
+
+	e := echo.New()
+	srv := &endpoints.Server{Tenant: pool, Subscriber: dnats.NewSubscriberFromConn(nc)}
+	g := e.Group("/api/v1")
+	srv.RegisterAssistants(g)
+	srv.RegisterThreads(g)
+	srv.RegisterRuns(g)
+	srv.RegisterWorkers(g)
+	apiSrv := httptest.NewServer(e)
+	defer apiSrv.Close()
+	api := &apiClient{t: t, base: apiSrv.URL}
+
+	relay := dnats.NewRelay(dnats.NewOutboxDrain(pool), dnats.NewPublisher(js),
+		listenerDSNFromPool(), 200*time.Millisecond, 20)
+	go func() { _ = relay.Start(ctx) }()
+	defer relay.Stop()
+	rp := dnats.NewRunProcessor(js, dnats.NewPublisher(js), pool)
+	go func() { _ = rp.Start(ctx) }()
+	defer rp.Stop()
+
+	lw := worker.NewLLMSubWorker(nc, streamingLLM{tokens: []string{"Hello", ", ", "world"}})
+	go func() { _ = lw.Start(ctx) }()
+	defer lw.Stop()
+
+	graphName := "tok-" + uuid.NewString()[:8]
+	cl := worker.NewClient(apiSrv.URL, uuid.New(), nil)
+	if err := cl.RegisterWithGraphs(ctx, []string{graphName}, 1, []worker.GraphDefinition0{{
+		Name: graphName, Version: "1",
+		Nodes: json.RawMessage(`[{"id":"L","type":"llm","config":{"model":"m","prompt":"hi","output_key":"a"}}]`),
+		Edges: json.RawMessage(`[]`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	runner := worker.NewRunnerWithInvoker(js, cl, dnats.GraphExecutorMaxDeliver, worker.NewNATSInvoker(nc))
+	go func() { _ = runner.Start(ctx) }()
+
+	var assistant struct {
+		AssistantID string `json:"assistant_id"`
+	}
+	api.mustDo("POST", "/api/v1/assistants", map[string]any{
+		"graph_id": graphName, "name": "tok-assistant",
+	}, &assistant, http.StatusCreated)
+	var thread struct {
+		ThreadID string `json:"thread_id"`
+	}
+	api.mustDo("POST", "/api/v1/threads", map[string]any{}, &thread, http.StatusCreated)
+
+	// Subscribe to the ephemeral subject directly. Tokens are at-most-once, so
+	// a subscriber has to exist BEFORE the generation starts — which is exactly
+	// the contract, and asserting it over raw NATS keeps this test about the
+	// transport rather than about SSE timing.
+	tokens := make(chan string, 32)
+	sub, err := nc.Subscribe(dnats.EphemeralSubjectPrefix+">", func(m *natsgo.Msg) {
+		var env dnats.EphemeralEnvelope
+		if json.Unmarshal(m.Data, &env) != nil || env.EventType != "llm.token" {
+			return
+		}
+		var p struct {
+			Token string `json:"token"`
+			Seq   int    `json:"seq"`
+		}
+		if json.Unmarshal(env.Payload, &p) != nil {
+			return
+		}
+		select {
+		case tokens <- p.Token:
+		default:
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Unsubscribe() //nolint:errcheck
+
+	var run struct {
+		RunID string `json:"run_id"`
+	}
+	api.mustDo("POST", "/api/v1/threads/"+thread.ThreadID+"/runs", map[string]any{
+		"assistant_id": assistant.AssistantID,
+	}, &run, http.StatusCreated)
+	rid := uuid.MustParse(run.RunID)
+	waitForRunStatus(t, ctx, pool, rid, "completed", 30*time.Second)
+
+	var got []string
+	deadline := time.After(5 * time.Second)
+collect:
+	for len(got) < 3 {
+		select {
+		case tok := <-tokens:
+			got = append(got, tok)
+		case <-deadline:
+			break collect
+		}
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 streamed tokens, got %d: %v", len(got), got)
+	}
+	if strings.Join(got, "") != "Hello, world" {
+		t.Errorf("tokens did not reassemble into the completion: %v", got)
+	}
+
+	// The completion still lands on the graph's channels — streaming is
+	// observation, not a replacement for the node's writes.
+	var state struct {
+		Values map[string]any `json:"values"`
+	}
+	api.mustDo("GET", "/api/v1/threads/"+thread.ThreadID+"/state", nil, &state, http.StatusOK)
+	if state.Values["a"] != "Hello, world" {
+		t.Errorf("values.a: want the full completion, got %v", state.Values["a"])
+	}
+
+	// THE EPHEMERAL GUARANTEE: nothing persisted. A token in the events table
+	// would mean the write amplification this design exists to avoid.
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE event_type = 'llm.token'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("llm.token must NOT be persisted, found %d row(s) in events", n)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM outbox WHERE event_type = 'llm.token'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("llm.token must NOT reach the outbox, found %d row(s)", n)
+	}
+	// And llm.completion IS still durable — the two paths coexist.
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE aggregate_id=$1 AND event_type='llm.completion'`, rid).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		t.Error("llm.completion must still be durable")
+	}
+}
+
+// TestNonStreamingProviderEmitsNoTokens: streaming is an OPTIONAL capability. A
+// provider that cannot stream must still work, and must not fabricate tokens.
+func TestNonStreamingProviderEmitsNoTokens(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := newPool(t)
+
+	llm := &recordingLLM{}
+	api, tid, aid := delegationHarness(t, ctx, llm, nil,
+		`[{"id":"L","type":"llm","config":{"model":"m","prompt":"p","output_key":"a"}}]`, `[]`)
+
+	var run struct {
+		RunID string `json:"run_id"`
+	}
+	api.mustDo("POST", "/api/v1/threads/"+tid+"/runs", map[string]any{"assistant_id": aid}, &run, http.StatusCreated)
+	waitForRunStatus(t, ctx, pool, uuid.MustParse(run.RunID), "completed", 30*time.Second)
+
+	if llm.calls != 1 {
+		t.Errorf("non-streaming provider should still be called once, got %d", llm.calls)
+	}
+	var state struct {
+		Values map[string]any `json:"values"`
+	}
+	api.mustDo("GET", "/api/v1/threads/"+tid+"/state", nil, &state, http.StatusOK)
+	if state.Values["a"] != "answered: p" {
+		t.Errorf("completion missing from channels: %v", state.Values)
+	}
+}
+
+// TestTokensCannotEnterTheDurablePath is the structural half of the ephemeral
+// guarantee. Counting rows proves tokens did not happen to be persisted in one
+// run; this proves they CANNOT be, because the durable events endpoint refuses
+// the type outright. Someone routing llm.token through StreamDetail to "make it
+// replayable" hits a 400 rather than quietly multiplying write volume by the
+// length of every generation.
+func TestTokensCannotEnterTheDurablePath(t *testing.T) {
+	ctx := context.Background()
+	pool := newPool(t)
+
+	_, aid, rid := seedThreadAssistantRun(t, ctx, pool)
+	seedCounterGraph(t, ctx, pool, aid, false)
+
+	cl := worker.NewClient(serverURL, uuid.New(), nil)
+	if err := cl.Register(ctx, []string{"counter"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cl.RunStarted(ctx, rid); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cl.StreamDetail(ctx, rid, "llm.token", "L", nil, nil, nil)
+	if err == nil {
+		t.Fatal("llm.token must be refused by the durable events endpoint; it is ephemeral by design")
+	}
+	if !contains(err.Error(), "unknown event type") {
+		t.Errorf("want a rejection naming the unknown type, got: %v", err)
+	}
+
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE event_type='llm.token'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("a refused event still reached the store: %d row(s)", n)
 	}
 }
