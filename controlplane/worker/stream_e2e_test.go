@@ -183,15 +183,18 @@ func TestStreamEndToEnd(t *testing.T) {
 
 	url := sseSrv.URL + "/api/v1/threads/" + uuid.Nil.String() + "/runs/" + rid.String() + "/stream"
 	done := make(chan []sseFrame, 1)
-	// Each node now streams a start AND a completion, so a consumer can see a
-	// node enter execution rather than only learning it finished.
-	go func() { done <- readSSE(t, url, 6, 15*time.Second) }()
+	// Each node streams a start, its checkpoint, and a completion, so a
+	// consumer sees a node enter execution, sees its state durably saved, and
+	// then sees it finish. checkpoint.saved lands BEFORE node_completed
+	// because the runner writes the checkpoint before announcing the node —
+	// state is durable before it is advertised.
+	go func() { done <- readSSE(t, url, 8, 15*time.Second) }()
 
 	frames := <-done
 	want := []string{
 		"run.started",
-		"execution.node_started", "execution.node_completed", // A
-		"execution.node_started", "execution.node_completed", // B
+		"execution.node_started", "checkpoint.saved", "execution.node_completed", // A
+		"execution.node_started", "checkpoint.saved", "execution.node_completed", // B
 		"run.completed",
 	}
 	if len(frames) != len(want) {
