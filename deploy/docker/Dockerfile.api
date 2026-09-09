@@ -7,6 +7,11 @@ RUN go mod download
 
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+# controlplane/ is the rebuilt control plane. cmd/ imports it for
+# `serve --control-plane=v2`, so omitting it here breaks the build
+# outright rather than degrading — this COPY list is an allowlist, and a
+# new top-level package that cmd depends on has to be added to it.
+COPY controlplane/ ./controlplane/
 # embeds.go (//go:embed all:dashboard/dist) lives at module root. The
 # dist/ tree ships with a placeholder index.html so the build works
 # without pnpm; production images use Dockerfile.server which actually
