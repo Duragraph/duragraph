@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	dnats "github.com/duragraph/duragraph/controlplane/nats"
 )
 
 // SubWorker answers invocation requests on one subject.
@@ -42,7 +44,38 @@ func NewLLMSubWorker(nc *nats.Conn, p LLMProvider) *SubWorker {
 		stopCh:  make(chan struct{}),
 		handle: func(ctx context.Context, req InvokeRequest) InvokeResponse {
 			model := modelFrom(req.Config)
-			text, err := p.Complete(ctx, model, promptFrom(req.Config, req.Channels), req.Config)
+			prompt := promptFrom(req.Config, req.Channels)
+
+			var text string
+			var err error
+			// Stream when the provider can, so api.d2's llm.token
+			// ("single token (streaming)") reaches a watching client as the
+			// generation happens. Tokens go out on the EPHEMERAL path — no
+			// events row, no outbox row — because a token is superseded by the
+			// completion seconds later and persisting one per token would
+			// multiply write volume by the length of every generation.
+			if sp, ok := p.(StreamingLLMProvider); ok {
+				var seq int
+				text, err = sp.CompleteStream(ctx, model, prompt, req.Config, func(tok string) {
+					// Best-effort by design: a failed token publish must never
+					// disturb the generation that produced it.
+					_ = dnats.PublishEphemeral(nc, dnats.EphemeralEnvelope{
+						AggregateID: req.RunID,
+						EventType:   "llm.token",
+						NodeID:      req.NodeID,
+						Payload: mustJSONRaw(map[string]any{
+							"token": tok,
+							// seq lets a client order tokens without relying on
+							// arrival order, which at-most-once delivery does
+							// not promise.
+							"seq": seq,
+						}),
+					})
+					seq++
+				})
+			} else {
+				text, err = p.Complete(ctx, model, prompt, req.Config)
+			}
 			if err != nil {
 				return InvokeResponse{Error: err.Error()}
 			}

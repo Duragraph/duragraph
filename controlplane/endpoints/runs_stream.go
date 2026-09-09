@@ -118,6 +118,14 @@ func (s *Server) streamRun(c echo.Context, runIDs map[uuid.UUID]bool, closeOnTer
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	// Ephemeral detail (llm.token). Deliberately NOT part of the catch-up
+	// replay below: these are never persisted, so there is nothing to catch up
+	// on. A client that connects mid-generation sees the remaining tokens and
+	// then the completion — which is what it actually needs.
+	ephCh, err := s.Subscriber.Subscribe(ctx, nats.EphemeralSubjectPrefix+">")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	// SSE headers.
 	h := c.Response().Header()
@@ -182,6 +190,26 @@ func (s *Server) streamRun(c echo.Context, runIDs map[uuid.UUID]bool, closeOnTer
 		case <-beat.C:
 			// A failed write means the client is gone; stop rather than spin.
 			if writeSSEFrame(c, "heartbeat", nil) != nil {
+				return nil
+			}
+			continue
+		case msg = <-ephCh:
+			// Ephemeral events carry no event_id, so there is nothing to dedup
+			// on and nothing to replay — at-most-once is the contract. Handled
+			// separately rather than squeezed into relayEnvelope, so that
+			// absence stays explicit instead of looking like a missing field.
+			if msg == nil {
+				return nil
+			}
+			var eph nats.EphemeralEnvelope
+			if json.Unmarshal(msg.Payload, &eph) != nil {
+				continue
+			}
+			aid, err := uuid.Parse(eph.AggregateID)
+			if err != nil || !runIDs[aid] {
+				continue
+			}
+			if writeSSEFrame(c, eph.EventType, eph.Payload) != nil {
 				return nil
 			}
 			continue
