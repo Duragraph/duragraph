@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -54,7 +55,7 @@ func (c *stubEscalationClient) NodeFailed(ctx context.Context, runID uuid.UUID, 
 	return nil
 }
 
-func (c *stubEscalationClient) RunCompleted(ctx context.Context, runID uuid.UUID, epoch int) error {
+func (c *stubEscalationClient) RunCompletedWithOutput(ctx context.Context, runID uuid.UUID, epoch int, output json.RawMessage) error {
 	return nil
 }
 
