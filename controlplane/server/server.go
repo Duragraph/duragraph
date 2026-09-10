@@ -22,10 +22,12 @@ import (
 	"syscall"
 	"time"
 
+	duragraph "github.com/duragraph/duragraph"
 	"github.com/duragraph/duragraph/controlplane/cron"
 	"github.com/duragraph/duragraph/controlplane/endpoints"
 	"github.com/duragraph/duragraph/controlplane/nats"
 	"github.com/duragraph/duragraph/controlplane/reaper"
+	"github.com/duragraph/duragraph/internal/infrastructure/http/dashboard"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
@@ -102,6 +104,12 @@ type Config struct {
 	// Default false; set true when NATSURL is non-empty to enable
 	// event publishing.
 	Relays bool
+
+	// DashboardFS overrides the embedded React UI. Nil — the normal case —
+	// serves the dashboard embedded in the binary. Supplying one lets a
+	// deployment ship its own build, and lets tests assert routing without
+	// depending on whether pnpm ran.
+	DashboardFS fs.FS
 
 	// DrainTimeout caps how long Shutdown waits for in-flight HTTP
 	// requests + relay goroutines to drain. Default 15s.
@@ -320,7 +328,49 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 
 	ep.RegisterSystem(e) // root-level: /ok, /info, /metrics
 
+	// The embedded React dashboard. Without it the rebuilt control plane
+	// serves the API and nothing at "/" — the entire UI missing, which a
+	// route-by-route diff against the legacy server cannot surface because
+	// the dashboard is not a route.
+	//
+	// Mounted last to mirror the legacy server, but NOT because ordering is
+	// load-bearing: Echo's radix router prefers static and parameterised
+	// routes over a catch-all regardless of registration order, and mounting
+	// this first leaves every API route reachable (verified). The legacy
+	// comment claims otherwise; it is wrong on this point.
+	//
+	// What IS load-bearing is the /api/ guard inside the handler, which
+	// turns an unmatched /api/... path into a clean 404 instead of serving
+	// the SPA shell to a client expecting JSON.
+	if err := mountDashboard(e, cfg.DashboardFS); err != nil {
+		// A missing UI must not stop the control plane from serving the
+		// API — an operator running headless is a legitimate deployment,
+		// and failing here would turn a cosmetic problem into an outage.
+		slog.Warn("dashboard not mounted; API-only", "err", err)
+	}
+
 	return s, nil
+}
+
+// mountDashboard serves the embedded UI, or the caller's filesystem when
+// one is supplied (tests, and any deployment shipping its own build).
+func mountDashboard(e *echo.Echo, override fs.FS) error {
+	distFS := override
+	if distFS == nil {
+		var err error
+		distFS, err = duragraph.DashboardFS()
+		if err != nil {
+			return fmt.Errorf("embedded dashboard: %w", err)
+		}
+	}
+	// A placeholder index.html ships in git so `go build` works without
+	// pnpm, so the tree existing does not prove the UI was built. Checking
+	// for index.html at least distinguishes "no UI" from "broken embed".
+	if _, err := fs.Stat(distFS, "index.html"); err != nil {
+		return fmt.Errorf("dashboard index.html: %w", err)
+	}
+	dashboard.Register(e, distFS)
+	return nil
 }
 
 // Run blocks until ctx is canceled or a SIGINT/SIGTERM arrives, then
