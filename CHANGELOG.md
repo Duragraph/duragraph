@@ -7,16 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-09
+
+### Fixed
+
+- **The rebuilt control plane is now reachable from the binary.** It was
+  not in 0.8.0. The release pipeline builds `./cmd/duragraph`, and that
+  command imported none of `controlplane/` — so everything 0.8.0's notes
+  described shipped as unreachable code while the binary ran the previous
+  implementation. See the correction on 0.8.0 below.
+
+  Select it with `duragraph serve --control-plane=v2`, or
+  `DURAGRAPH_CONTROL_PLANE=v2`. **The default remains the legacy stack**,
+  because the rebuild does not yet serve every route the legacy one does
+  — password authentication (`POST /api/auth/register`, `/login`),
+  `GET /health`, `POST /mcp`, and the assistant schema/subgraph endpoints
+  are still legacy-only. Those are being ported before the default moves.
+
+- **The control plane can now restart.** Its migrations used plain
+  `CREATE TABLE` with nothing recording which had run, so a second start
+  against the same database failed with `relation already exists` and the
+  process refused to boot — it could be started exactly once per
+  database. Migrations are now tracked in `schema_migrations`, and each
+  applies in one transaction with the row recording it.
+
+- **Migrations are embedded in the binary.** They were read from a
+  source-tree path resolved against the working directory, so an
+  installed binary could not migrate at all.
+
+- The API container image now builds. Its Dockerfile copies an allowlist
+  of source trees rather than the whole context, and `controlplane/` was
+  not on it.
+
 ## [0.8.0] - 2026-09-09
+
+**Correction (0.8.1).** The entry below describes the rebuilt control
+plane, and every word of it is true of the `controlplane/` packages. It
+was misleading about the released artifact: the rebuild was **not wired
+into the `duragraph` binary in 0.8.0**, so a user who installed and ran
+it got the previous implementation, in which `llm.token`,
+`checkpoint.saved` and the SSE heartbeat are absent, cron advances its
+schedule without creating any run, and completed runs do not record their
+output. The wiring landed in 0.8.1 behind `--control-plane=v2`. The
+original text is kept below unaltered rather than quietly edited.
+
+Note: this entry resumes a changelog that had gone quiet — 0.7.1 through
+0.7.7 were tagged and released without entries here. Their contents are
+in the GitHub release notes for those tags.
 
 The control plane is rebuilt against the structural specification, and a
 single user can now drive a graph end to end over the HTTP API alone:
 install a graph, create an assistant and thread, start a run, watch it
 stream, pause it for human input, resume it, and read the result back.
-
-Note: this entry resumes a changelog that had gone quiet — 0.7.1 through
-0.7.7 were tagged and released without entries here. Their contents are
-in the GitHub release notes for those tags.
 
 ### Added
 
@@ -209,6 +251,7 @@ The 5 source repos are now archived (don't delete — history preserved server-s
 - Canonical Apache 2.0 license
 - Panic on short model names in LLM provider routing
 
+[0.8.1]: https://github.com/Duragraph/duragraph/releases/tag/v0.8.1
 [0.8.0]: https://github.com/Duragraph/duragraph/releases/tag/v0.8.0
 [0.7.0]: https://github.com/Duragraph/duragraph/releases/tag/v0.7.0
 [0.2.0]: https://github.com/Duragraph/duragraph/releases/tag/v0.2.0
