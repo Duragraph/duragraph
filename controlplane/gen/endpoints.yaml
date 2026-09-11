@@ -762,6 +762,35 @@ groups:
           - "branch: bootstrap | new_user | existing (see branches)"
           - "Set cookie duragraph_session = JWT"
           - "302 redirect to dashboard / awaiting-approval / suspended"
+      - name: register
+        method: POST
+        path: /api/auth/register
+        custom: true
+        kind: write
+        outbox: true
+        events: [user.signed_up, user.promoted_to_admin, user.approved, tenant.pending, tenant.provisioning]
+        nats: {subject: "user.* + tenant.*", stream: "PLATFORM_USERS + PLATFORM_TENANTS"}
+        branches:
+          bootstrap: "INSERT users (role='admin', status='approved', auth_method='password') + tenants + events(user.signed_up, user.promoted_to_admin, user.approved, tenant.pending, tenant.provisioning) + outbox + pg_notify"
+          new_user: "INSERT users (status='pending', auth_method='password') + tenants (status='pending') + events(user.signed_up, tenant.pending) + outbox + pg_notify"
+          duplicate: "409 — email already registered (no writes)"
+        steps:
+          - "Validate email + password (presence, password length 8..72)"
+          - "bcrypt hash the password (never logged)"
+          - "Claim bootstrap_lock: winner is admin+approved, loser is pending"
+          - "INSERT users + tenants + events (same shape as auth.callback)"
+          - "Set cookie duragraph_session = JWT"
+      - name: password_login
+        method: POST
+        path: /api/auth/login
+        custom: true
+        kind: special
+        outbox: false
+        steps:
+          - "Look up user by LOWER(email)"
+          - "bcrypt compare against password_hash (constant-time)"
+          - "Reject identically for unknown email and wrong password"
+          - "Set cookie duragraph_session = JWT"
       - name: logout
         method: POST
         path: /api/auth/logout

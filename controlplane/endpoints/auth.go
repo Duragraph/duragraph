@@ -322,34 +322,7 @@ func (s *Server) insertIdentity(ctx context.Context, provider, oauthID, email st
 		}
 		out.TenantID = &tid
 
-		evs := make([]eventstore.Event, 0, len(events))
-		for _, et := range events {
-			if strings.HasPrefix(et, "user.") {
-				evs = append(evs, eventstore.Event{
-					AggregateType: "User",
-					AggregateID:   out.ID,
-					EventType:     et,
-					Payload: mustJSON(map[string]any{
-						"user_id": out.ID.String(),
-						"email":   email,
-						"role":    role,
-						"status":  userStatus,
-					}),
-				})
-				continue
-			}
-			evs = append(evs, eventstore.Event{
-				AggregateType: "Tenant",
-				AggregateID:   tid,
-				EventType:     et,
-				Payload: mustJSON(map[string]any{
-					"tenant_id": tid.String(),
-					"user_id":   out.ID.String(),
-					"db_name":   dbName,
-				}),
-			})
-		}
-		return evs, nil
+		return platformSignupEvents(events, out.ID, tid, email, role, userStatus, dbName), nil
 	})
 	if err != nil {
 		return nil, err
@@ -453,4 +426,48 @@ func (s *Server) AuthRefresh(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, AuthRefreshResponse{Token: token, Exp: fresh.ExpiresAt.Unix()})
+}
+
+// platformSignupEvents builds the event set a new account emits, routing
+// each to the aggregate its name implies: user.* against the user,
+// everything else against the tenant.
+//
+// Shared by the OAuth callback and password registration so the two
+// cannot drift. That mattered enough to extract: if one path emitted a
+// different set, a consumer rebuilding state from the log would see
+// accounts that exist without having signed up, and the discrepancy would
+// depend on which door the user came in through.
+func platformSignupEvents(
+	events []string,
+	userID, tenantID uuid.UUID,
+	email, role, status, dbName string,
+) []eventstore.Event {
+	evs := make([]eventstore.Event, 0, len(events))
+	for _, et := range events {
+		if strings.HasPrefix(et, "user.") {
+			evs = append(evs, eventstore.Event{
+				AggregateType: "User",
+				AggregateID:   userID,
+				EventType:     et,
+				Payload: mustJSON(map[string]any{
+					"user_id": userID.String(),
+					"email":   email,
+					"role":    role,
+					"status":  status,
+				}),
+			})
+			continue
+		}
+		evs = append(evs, eventstore.Event{
+			AggregateType: "Tenant",
+			AggregateID:   tenantID,
+			EventType:     et,
+			Payload: mustJSON(map[string]any{
+				"tenant_id": tenantID.String(),
+				"user_id":   userID.String(),
+				"db_name":   dbName,
+			}),
+		})
+	}
+	return evs
 }
