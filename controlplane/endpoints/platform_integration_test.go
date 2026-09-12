@@ -36,9 +36,16 @@ func newMeTestServer() *echo.Echo {
 func seedMeUser(t *testing.T, ctx context.Context, email, role, status string) string {
 	t.Helper()
 	var id string
+	// An OAuth identity is seeded, not omitted. Platform migration 004 adds
+	// users_at_least_one_auth_method, so a row with neither an OAuth
+	// identity nor a password is now rejected — correctly, since it is an
+	// account nobody could ever sign in to. This fixture was creating
+	// exactly that; giving it a provider makes it a realistic user rather
+	// than one the schema has to tolerate.
 	if err := testPlatform.QueryRow(ctx,
-		`INSERT INTO users (email, role, status) VALUES ($1,$2,$3) RETURNING id`,
-		email, role, status).Scan(&id); err != nil {
+		`INSERT INTO users (oauth_provider, oauth_id, email, role, status)
+		 VALUES ('google', $1, $2, $3, $4) RETURNING id`,
+		"oauth-"+email, email, role, status).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id
