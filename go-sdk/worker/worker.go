@@ -530,11 +530,6 @@ func (w *Worker[S]) sendEvents(ctx context.Context, path string, events []any, o
 }
 func (w *Worker[S]) workerPath() string { return "/api/v1/workers/" + w.workerID }
 func (w *Worker[S]) setStatus(s Status) { w.statusMu.Lock(); w.status = s; w.statusMu.Unlock() }
-func (w *Worker[S]) getStatus() Status {
-	w.statusMu.RLock()
-	defer w.statusMu.RUnlock()
-	return w.status
-}
 
 type apiError struct {
 	code int

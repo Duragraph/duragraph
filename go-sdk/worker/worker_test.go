@@ -11,8 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/duragraph/duragraph/go-sdk/graph"
 	"github.com/google/uuid"
+
+	"github.com/duragraph/duragraph/go-sdk/graph"
 )
 
 type echoNode struct{}
@@ -43,7 +44,6 @@ type wire struct {
 	checkpoint json.RawMessage
 	version    int
 	epoch      int
-	failNode   bool
 }
 
 func (f *wire) handler(t *testing.T) http.Handler {
@@ -73,17 +73,23 @@ func (f *wire) handler(t *testing.T) http.Handler {
 			if def["name"] != "test-graph" || def["nodes"] == nil {
 				t.Errorf("graph registration: %v", def)
 			}
-			json.NewEncoder(w).Encode(map[string]any{"worker_id": body["worker_id"], "status": "online"})
+			if err := json.NewEncoder(w).Encode(map[string]any{"worker_id": body["worker_id"], "status": "online"}); err != nil {
+				t.Errorf("encode register: %v", err)
+			}
 		case strings.HasSuffix(r.URL.Path, "/heartbeat"):
 			if body["status"] != "online" {
 				t.Errorf("heartbeat status: %v", body)
 			}
-			json.NewEncoder(w).Encode(map[string]any{"commands": []string{}})
+			if err := json.NewEncoder(w).Encode(map[string]any{"commands": []string{}}); err != nil {
+				t.Errorf("encode heartbeat: %v", err)
+			}
 		case strings.HasSuffix(r.URL.Path, "/runs/claim"):
 			if body["max_runs"] != float64(1) {
 				t.Errorf("claim payload: %v", body)
 			}
-			json.NewEncoder(w).Encode(map[string]any{"runs": []any{}})
+			if err := json.NewEncoder(w).Encode(map[string]any{"runs": []any{}}); err != nil {
+				t.Errorf("encode claim: %v", err)
+			}
 		case strings.HasSuffix(r.URL.Path, "/events"):
 			events := body["events"].([]any)
 			for _, v := range events {
@@ -91,7 +97,9 @@ func (f *wire) handler(t *testing.T) http.Handler {
 				f.events = append(f.events, ev)
 				if ev["type"] == "run.started" {
 					f.epoch++
-					json.NewEncoder(w).Encode(map[string]any{"lease_epoch": f.epoch})
+					if err := json.NewEncoder(w).Encode(map[string]any{"lease_epoch": f.epoch}); err != nil {
+						t.Errorf("encode epoch: %v", err)
+					}
 					return
 				}
 				if ev["lease_epoch"] != float64(f.epoch) {
@@ -100,20 +108,30 @@ func (f *wire) handler(t *testing.T) http.Handler {
 			}
 			w.WriteHeader(200)
 		case strings.HasSuffix(r.URL.Path, "/graph"):
-			json.NewEncoder(w).Encode(map[string]any{"nodes": []any{map[string]string{"id": "echo", "type": "function"}}, "edges": []any{}, "config": map[string]any{}})
+			if err := json.NewEncoder(w).Encode(map[string]any{"nodes": []any{map[string]string{"id": "echo", "type": "function"}}, "edges": []any{}, "config": map[string]any{}}); err != nil {
+				t.Errorf("encode graph: %v", err)
+			}
 		case strings.HasSuffix(r.URL.Path, "/checkpoints/latest"):
 			if f.checkpoint == nil {
 				w.WriteHeader(404)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"checkpoint_id": 1, "version": f.version, "state": f.checkpoint})
+			if err := json.NewEncoder(w).Encode(map[string]any{"checkpoint_id": 1, "version": f.version, "state": f.checkpoint}); err != nil {
+				t.Errorf("encode checkpoint: %v", err)
+			}
 		case strings.HasSuffix(r.URL.Path, "/checkpoints"):
 			if body["lease_epoch"] != float64(f.epoch) {
 				t.Errorf("unfenced checkpoint: %v", body)
 			}
-			f.checkpoint, _ = json.Marshal(body["state"])
+			var err error
+			f.checkpoint, err = json.Marshal(body["state"])
+			if err != nil {
+				t.Errorf("marshal checkpoint: %v", err)
+			}
 			f.version = int(body["version"].(float64))
-			json.NewEncoder(w).Encode(map[string]int{"checkpoint_id": 1})
+			if err := json.NewEncoder(w).Encode(map[string]int{"checkpoint_id": 1}); err != nil {
+				t.Errorf("encode checkpoint write: %v", err)
+			}
 		case strings.HasSuffix(r.URL.Path, "/deregister"):
 			w.WriteHeader(204)
 		default:
@@ -201,7 +219,9 @@ func TestStaleLeaseAndGraphMismatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tt.mismatch {
-					json.NewEncoder(w).Encode(map[string]any{"nodes": []any{map[string]string{"id": "other"}}, "edges": []any{}})
+					if err := json.NewEncoder(w).Encode(map[string]any{"nodes": []any{map[string]string{"id": "other"}}, "edges": []any{}}); err != nil {
+						t.Errorf("encode mismatch: %v", err)
+					}
 				} else {
 					w.WriteHeader(tt.code)
 				}
