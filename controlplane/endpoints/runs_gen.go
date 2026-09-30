@@ -17,6 +17,8 @@ func (s *Server) RegisterRuns(g *echo.Group) {
 	g.POST("/threads/:id/runs", s.RunsCreateOnThread)
 	g.POST("/runs", s.RunsCreateStateless)
 	g.POST("/runs/batch", s.RunsBatchCreate)
+	g.GET("/runs", s.RunsListAll)
+	g.GET("/runs/:rid", s.RunsGetById)
 	g.GET("/threads/:id/runs/:rid", s.RunsGet)
 	g.POST("/threads/:id/runs/:rid/cancel", s.RunsCancel)
 	g.POST("/threads/:id/runs/:rid/join", s.RunsJoin)
@@ -34,6 +36,33 @@ func (s *Server) RegisterRuns(g *echo.Group) {
 // RunsCreateStateless — POST /runs  (kind: write) — hand-written in runs.go
 
 // RunsBatchCreate — POST /runs/batch  (kind: write) — hand-written in runs.go
+
+// RunsListAll — GET /runs  (kind: read) — hand-written in runs.go
+
+// RunsGetById — GET /runs/{rid}  (kind: read)
+//   - SELECT * FROM runs WHERE id = :rid (including stateless runs)
+func (s *Server) RunsGetById(c echo.Context) error {
+	ctx := c.Request().Context()
+	_ = ctx
+	pathID, err := uuid.Parse(c.Param("rid"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid rid")
+	}
+	rows, err := s.Tenant.Query(ctx, `SELECT id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+FROM runs WHERE id = $1
+`, pathID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[runRow])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
+}
 
 // RunsGet — GET /threads/{id}/runs/{rid}  (kind: read)
 //   - SELECT * FROM runs WHERE id = :rid AND thread_id = :id

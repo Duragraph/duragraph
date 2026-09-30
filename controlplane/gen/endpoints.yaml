@@ -375,6 +375,29 @@ groups:
         steps:
           - "FOR EACH run in batch: event_streams + events + outbox + projection"
           - "pg_notify('outbox_new','') once at end of TX"
+      - name: list_all
+        method: GET
+        path: /runs
+        kind: read
+        outbox: false
+        custom: true  # hand-written in runs_read.go — optional assistant_id and pagination
+        response: Run
+        steps: ["SELECT runs across threads, optionally filtered by assistant_id, newest first"]
+      - name: get_by_id
+        method: GET
+        path: /runs/{rid}
+        kind: read
+        outbox: false
+        response: Run
+        impl:
+          mode: read_one
+          row: runRow
+          path_param: rid
+          query: |
+            SELECT id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
+            FROM runs WHERE id = $1
+          args: ["pathID"]
+        steps: ["SELECT * FROM runs WHERE id = :rid (including stateless runs)"]
       - name: get
         method: GET
         path: /threads/{id}/runs/{rid}
