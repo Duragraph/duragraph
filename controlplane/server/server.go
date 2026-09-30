@@ -327,6 +327,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	ep.RegisterAdmin(root)
 
 	ep.RegisterSystem(e) // root-level: /ok, /info, /metrics
+	ep.RegisterMCP(e)    // root-level Streamable HTTP, not /api/v1
 
 	// The embedded React dashboard. Without it the rebuilt control plane
 	// serves the API and nothing at "/" — the entire UI missing, which a
