@@ -8,8 +8,20 @@ import (
 	"strings"
 	"testing"
 
+	authpkg "github.com/duragraph/duragraph/internal/infrastructure/auth"
 	"github.com/labstack/echo/v4"
 )
+
+var adminTestSecret = []byte("admin-test-secret-not-for-production")
+
+func adminTestToken(role string) string {
+	token, err := authpkg.IssueJWT(adminTestSecret,
+		"11111111-1111-1111-1111-111111111111", "operator@test", role, "", DefaultSessionTTL)
+	if err != nil {
+		panic(err)
+	}
+	return token
+}
 
 // truncatePlatform resets the platform tables. The pool is shared across the
 // package, so every test in this file starts from a known-empty state.
@@ -23,7 +35,7 @@ func truncatePlatform(t *testing.T, ctx context.Context) {
 
 func newAdminServer() *echo.Echo {
 	e := echo.New()
-	(&Server{Platform: testPlatform}).RegisterAdmin(e.Group(""))
+	(&Server{Platform: testPlatform, Auth: AuthConfig{JWTSecret: adminTestSecret}}).RegisterAdmin(e.Group(""))
 	return e
 }
 
@@ -53,8 +65,67 @@ func doAdmin(e *echo.Echo, method, path string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, nil)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminTestToken("admin"))
 	e.ServeHTTP(rec, req)
 	return rec
+}
+
+// Registration outside server.New must not bypass authentication, even if the
+// embedding caller forgot to configure a signing secret (or platform pool).
+func TestAdminRoutesFailClosedWithoutSecret(t *testing.T) {
+	e := echo.New()
+	(&Server{}).RegisterAdmin(e.Group(""))
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/api/admin/users"},
+		{"POST", "/api/admin/users/11111111-1111-1111-1111-111111111111/approve"},
+		{"POST", "/api/admin/users/11111111-1111-1111-1111-111111111111/reject"},
+		{"POST", "/api/admin/users/11111111-1111-1111-1111-111111111111/suspend"},
+		{"POST", "/api/admin/users/11111111-1111-1111-1111-111111111111/resume"},
+		{"POST", "/api/admin/tenants/11111111-1111-1111-1111-111111111111/retry-migration"},
+		{"GET", "/api/admin/metrics"},
+		{"GET", "/api/admin/metrics/11111111-1111-1111-1111-111111111111"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			for _, bearer := range []string{"", "Bearer " + adminTestToken("admin")} {
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(tc.method, tc.path, nil)
+				if bearer != "" {
+					req.Header.Set("Authorization", bearer)
+				}
+				e.ServeHTTP(rec, req)
+				if rec.Code != http.StatusUnauthorized {
+					t.Errorf("bearer=%q: want 401, got %d: %s", bearer, rec.Code, rec.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestAdminRoutesRequireAdminRole(t *testing.T) {
+	e := newAdminServer()
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/api/admin/users"},
+		{"POST", "/api/admin/users/11111111-1111-1111-1111-111111111111/approve"},
+		{"GET", "/api/admin/metrics"},
+	} {
+		for _, expected := range []struct {
+			bearer string
+			status int
+		}{
+			{"", http.StatusUnauthorized},
+			{"Bearer " + adminTestToken("user"), http.StatusForbidden},
+		} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			if expected.bearer != "" {
+				req.Header.Set("Authorization", expected.bearer)
+			}
+			e.ServeHTTP(rec, req)
+			if rec.Code != expected.status {
+				t.Errorf("%s %s bearer=%q: want %d, got %d: %s", tc.method, tc.path, expected.bearer, expected.status, rec.Code, rec.Body.String())
+			}
+		}
+	}
 }
 
 // userStatus / tenantStatus read the rows back so assertions are against the

@@ -51,32 +51,11 @@ type AdminListUsersResponse struct {
 // not be able to turn one request into an unbounded scan + serialization.
 const maxAdminPageSize = 200
 
-// requireAdminIfConfigured is the auth gate for this surface.
-//
-// FAIL-OPEN WHEN UNCONFIGURED, AND THAT IS A REAL RISK. With no JWTSecret set,
-// s.requireAdmin cannot verify anything, so rather than 500 on every call this
-// lets the request through. That is tolerable ONLY because the composition root
-// does not mount the platform surface without a secret, and because it keeps
-// these endpoints drivable in tests that have no auth. It is NOT defence in
-// depth: anyone who mounts these routes with an empty AuthConfig publishes an
-// unauthenticated user-administration API.
-//
-// MUST BE REVISITED — the right shape is for the server to refuse to start when
-// the platform surface is enabled without a secret, at which point this helper
-// collapses to a plain s.requireAdmin call.
-func (s *Server) requireAdminIfConfigured(c echo.Context) error {
-	if len(s.Auth.JWTSecret) == 0 {
-		return nil
-	}
-	_, err := s.requireAdmin(c)
-	return err
-}
-
 // AdminListUsers lists platform users, newest-registration-last.
 // GET /api/admin/users?status=&limit=&offset= -> 200 AdminListUsersResponse.
 func (s *Server) AdminListUsers(c echo.Context) error {
 	ctx := c.Request().Context()
-	if err := s.requireAdminIfConfigured(c); err != nil {
+	if _, err := s.requireAdmin(c); err != nil {
 		return err
 	}
 
@@ -212,7 +191,7 @@ type userTransition struct {
 // to tell 404 (no such user) from 409 (wrong state) for the error message.
 func (s *Server) adminUserTransition(c echo.Context, t userTransition) error {
 	ctx := c.Request().Context()
-	if err := s.requireAdminIfConfigured(c); err != nil {
+	if _, err := s.requireAdmin(c); err != nil {
 		return err
 	}
 	uid, err := pathUUID(c, "id")
@@ -345,7 +324,7 @@ func adminEvents(types []string, uid uuid.UUID, tenantID *uuid.UUID, email, role
 // and that is what is used here. The spec text should be corrected to match.
 func (s *Server) AdminRetryMigration(c echo.Context) error {
 	ctx := c.Request().Context()
-	if err := s.requireAdminIfConfigured(c); err != nil {
+	if _, err := s.requireAdmin(c); err != nil {
 		return err
 	}
 	tid, err := pathUUID(c, "id")
@@ -407,7 +386,7 @@ func (s *Server) AdminRetryMigration(c echo.Context) error {
 // dashboard cannot tell invented numbers from real ones, and "all tenants show
 // zero runs" reads as an outage rather than as an unimplemented endpoint.
 func (s *Server) AdminMetrics(c echo.Context) error {
-	if err := s.requireAdminIfConfigured(c); err != nil {
+	if _, err := s.requireAdmin(c); err != nil {
 		return err
 	}
 	return echo.NewHTTPError(http.StatusNotImplemented,
@@ -416,7 +395,7 @@ func (s *Server) AdminMetrics(c echo.Context) error {
 
 // AdminMetricsTenant — see AdminMetrics.
 func (s *Server) AdminMetricsTenant(c echo.Context) error {
-	if err := s.requireAdminIfConfigured(c); err != nil {
+	if _, err := s.requireAdmin(c); err != nil {
 		return err
 	}
 	if _, err := pathUUID(c, "tenant_id"); err != nil {
