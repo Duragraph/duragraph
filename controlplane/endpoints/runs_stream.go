@@ -405,8 +405,19 @@ func (s *Server) waitForRun(c echo.Context, rid uuid.UUID) error {
 }
 
 func (s *Server) waitForRunWithTimeout(c echo.Context, rid uuid.UUID, timeout time.Duration) error {
+	row, err := s.waitForRunRow(c, rid, timeout)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, row.toAPI())
+}
+
+// waitForRunRow shares the subscribe-first terminal wait and final DB read.
+// Callers choose their own wire response: join/stateless wait return the v2 Run
+// model, while thread create-and-wait also returns its final output and error.
+func (s *Server) waitForRunRow(c echo.Context, rid uuid.UUID, timeout time.Duration) (runRow, error) {
 	if s.Subscriber == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "wait requires NATS")
+		return runRow{}, echo.NewHTTPError(http.StatusServiceUnavailable, "wait requires NATS")
 	}
 	ctx := c.Request().Context()
 	var deadline <-chan time.Time
@@ -419,16 +430,16 @@ func (s *Server) waitForRunWithTimeout(c echo.Context, rid uuid.UUID, timeout ti
 	// 1. Subscribe FIRST (before the status read) so nothing is missed in the gap.
 	runsCh, err := s.Subscriber.Subscribe(ctx, "duragraph.runs.>")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return runRow{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	// 2. Check current status; skip waiting if already terminal.
 	var status string
 	if err := s.Tenant.QueryRow(ctx, `SELECT status FROM runs WHERE id=$1`, rid).Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "run not found")
+			return runRow{}, echo.NewHTTPError(http.StatusNotFound, "run not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return runRow{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	if !isTerminalStatus(status) {
@@ -437,12 +448,12 @@ func (s *Server) waitForRunWithTimeout(c echo.Context, rid uuid.UUID, timeout ti
 		for {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return runRow{}, ctx.Err()
 			case <-deadline:
-				return echo.NewHTTPError(http.StatusGatewayTimeout, "run wait timeout")
+				return runRow{}, echo.NewHTTPError(http.StatusGatewayTimeout, "run wait timeout")
 			case msg := <-runsCh:
 				if msg == nil { // channel closed (ctx canceled)
-					return ctx.Err()
+					return runRow{}, ctx.Err()
 				}
 				var env relayEnvelope
 				if json.Unmarshal(msg.Payload, &env) != nil {
@@ -461,16 +472,16 @@ func (s *Server) waitForRunWithTimeout(c echo.Context, rid uuid.UUID, timeout ti
 	rows, err := s.Tenant.Query(ctx, `SELECT id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
 FROM runs WHERE id = $1`, rid)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return runRow{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	row, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[runRow])
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "run not found")
+			return runRow{}, echo.NewHTTPError(http.StatusNotFound, "run not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return runRow{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, row.toAPI())
+	return row, nil
 }
 
 // isTerminalStatus reports whether a DB runs.status value is terminal
@@ -514,6 +525,17 @@ func (s *Server) RunsStatelessWait(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return s.waitForRun(c, rid)
+}
+
+// threadWaitResponse extends the v2 Run representation for the OpenAPI wait
+// operation's unconstrained JSON response. output is the final JSON value
+// persisted by the worker (null when absent); error is its failure message
+// (null when absent). Unlike join/stateless wait these fields are essential to
+// the thread wait operation's "return the final output" contract.
+type threadWaitResponse struct {
+	Run
+	Output json.RawMessage `json:"output"`
+	Error  *string         `json:"error"`
 }
 
 // RunsCreateAndWait creates a run on an existing thread and blocks until it is
@@ -568,7 +590,11 @@ func (s *Server) RunsCreateAndWait(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	c.Response().Header().Set("Content-Location", "/api/v1/threads/"+threadID.String()+"/runs/"+rid.String())
-	return s.waitForRunWithTimeout(c, rid, timeout)
+	row, err := s.waitForRunRow(c, rid, timeout)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, threadWaitResponse{Run: row.toAPI(), Output: json.RawMessage(row.Output), Error: row.Error})
 }
 
 // HeartbeatInterval reports the SSE keepalive period; SetHeartbeatInterval

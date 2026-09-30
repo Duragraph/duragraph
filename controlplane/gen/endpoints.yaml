@@ -494,7 +494,7 @@ groups:
         steps:
           - "CREATE RUN (same as POST /threads/{id}/runs)"
           - "Subscribe NATS, wait for run.completed, run.failed or run.cancelled"
-          - "Return final run state as JSON"
+          - "Return final run state with output and error as JSON (null when absent)"
       - name: cancel_stateless
         method: POST
         path: /runs/cancel

@@ -59,10 +59,13 @@ func waitForThreadRun(t *testing.T, threadID uuid.UUID) uuid.UUID {
 }
 
 func TestThreadWaitTerminal(t *testing.T) {
-	for _, tc := range []struct{ dbStatus, event, apiStatus string }{
-		{"completed", "run.completed", "success"},
-		{"failed", "run.failed", "error"},
-		{"cancelled", "run.cancelled", "error"},
+	for _, tc := range []struct {
+		dbStatus, event, apiStatus string
+		output, failure            string
+	}{
+		{"completed", "run.completed", "success", `{"answer":["one",2]}`, ""},
+		{"failed", "run.failed", "error", "", "node failed: unavailable"},
+		{"cancelled", "run.cancelled", "error", "", ""},
 	} {
 		t.Run(tc.dbStatus, func(t *testing.T) {
 			threadID, assistantID, url := threadWaitFixture(t)
@@ -109,7 +112,15 @@ func TestThreadWaitTerminal(t *testing.T) {
 			if err := json.Unmarshal(payload, &event); err != nil || event.ThreadID != threadID {
 				t.Fatalf("run.created must identify thread: payload=%s err=%v", payload, err)
 			}
-			if _, err := testPool.Exec(context.Background(), `UPDATE runs SET status=$2 WHERE id=$1`, rid, tc.dbStatus); err != nil {
+			var output any
+			if tc.output != "" {
+				output = []byte(tc.output)
+			}
+			var failure any
+			if tc.failure != "" {
+				failure = tc.failure
+			}
+			if _, err := testPool.Exec(context.Background(), `UPDATE runs SET status=$2, output=$3, error=$4 WHERE id=$1`, rid, tc.dbStatus, output, failure); err != nil {
 				t.Fatal(err)
 			}
 			pub := nats.NewPublisher(mustJS(t))
@@ -128,6 +139,25 @@ func TestThreadWaitTerminal(t *testing.T) {
 				}
 				if resp.StatusCode != http.StatusOK || got["status"] != tc.apiStatus || got["thread_id"] != threadID.String() || got["run_id"] != rid.String() {
 					t.Fatalf("unexpected wait result: %d %+v", resp.StatusCode, got)
+				}
+				if tc.output != "" {
+					value, ok := got["output"].(map[string]any)
+					if !ok {
+						t.Fatalf("final output missing or not JSON: %+v", got["output"])
+					}
+					answer, ok := value["answer"].([]any)
+					if !ok || len(answer) != 2 || answer[0] != "one" || answer[1] != float64(2) {
+						t.Fatalf("final output corrupted: %+v", got["output"])
+					}
+				} else if value, ok := got["output"]; !ok || value != nil {
+					t.Fatalf("missing output must be null: %+v", got)
+				}
+				if tc.failure != "" {
+					if got["error"] != tc.failure {
+						t.Fatalf("failure message missing: %+v", got)
+					}
+				} else if value, ok := got["error"]; !ok || value != nil {
+					t.Fatalf("missing failure must be null: %+v", got)
 				}
 				if want := "/api/v1/threads/" + threadID.String() + "/runs/" + rid.String(); resp.Header.Get("Content-Location") != want {
 					t.Errorf("Content-Location = %q, want %q", resp.Header.Get("Content-Location"), want)
