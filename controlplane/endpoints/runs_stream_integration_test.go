@@ -467,14 +467,26 @@ type joinResult struct {
 	body   map[string]any
 }
 
-// postJoin POSTs url (join or wait) and sends the decoded result on done. A
+func attachRunToThread(t *testing.T, ctx context.Context, rid uuid.UUID) uuid.UUID {
+	t.Helper()
+	var tid uuid.UUID
+	if err := testPool.QueryRow(ctx, `INSERT INTO threads DEFAULT VALUES RETURNING id`).Scan(&tid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE runs SET thread_id=$1 WHERE id=$2`, tid, rid); err != nil {
+		t.Fatal(err)
+	}
+	return tid
+}
+
+// requestJoin calls the contract GET (join) and sends the decoded result on done. A
 // request error is reported via t.Errorf and an empty result is still sent so
 // callers waiting on done never block forever.
-func postJoin(t *testing.T, url string, done chan<- joinResult) {
+func requestJoin(t *testing.T, url string, done chan<- joinResult) {
 	t.Helper()
-	resp, err := http.Post(url, "application/json", nil)
+	resp, err := http.Get(url)
 	if err != nil {
-		t.Errorf("join/wait POST: %v", err)
+		t.Errorf("join GET: %v", err)
 		done <- joinResult{}
 		return
 	}
@@ -484,7 +496,7 @@ func postJoin(t *testing.T, url string, done chan<- joinResult) {
 	done <- joinResult{status: resp.StatusCode, body: body}
 }
 
-// TestJoinReturnsOnTerminal proves POST /threads/{id}/runs/{rid}/join blocks
+// TestJoinReturnsOnTerminal proves GET /threads/{id}/runs/{rid}/join blocks
 // on an in_progress run until a terminal run.* event arrives, then returns
 // the run's terminal state as JSON.
 func TestJoinReturnsOnTerminal(t *testing.T) {
@@ -493,6 +505,7 @@ func TestJoinReturnsOnTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	rid := seedRunWithStream(t, ctx) // in_progress run
+	tid := attachRunToThread(t, ctx, rid)
 
 	e := echo.New()
 	s := newStreamTestServer()
@@ -500,10 +513,10 @@ func TestJoinReturnsOnTerminal(t *testing.T) {
 	srv := httptest.NewServer(e)
 	defer srv.Close()
 
-	url := srv.URL + "/api/v1/threads/" + uuid.Nil.String() + "/runs/" + rid.String() + "/join"
+	url := srv.URL + "/api/v1/threads/" + tid.String() + "/runs/" + rid.String() + "/join"
 
 	done := make(chan joinResult, 1)
-	go postJoin(t, url, done)
+	go requestJoin(t, url, done)
 
 	time.Sleep(300 * time.Millisecond) // let subscribe + status read run
 	if _, err := testPool.Exec(ctx, `UPDATE runs SET status='completed' WHERE id=$1`, rid); err != nil {
@@ -533,6 +546,7 @@ func TestJoinAlreadyTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	rid := seedRunWithStream(t, ctx)
+	tid := attachRunToThread(t, ctx, rid)
 	if _, err := testPool.Exec(ctx, `UPDATE runs SET status='completed' WHERE id=$1`, rid); err != nil {
 		t.Fatal(err)
 	}
@@ -543,10 +557,10 @@ func TestJoinAlreadyTerminal(t *testing.T) {
 	srv := httptest.NewServer(e)
 	defer srv.Close()
 
-	url := srv.URL + "/api/v1/threads/" + uuid.Nil.String() + "/runs/" + rid.String() + "/join"
+	url := srv.URL + "/api/v1/threads/" + tid.String() + "/runs/" + rid.String() + "/join"
 
 	done := make(chan joinResult, 1)
-	go postJoin(t, url, done)
+	go requestJoin(t, url, done)
 
 	select {
 	case res := <-done:

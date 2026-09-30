@@ -24,6 +24,10 @@ import (
 func (s *Server) Register{{.Pascal}}(g *echo.Group) {
 {{- range .Endpoints}}
 	g.{{.EchoVerb}}("{{.EchoPath}}", s.{{.Handler}})
+{{- $endpoint := .}}
+{{- range .AliasVerbs}}
+	g.{{.}}("{{$endpoint.EchoPath}}", s.{{$endpoint.Handler}}) // temporary compatibility alias
+{{- end}}
 {{- end}}
 }
 {{range .Endpoints}}
@@ -128,6 +132,11 @@ func (s *Server) {{.Handler}}(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	{{- range .Impl.RejectNonNil}}
+	if req.{{.}} != nil {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "{{.}} is not supported")
+	}
+	{{- end}}
 	payload := mustJSON(req)
 {{- else}}
 	var payload []byte

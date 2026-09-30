@@ -18,7 +18,7 @@ func (s *Server) RegisterThreads(g *echo.Group) {
 	g.POST("/threads/search", s.ThreadsSearch)
 	g.POST("/threads/count", s.ThreadsCount)
 	g.GET("/threads/:id", s.ThreadsGet)
-	g.PUT("/threads/:id", s.ThreadsUpdate)
+	g.PATCH("/threads/:id", s.ThreadsUpdate)
 	g.DELETE("/threads/:id", s.ThreadsDelete)
 	g.GET("/threads/:id/state", s.ThreadsGetState)
 	g.GET("/threads/:id/state/:checkpoint_id", s.ThreadsGetCheckpointState)
@@ -101,7 +101,7 @@ FROM threads WHERE id = $1
 	return c.JSON(http.StatusOK, row.toAPI())
 }
 
-// ThreadsUpdate — PUT /threads/{id}  (kind: write)
+// ThreadsUpdate — PATCH /threads/{id}  (kind: write)
 //   - INSERT events: event_type='thread.updated', payload={metadata}
 //   - INSERT outbox (same event_id, same TX)
 //   - pg_notify('outbox_new',”)
@@ -117,6 +117,9 @@ func (s *Server) ThreadsUpdate(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if req.Ttl != nil {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "Ttl is not supported")
+	}
 	payload := mustJSON(req)
 	events := []Event{
 		{AggregateType: "Thread", AggregateID: pathID, EventType: "thread.updated", Payload: payload},
@@ -124,7 +127,7 @@ func (s *Server) ThreadsUpdate(c echo.Context) error {
 	var row threadRow
 	if err := s.writeTx(ctx, s.Tenant, events, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `UPDATE threads SET
-  metadata = COALESCE($2, metadata)
+  metadata = COALESCE(metadata, '{}'::jsonb) || COALESCE($2::jsonb, '{}'::jsonb)
 WHERE id = $1
 RETURNING id, status, values, config, metadata, created_at, updated_at
 `, pathID, jsonbOrNil(req.Metadata))
