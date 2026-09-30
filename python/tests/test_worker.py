@@ -73,9 +73,10 @@ class TestWorkerLifecycle:
         call_args = mock_httpx_client.post.call_args
         assert "/api/v1/workers/register" in call_args[0][0]
         payload = call_args[1]["json"]
-        assert payload["name"] == worker.name
-        assert "worker_id" in payload
-        assert "capabilities" in payload
+        assert payload["worker_id"] == worker._identity
+        assert payload["graphs"] == ["test_graph"]
+        assert payload["capacity"] == 10
+        assert payload["graph_definitions"][0]["name"] == "test_graph"
 
     async def test_worker_registration_retry(self, mock_httpx_client, simple_graph):
         """Test worker registration with retries on failure."""
@@ -129,16 +130,15 @@ class TestWorkerLifecycle:
 
         # Verify payload
         payload = call_args[1]["json"]
-        assert payload["status"] == "ready"
+        assert payload["status"] == "online"
         assert payload["active_runs"] == 2
-        assert payload["total_runs"] == 6
-        assert payload["failed_runs"] == 1
+        assert set(payload) == {"status", "active_runs"}
 
     async def test_heartbeat_reregistration_on_404(self, mock_httpx_client):
         """Test worker re-registers when heartbeat returns 404."""
-        # First heartbeat returns 404
+        # First heartbeat returns 409 (expired lease)
         error_response = MagicMock()
-        error_response.status_code = 404
+        error_response.status_code = 409
         mock_httpx_client.post.side_effect = [
             httpx.HTTPStatusError("Not found", request=MagicMock(), response=error_response),
             # Registration succeeds
@@ -159,17 +159,17 @@ class TestWorkerLifecycle:
         assert mock_httpx_client.post.call_count == 2
         assert worker._worker_id == "worker-456"
 
-    async def test_poll_respects_draining_status(self, mock_httpx_client):
+    async def test_claim_respects_draining_status(self, mock_httpx_client):
         """Test worker doesn't accept new work when draining."""
         worker = Worker("http://localhost:8080")
         worker._client = mock_httpx_client
         worker._worker_id = "worker-123"
         worker._status = WorkerStatus.DRAINING
 
-        result = await worker._poll_for_work()
+        result = await worker._claim_work(1)
 
-        assert result is None
-        mock_httpx_client.get.assert_not_called()
+        assert result == []
+        mock_httpx_client.post.assert_not_called()
 
     async def test_graceful_shutdown_no_active_runs(self):
         """Test graceful shutdown with no active runs."""
@@ -212,7 +212,7 @@ class TestWorkerLifecycle:
         worker._status = WorkerStatus.BUSY
         worker._client = AsyncMock()
         worker._active_runs = {"run-1"}
-        worker._run_tasks = {"run-1": AsyncMock(done=MagicMock(return_value=False))}
+        worker._run_tasks = {"run-1": MagicMock(done=MagicMock(return_value=False))}
         worker.shutdown_timeout = 1.0  # Very short timeout
 
         start_time = time.time()

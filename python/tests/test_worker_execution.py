@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from duragraph import Graph, entrypoint, llm_node, node, router_node, tool_node
-from duragraph.graph import GraphInstance
+from duragraph import Graph, entrypoint, node, router_node, tool_node
 from duragraph.worker import Worker, WorkerStatus
 
 
@@ -32,14 +31,27 @@ def make_worker(mock_client, graph_instance, graph_def):
 
 
 def get_events(mock_client):
-    """Extract event_type and data from all _send_event calls."""
+    """Extract the v2 per-run event envelopes."""
     events = []
     for call in mock_client.post.call_args_list:
         url = call[0][0]
         if "/events" in url:
-            payload = call[1]["json"]
-            events.append((payload["event_type"], payload["data"]))
+            for event in call[1]["json"]["events"]:
+                events.append((event["type"], event))
     return events
+
+
+async def execute_claim(worker, work):
+    """Test with the claim response shape, not the retired poll payload."""
+    await worker._execute_run(
+        {
+            "run": {"run_id": work["run_id"], "thread_id": work.get("thread_id")},
+            "graph_id": work["graph_id"],
+            "input": work["input"],
+            "lease_epoch": 3,
+            "checkpoint_id": None,
+        }
+    )
 
 
 class TestWorkerFunctionNodeExecution:
@@ -59,25 +71,25 @@ class TestWorkerFunctionNodeExecution:
         definition = graph._get_definition()
         worker = make_worker(mock_httpx_client, graph, definition)
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "simple",
                 "input": {"input": "hello"},
                 "thread_id": "thread-1",
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
         event_types = [e[0] for e in events]
 
-        assert "run_started" in event_types
-        assert "node_started" in event_types
-        assert "node_completed" in event_types
-        assert "run_completed" in event_types
-        assert "run_failed" not in event_types
+        assert "execution.node_started" in event_types
+        assert "execution.node_completed" in event_types
+        assert "run.completed" in event_types
+        assert "run.failed" not in event_types
 
-        run_completed = next(e for e in events if e[0] == "run_completed")
+        run_completed = next(e for e in events if e[0] == "run.completed")
         assert run_completed[1]["output"]["result"] == "hello_processed"
 
     async def test_multi_node_chain(self, mock_httpx_client):
@@ -104,17 +116,18 @@ class TestWorkerFunctionNodeExecution:
         definition = graph._get_definition()
         worker = make_worker(mock_httpx_client, graph, definition)
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "chain",
                 "input": {},
                 "thread_id": "thread-1",
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
-        run_completed = next(e for e in events if e[0] == "run_completed")
+        run_completed = next(e for e in events if e[0] == "run.completed")
         assert run_completed[1]["output"]["value"] == 22
 
     async def test_async_function_node(self, mock_httpx_client):
@@ -132,17 +145,18 @@ class TestWorkerFunctionNodeExecution:
         definition = graph._get_definition()
         worker = make_worker(mock_httpx_client, graph, definition)
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "async_graph",
                 "input": {},
                 "thread_id": "thread-1",
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
-        run_completed = next(e for e in events if e[0] == "run_completed")
+        run_completed = next(e for e in events if e[0] == "run.completed")
         assert run_completed[1]["output"]["async_result"] == "done"
 
 
@@ -163,17 +177,18 @@ class TestWorkerToolNodeExecution:
         definition = graph._get_definition()
         worker = make_worker(mock_httpx_client, graph, definition)
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "tool_graph",
                 "input": {"query": "duragraph"},
                 "thread_id": "thread-1",
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
-        run_completed = next(e for e in events if e[0] == "run_completed")
+        run_completed = next(e for e in events if e[0] == "run.completed")
         assert run_completed[1]["output"]["search_result"] == "found: duragraph"
 
 
@@ -205,25 +220,26 @@ class TestWorkerRouterNodeExecution:
         definition.nodes["fast_path"] = NodeMetadata(node_type="function", name="fast_path")
         definition.nodes["slow_path"] = NodeMetadata(node_type="function", name="slow_path")
 
-        graph.fast_path = lambda state: {"route": "fast"}
-        graph.slow_path = lambda state: {"route": "slow"}
+        graph.fast_path = lambda _state: {"route": "fast"}
+        graph.slow_path = lambda _state: {"route": "slow"}
 
         worker = make_worker(mock_httpx_client, graph, definition)
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "router_graph",
                 "input": {"urgent": True},
                 "thread_id": "thread-1",
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
         event_types = [e[0] for e in events]
-        assert "run_completed" in event_types
+        assert "run.completed" in event_types
 
-        node_started_events = [e for e in events if e[0] == "node_started"]
+        node_started_events = [e for e in events if e[0] == "execution.node_started"]
         node_ids = [e[1]["node_id"] for e in node_started_events]
         assert "classify" in node_ids
         assert "fast_path" in node_ids
@@ -247,21 +263,22 @@ class TestWorkerErrorHandling:
         definition = graph._get_definition()
         worker = make_worker(mock_httpx_client, graph, definition)
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "error_graph",
                 "input": {},
                 "thread_id": "thread-1",
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
         event_types = [e[0] for e in events]
-        assert "run_failed" in event_types
-        assert "run_completed" not in event_types
+        assert "run.failed" in event_types
+        assert "run.completed" not in event_types
 
-        run_failed = next(e for e in events if e[0] == "run_failed")
+        run_failed = next(e for e in events if e[0] == "run.failed")
         assert "something went wrong" in run_failed[1]["error"]
 
     async def test_missing_graph_sends_run_failed(self, mock_httpx_client):
@@ -270,17 +287,18 @@ class TestWorkerErrorHandling:
         worker._client = mock_httpx_client
         worker._worker_id = "worker-123"
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "nonexistent",
                 "input": {},
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
         event_types = [e[0] for e in events]
-        assert "run_failed" in event_types
+        assert "run.failed" in event_types
 
     async def test_no_instance_sends_run_failed(self, mock_httpx_client):
         """Test that a graph registered without instance fails with clear error."""
@@ -300,16 +318,17 @@ class TestWorkerErrorHandling:
         worker._worker_id = "worker-123"
         worker.register_graph(definition)
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "no_instance",
                 "input": {},
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
-        run_failed = next(e for e in events if e[0] == "run_failed")
+        run_failed = next(e for e in events if e[0] == "run.failed")
         assert "No graph instance" in run_failed[1]["error"]
 
 
@@ -332,22 +351,23 @@ class TestWorkerHumanNode:
         definition = graph._get_definition()
         worker = make_worker(mock_httpx_client, graph, definition)
 
-        await worker._execute_run(
+        await execute_claim(
+            worker,
             {
                 "run_id": "run-1",
                 "graph_id": "human_graph",
                 "input": {"data": "review this"},
                 "thread_id": "thread-1",
-            }
+            },
         )
 
         events = get_events(mock_httpx_client)
         event_types = [e[0] for e in events]
-        assert "run_requires_action" in event_types
-        assert "run_completed" not in event_types
+        assert "run.requires_action" in event_types
+        assert "run.completed" not in event_types
 
-        action = next(e for e in events if e[0] == "run_requires_action")
-        assert action[1]["prompt"] == "Please approve"
+        action = next(e for e in events if e[0] == "run.requires_action")
+        assert action[1]["state"]["prompt"] == "Please approve"
 
 
 class TestWorkerGraphInstanceIntegration:
@@ -397,7 +417,6 @@ class TestResolveNextNode:
 
     async def test_simple_edge(self):
         """Test resolving a simple string edge."""
-        from duragraph.edges import Edge
 
         @Graph(id="test")
         class TestGraph:

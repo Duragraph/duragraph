@@ -1,24 +1,16 @@
 """Worker implementation for DuraGraph control plane."""
 
 import asyncio
-import json
 import signal
 import time
 from collections.abc import Callable
 from enum import Enum
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_DNS, uuid4, uuid5
 
 import httpx
 
 from duragraph.graph import GraphDefinition
-
-try:
-    import nats as nats_client
-
-    NATS_AVAILABLE = True
-except ImportError:
-    NATS_AVAILABLE = False
 
 
 class WorkerStatus(Enum):
@@ -31,16 +23,23 @@ class WorkerStatus(Enum):
     STOPPED = "stopped"
 
 
+# The SDK's decorator names are richer than execution_history.node_type's
+# CHECK (start/end/llm/tool/conditional/human). Preserve the original graph
+# definition at registration; only normalize the persisted execution event.
+_EVENT_NODE_TYPES = {
+    "function": "tool",
+    "dspy": "tool",
+    "router": "conditional",
+    "llm": "llm",
+    "tool": "tool",
+    "human": "human",
+}
+
+
 class Worker:
     """Worker that connects to DuraGraph control plane and executes graphs.
 
-    Supports two task delivery modes:
-    - HTTP polling (default, always available)
-    - NATS JetStream subscription (optional, for instant task delivery)
-
-    When nats_url is provided and nats-py is installed, the worker subscribes
-    to NATS task notifications for instant delivery and uses HTTP polling only
-    as a fallback safety net (every 30s instead of 1s).
+    Claims queued runs over HTTP and pushes epoch-fenced events to the server.
     """
 
     def __init__(
@@ -50,16 +49,18 @@ class Worker:
         name: str | None = None,
         capabilities: list[str] | None = None,
         nats_url: str | None = None,
-        poll_interval: float = 1.0,
+        claim_interval: float = 1.0,
         heartbeat_interval: float = 30.0,
         max_concurrent_runs: int = 10,
         shutdown_timeout: float = 60.0,
     ):
         self.control_plane_url = control_plane_url.rstrip("/")
         self.name = name or f"worker-{uuid4().hex[:8]}"
+        if nats_url is not None:
+            raise ValueError("NATS worker delivery is not supported by the v2 claim protocol")
+        self._identity = str(uuid5(NAMESPACE_DNS, f"duragraph:{self.name}"))
         self.capabilities = capabilities or []
-        self.nats_url = nats_url
-        self.poll_interval = poll_interval
+        self.claim_interval = claim_interval
         self.heartbeat_interval = heartbeat_interval
         self.max_concurrent_runs = max_concurrent_runs
         self.shutdown_timeout = shutdown_timeout
@@ -70,12 +71,6 @@ class Worker:
         self._executors: dict[str, Callable[..., Any]] = {}
         self._status = WorkerStatus.STARTING
         self._client: httpx.AsyncClient | None = None
-
-        # NATS client (optional)
-        self._nc: Any | None = None
-        self._js: Any | None = None
-        self._nats_subscriptions: list[Any] = []
-        self._use_nats = bool(nats_url and NATS_AVAILABLE)
 
         # Track in-progress runs for graceful shutdown
         self._active_runs: set[str] = set()
@@ -110,92 +105,6 @@ class Worker:
         if executor:
             self._executors[definition.graph_id] = executor
 
-    async def _connect_nats(self) -> None:
-        """Connect to NATS and subscribe to task assignment subjects."""
-        if not self._use_nats or not self.nats_url:
-            return
-
-        try:
-            self._nc = await nats_client.connect(self.nats_url)
-            self._js = self._nc.jetstream()
-            print(f"✅ NATS connected: {self.nats_url}")
-
-            graph_ids = list(self._graphs.keys())
-            for graph_id in graph_ids:
-                subject = f"duragraph.tasks.assign.{graph_id}"
-                durable = f"worker-{self.name}-{graph_id}"
-
-                try:
-                    sub = await self._js.subscribe(
-                        subject,
-                        durable=durable,
-                        manual_ack=True,
-                    )
-                    self._nats_subscriptions.append(sub)
-                    print(f"  📡 Subscribed: {subject}")
-
-                    asyncio.create_task(self._nats_message_loop(sub))
-                except Exception as e:
-                    print(f"  ⚠️  Failed to subscribe to {subject}: {e}")
-
-        except Exception as e:
-            print(f"⚠️  NATS connection failed, falling back to HTTP polling: {e}")
-            self._use_nats = False
-            self._nc = None
-            self._js = None
-
-    async def _nats_message_loop(self, sub: Any) -> None:
-        """Process messages from a NATS subscription."""
-        try:
-            async for msg in sub.messages:
-                if self._status in (WorkerStatus.DRAINING, WorkerStatus.STOPPED):
-                    await msg.nak()
-                    continue
-
-                if len(self._active_runs) >= self.max_concurrent_runs:
-                    await msg.nak(delay=5)
-                    continue
-
-                try:
-                    task_data = json.loads(msg.data.decode())
-                    run_id = task_data.get("run_id", "unknown")
-                    print(f"📥 NATS task received: {run_id}")
-
-                    work = await self._claim_task_via_http(task_data)
-                    if work:
-                        task = asyncio.create_task(self._execute_run(work))
-                        self._run_tasks[run_id] = task
-
-                        if self._status == WorkerStatus.READY:
-                            self._status = WorkerStatus.BUSY
-
-                    await msg.ack()
-                except Exception as e:
-                    print(f"  ⚠️  Error processing NATS message: {e}")
-                    await msg.nak()
-        except Exception:
-            pass
-
-    async def _claim_task_via_http(self, task_data: dict[str, Any]) -> dict[str, Any] | None:
-        """Claim a task via HTTP polling after NATS notification."""
-        if self._client is None or self._worker_id is None:
-            return None
-
-        try:
-            response = await self._client.post(
-                f"{self.control_plane_url}/api/v1/workers/{self._worker_id}/poll",
-                json={"max_tasks": 1},
-            )
-            response.raise_for_status()
-            data = response.json()
-            tasks = data.get("tasks", [])
-            if tasks:
-                return tasks[0]
-        except Exception:
-            pass
-
-        return task_data
-
     async def _register_with_control_plane(self, retry_count: int = 0) -> str:
         """Register this worker with the control plane."""
         if self._client is None:
@@ -204,18 +113,9 @@ class Worker:
         self._health_metrics["registration_attempts"] += 1
         max_retries = 5
 
-        # The control plane parses each entry as a flat
-        # `GraphDefinition` (see
-        # internal/infrastructure/http/dto/worker.go) — keys
-        # `graph_id`, `name`, `description`, `nodes`, `edges`,
-        # `entry_point` at the top level. Earlier revisions of this
-        # SDK nested the IR under `{"definition": g.to_ir()}` which
-        # the control plane silently ignored, so the worker-graphs
-        # endpoint returned empty topology and the dashboard's Graph
-        # tab stayed blank. Emit the flat shape here.
+        # controlplane/endpoints/worker_types.go: GraphDefinitionInput.
         graphs = [
             {
-                "graph_id": g.graph_id,
                 "name": getattr(g, "name", "") or g.graph_id,
                 "description": getattr(g, "description", "") or "",
                 "nodes": [
@@ -223,18 +123,15 @@ class Worker:
                     for name, meta in g.nodes.items()
                 ],
                 "edges": [e.to_dict() for e in g.edges],
-                "entry_point": g.entrypoint,
+                "config": {"entry_point": g.entrypoint},
             }
             for g in self._graphs.values()
         ]
 
         payload = {
-            "worker_id": self.name,
-            "name": self.name,
-            "capabilities": {
-                "graphs": list(self._graphs.keys()),
-                "max_concurrent_runs": self.max_concurrent_runs,
-            },
+            "worker_id": self._identity,
+            "graphs": list(self._graphs.keys()),
+            "capacity": self.max_concurrent_runs,
             "graph_definitions": graphs,
         }
 
@@ -261,37 +158,28 @@ class Worker:
                 print(f"✗ Registration failed after {max_retries} attempts")
                 raise
 
-    async def _poll_for_work(self) -> dict[str, Any] | None:
-        """Poll the control plane for work via HTTP."""
+    async def _claim_work(self, max_runs: int) -> list[dict[str, Any]]:
+        """Lease up to max_runs queued runs; the claim itself emits run.started."""
         if self._client is None or self._worker_id is None:
-            return None
+            return []
 
         if self._status == WorkerStatus.DRAINING:
-            return None
+            return []
 
         try:
             response = await self._client.post(
-                f"{self.control_plane_url}/api/v1/workers/{self._worker_id}/poll",
-                json={"max_tasks": 1},
+                f"{self.control_plane_url}/api/v1/workers/{self._worker_id}/runs/claim",
+                json={"max_runs": max_runs},
             )
-            if response.status_code == 204:
-                return None
             response.raise_for_status()
-            data = response.json()
-            tasks = data.get("tasks", [])
-            if tasks:
-                return tasks[0]
-            return None
+            return response.json()["runs"]
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                print("Worker not found on control plane, re-registering...")
+            if e.response.status_code == 409:
                 self._worker_id = await self._register_with_control_plane()
-            return None
+                return []
+            raise
         except (httpx.ConnectError, httpx.TimeoutException):
-            return None
-        except Exception as e:
-            print(f"Error polling for work: {e}")
-            return None
+            return []
 
     async def _execute_run(self, work: dict[str, Any]) -> None:
         """Execute a run from the control plane.
@@ -302,10 +190,12 @@ class Worker:
         """
         from duragraph.executor import execute_node
 
-        run_id = work.get("run_id")
-        graph_id = work.get("graph_id")
-        input_data = work.get("input", {})
-        thread_id = work.get("thread_id")
+        run = work["run"]
+        run_id = run["run_id"]
+        graph_id = work.get("graph_id") or run.get("graph_id")
+        input_data = work.get("input") or run.get("input") or {}
+        thread_id = run.get("thread_id")
+        epoch = work["lease_epoch"]
 
         if not run_id or not graph_id:
             return
@@ -317,39 +207,46 @@ class Worker:
             if not graph_def:
                 await self._send_event(
                     run_id,
-                    "run_failed",
-                    {
-                        "error": f"Graph '{graph_id}' not registered with this worker",
-                    },
+                    epoch,
+                    "run.failed",
+                    error=f"Graph '{graph_id}' not registered with this worker",
                 )
                 return
 
             instance = self._graph_instances.get(graph_id)
 
-            await self._send_event(run_id, "run_started", {"thread_id": thread_id})
-
             try:
                 state = input_data.copy()
                 current_node = graph_def.entrypoint
+                version = 0
+                if work.get("checkpoint_id") is not None:
+                    checkpoint = await self._read_checkpoint(thread_id, work["checkpoint_id"])
+                    state = checkpoint["state"]["channels"]
+                    current_node = checkpoint["state"]["next_node"]
+                    version = checkpoint["version"]
 
                 while current_node:
                     if self._status == WorkerStatus.DRAINING:
                         print(f"Worker draining, but completing run {run_id}")
 
-                    await self._send_event(
-                        run_id,
-                        "node_started",
-                        {
-                            "node_id": current_node,
-                        },
-                    )
-
                     node_meta = graph_def.nodes.get(current_node)
                     if not node_meta:
                         raise ValueError(f"Node '{current_node}' not found")
+                    node_type = _EVENT_NODE_TYPES[node_meta.node_type]
+                    await self._send_event(
+                        run_id,
+                        epoch,
+                        "execution.node_started",
+                        node_id=current_node,
+                        node_type=node_type,
+                        node_status="started",
+                        input=state,
+                    )
 
                     if node_meta.node_type == "human":
-                        result = await self._handle_human_node(run_id, node_meta, state)
+                        result = await self._handle_human_node(
+                            run_id, epoch, current_node, node_meta, state
+                        )
                         if result is None:
                             return
                     elif instance is not None:
@@ -370,40 +267,34 @@ class Worker:
 
                     await self._send_event(
                         run_id,
-                        "node_completed",
-                        {
-                            "node_id": current_node,
-                            "output": result,
-                        },
+                        epoch,
+                        "execution.node_completed",
+                        node_id=current_node,
+                        node_type=node_type,
+                        node_status="completed",
+                        output=result,
                     )
 
                     next_node = self._resolve_next_node(graph_def, current_node, result)
+                    version += 1
+                    if thread_id and thread_id != "00000000-0000-0000-0000-000000000000":
+                        await self._write_checkpoint(
+                            thread_id, run_id, epoch, version, state, next_node
+                        )
                     current_node = next_node
 
-                await self._send_event(
-                    run_id,
-                    "run_completed",
-                    {
-                        "output": state,
-                        "thread_id": thread_id,
-                    },
-                )
+                await self._send_event(run_id, epoch, "run.completed", output=state)
                 self._health_metrics["runs_completed"] += 1
 
             except Exception as e:
-                await self._send_event(
-                    run_id,
-                    "run_failed",
-                    {
-                        "error": str(e),
-                        "thread_id": thread_id,
-                    },
-                )
+                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 409:
+                    # Fenced by a newer lease: never report failure on its behalf.
+                    return
+                await self._send_event(run_id, epoch, "run.failed", error=str(e))
                 self._health_metrics["runs_failed"] += 1
 
         finally:
             self._active_runs.discard(run_id)
-            self._run_tasks.pop(run_id, None)
 
     def _resolve_next_node(
         self,
@@ -425,6 +316,8 @@ class Worker:
     async def _handle_human_node(
         self,
         run_id: str,
+        epoch: int,
+        node_id: str,
         node_meta: Any,
         state: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -434,12 +327,11 @@ class Worker:
 
         await self._send_event(
             run_id,
-            "run_requires_action",
-            {
-                "action_type": "human_review",
-                "prompt": prompt,
-                "state": state,
-            },
+            epoch,
+            "run.requires_action",
+            node_id=node_id,
+            reason="approval_required",
+            state={**state, "prompt": prompt},
         )
 
         return None
@@ -447,27 +339,47 @@ class Worker:
     async def _send_event(
         self,
         run_id: str,
+        epoch: int,
         event_type: str,
-        data: dict[str, Any],
+        **data: Any,
     ) -> None:
         """Send an event to the control plane via HTTP."""
         if self._client is None or self._worker_id is None:
-            return
+            raise RuntimeError("Worker not registered")
+        response = await self._client.post(
+            f"{self.control_plane_url}/api/v1/workers/{self._worker_id}/runs/{run_id}/events",
+            json={"events": [{"type": event_type, "lease_epoch": epoch, **data}]},
+        )
+        response.raise_for_status()
 
-        payload = {
-            "run_id": run_id,
-            "event_type": event_type,
-            "data": data,
-        }
+    async def _read_checkpoint(self, thread_id: str, checkpoint_id: int) -> dict[str, Any]:
+        assert self._client is not None
+        response = await self._client.get(
+            f"{self.control_plane_url}/api/v1/threads/{thread_id}/checkpoints/{checkpoint_id}"
+        )
+        response.raise_for_status()
+        return response.json()
 
-        try:
-            response = await self._client.post(
-                f"{self.control_plane_url}/api/v1/workers/{self._worker_id}/events",
-                json=payload,
-            )
-            response.raise_for_status()
-        except Exception:
-            pass  # Best effort
+    async def _write_checkpoint(
+        self,
+        thread_id: str,
+        run_id: str,
+        epoch: int,
+        version: int,
+        state: dict[str, Any],
+        next_node: str | None,
+    ) -> None:
+        assert self._client is not None
+        response = await self._client.post(
+            f"{self.control_plane_url}/api/v1/threads/{thread_id}/checkpoints",
+            json={
+                "run_id": run_id,
+                "lease_epoch": epoch,
+                "version": version,
+                "state": {"channels": state, "next_node": next_node},
+            },
+        )
+        response.raise_for_status()
 
     async def _heartbeat(self) -> None:
         """Send heartbeat to control plane."""
@@ -477,11 +389,8 @@ class Worker:
         self._health_metrics["last_heartbeat"] = time.time()
 
         payload = {
-            "status": self._status.value,
+            "status": "draining" if self._status == WorkerStatus.DRAINING else "online",
             "active_runs": len(self._active_runs),
-            "total_runs": self._health_metrics["runs_completed"]
-            + self._health_metrics["runs_failed"],
-            "failed_runs": self._health_metrics["runs_failed"],
         }
 
         try:
@@ -491,7 +400,7 @@ class Worker:
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
+            if e.response.status_code == 409:
                 print("Worker not found during heartbeat, re-registering...")
                 self._worker_id = await self._register_with_control_plane()
         except (httpx.ConnectError, httpx.TimeoutException):
@@ -513,16 +422,17 @@ class Worker:
             print(f"✗ Failed to register worker: {e}")
             raise
 
-        if self._use_nats:
-            await self._connect_nats()
-
         heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-        poll_task = asyncio.create_task(self._poll_loop())
+        claim_task = asyncio.create_task(self._claim_loop())
 
         try:
-            await asyncio.gather(heartbeat_task, poll_task)
+            await asyncio.gather(heartbeat_task, claim_task)
         except asyncio.CancelledError:
             pass
+        finally:
+            heartbeat_task.cancel()
+            claim_task.cancel()
+            await asyncio.gather(heartbeat_task, claim_task, return_exceptions=True)
 
     async def _heartbeat_loop(self) -> None:
         """Heartbeat loop."""
@@ -530,34 +440,27 @@ class Worker:
             await self._heartbeat()
             await asyncio.sleep(self.heartbeat_interval)
 
-    async def _poll_loop(self) -> None:
-        """Poll loop - reduced frequency when NATS is active."""
-        effective_interval = 30.0 if self._use_nats else self.poll_interval
-
+    async def _claim_loop(self) -> None:
+        """Claim only available capacity; every claim already owns a lease."""
         while self._status not in (WorkerStatus.STOPPED,):
-            if (
-                len(self._active_runs) < self.max_concurrent_runs
-                and self._status != WorkerStatus.DRAINING
-            ):
-                work = await self._poll_for_work()
-                if work:
-                    run_id = work.get("run_id", "unknown")
-                    print(f"📥 Received work (HTTP poll): {run_id}")
-
-                    if self._status == WorkerStatus.READY:
-                        self._status = WorkerStatus.BUSY
-
+            available = self.max_concurrent_runs - len(self._run_tasks)
+            if available > 0 and self._status != WorkerStatus.DRAINING:
+                for work in await self._claim_work(available):
+                    run_id = work["run"]["run_id"]
                     task = asyncio.create_task(self._execute_run(work))
                     self._run_tasks[run_id] = task
+                    self._status = WorkerStatus.BUSY
+                    task.add_done_callback(lambda t, rid=run_id: self._finish_run(rid, t))
 
-                    completed_tasks = [rid for rid, t in self._run_tasks.items() if t.done()]
-                    for rid in completed_tasks:
-                        del self._run_tasks[rid]
-
-            if self._status == WorkerStatus.BUSY and len(self._active_runs) == 0:
+            if self._status == WorkerStatus.BUSY and not self._run_tasks:
                 self._status = WorkerStatus.READY
 
-            await asyncio.sleep(effective_interval)
+            await asyncio.sleep(self.claim_interval)
+
+    def _finish_run(self, run_id: str, task: asyncio.Task[None]) -> None:
+        self._run_tasks.pop(run_id, None)
+        if not task.cancelled() and task.exception() is not None:
+            print(f"Run {run_id} could not report its result: {task.exception()}")
 
     def run(self) -> None:
         """Run the worker (blocking)."""
@@ -585,21 +488,7 @@ class Worker:
             await self._cleanup()
 
     async def _cleanup(self) -> None:
-        """Cleanup NATS and HTTP connections."""
-        for sub in self._nats_subscriptions:
-            try:
-                await sub.unsubscribe()
-            except Exception:
-                pass
-        self._nats_subscriptions.clear()
-
-        if self._nc:
-            try:
-                await self._nc.close()
-            except Exception:
-                pass
-            self._nc = None
-
+        """Close the HTTP connection."""
         if self._client:
             await self._client.aclose()
             self._client = None
@@ -638,6 +527,14 @@ class Worker:
                 print("✓ All runs completed successfully")
 
         self._status = WorkerStatus.STOPPED
+        if self._client is not None and self._worker_id is not None:
+            try:
+                response = await self._client.post(
+                    f"{self.control_plane_url}/api/v1/workers/{self._worker_id}/deregister"
+                )
+                response.raise_for_status()
+            except httpx.HTTPError as e:
+                print(f"Failed to deregister worker: {e}")
         await self._cleanup()
         print("✓ Worker shut down gracefully")
 
