@@ -15,11 +15,13 @@ import (
 // RegisterRuns mounts the runs endpoints on g (the /api/v1 group).
 func (s *Server) RegisterRuns(g *echo.Group) {
 	g.POST("/threads/:id/runs", s.RunsCreateOnThread)
+	g.GET("/threads/:id/runs", s.RunsListOnThread)
 	g.POST("/runs", s.RunsCreateStateless)
 	g.POST("/runs/batch", s.RunsBatchCreate)
 	g.GET("/threads/:id/runs/:rid", s.RunsGet)
 	g.POST("/threads/:id/runs/:rid/cancel", s.RunsCancel)
-	g.POST("/threads/:id/runs/:rid/join", s.RunsJoin)
+	g.GET("/threads/:id/runs/:rid/join", s.RunsJoin)
+	g.POST("/threads/:id/runs/:rid/join", s.RunsJoin) // temporary compatibility alias
 	g.GET("/threads/:id/runs/:rid/stream", s.RunsStreamPerRun)
 	g.GET("/threads/:id/stream", s.RunsStreamThread)
 	g.POST("/threads/:id/runs/stream", s.RunsCreateAndStream)
@@ -30,6 +32,8 @@ func (s *Server) RegisterRuns(g *echo.Group) {
 }
 
 // RunsCreateOnThread — POST /threads/{id}/runs  (kind: write) — hand-written in runs.go
+
+// RunsListOnThread — GET /threads/{id}/runs  (kind: read) — hand-written in runs.go
 
 // RunsCreateStateless — POST /runs  (kind: write) — hand-written in runs.go
 
@@ -101,7 +105,7 @@ RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, k
 	return c.JSON(http.StatusOK, row.toAPI())
 }
 
-// RunsJoin — POST /threads/{id}/runs/{rid}/join  (kind: wait) — hand-written in runs.go
+// RunsJoin — GET /threads/{id}/runs/{rid}/join  (kind: wait) — hand-written in runs.go
 
 // RunsStreamPerRun — GET /threads/{id}/runs/{rid}/stream  (kind: sse) — hand-written in runs.go
 

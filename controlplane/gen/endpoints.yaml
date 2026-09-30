@@ -248,7 +248,7 @@ groups:
           args: ["pathID"]
         steps: ["SELECT * FROM threads WHERE id = :id"]
       - name: update
-        method: PUT
+        method: PATCH
         path: /threads/{id}
         kind: write
         outbox: true
@@ -261,9 +261,13 @@ groups:
           aggregate: Thread
           row: threadRow
           path_param: id
+          # ThreadPatch.Ttl is a pointer. Reject any supplied object (even {})
+          # until thread TTL persistence and expiration/sweeping exist; never
+          # acknowledge TTL while silently applying only the metadata update.
+          reject_non_nil: [Ttl]
           query: |
             UPDATE threads SET
-              metadata = COALESCE($2, metadata)
+              metadata = COALESCE(metadata, '{}'::jsonb) || COALESCE($2::jsonb, '{}'::jsonb)
             WHERE id = $1
             RETURNING id, status, values, config, metadata, created_at, updated_at
           args: ["pathID", "jsonbOrNil(req.Metadata)"]
@@ -350,6 +354,13 @@ groups:
           - "INSERT outbox (same event_id, same TX)"
           - "pg_notify('outbox_new','')"
           - "INSERT runs projection (status='queued', thread_id, assistant_id, input)"
+      - name: list_on_thread
+        method: GET
+        path: /threads/{id}/runs
+        kind: read
+        outbox: false
+        custom: true  # query validation, API status mapping and select projection in runs_list.go
+        response: Run
       - name: create_stateless
         method: POST
         path: /runs
@@ -416,7 +427,8 @@ groups:
           - "pg_notify('outbox_new','')"
           - "UPDATE runs SET status='cancelled', version=version+1 WHERE id=:rid AND version=:expected"
       - name: join
-        method: POST
+        method: GET
+        aliases: [POST]  # legacy v2 clients; join is read-only and both verbs share a handler
         path: /threads/{id}/runs/{rid}/join
         kind: wait
         outbox: false

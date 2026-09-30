@@ -39,6 +39,7 @@ type group struct {
 type endpoint struct {
 	Name     string   `yaml:"name"`
 	Method   string   `yaml:"method"`
+	Aliases  []string `yaml:"aliases"` // temporary compatibility verbs sharing the same handler
 	Path     string   `yaml:"path"`
 	Kind     string   `yaml:"kind"`
 	Outbox   bool     `yaml:"outbox"`
@@ -52,13 +53,14 @@ type endpoint struct {
 
 // impl is the real-body spec for an endpoint (absent ⇒ scaffold the handler).
 type impl struct {
-	Mode       string   `yaml:"mode"`        // write_returning | read_one | update | delete | read_list | count | hard_delete
-	Aggregate  string   `yaml:"aggregate"`   // event aggregate type
-	Row        string   `yaml:"row"`         // db row struct to scan into
-	Query      string   `yaml:"query"`       // SQL (raw, $1.. params)
-	Args       []string `yaml:"args"`        // Go expressions bound as query args
-	PathParam  string   `yaml:"path_param"`  // path param parsed as uuid into pathID
-	PathParam2 string   `yaml:"path_param2"` // second path param parsed as uuid into pathID2
+	Mode         string   `yaml:"mode"`           // write_returning | read_one | update | delete | read_list | count | hard_delete
+	Aggregate    string   `yaml:"aggregate"`      // event aggregate type
+	Row          string   `yaml:"row"`            // db row struct to scan into
+	Query        string   `yaml:"query"`          // SQL (raw, $1.. params)
+	Args         []string `yaml:"args"`           // Go expressions bound as query args
+	PathParam    string   `yaml:"path_param"`     // path param parsed as uuid into pathID
+	PathParam2   string   `yaml:"path_param2"`    // second path param parsed as uuid into pathID2
+	RejectNonNil []string `yaml:"reject_non_nil"` // pointer request fields rejected before any write/event
 }
 
 // view types passed to the template (with computed fields).
@@ -78,6 +80,7 @@ type endpointView struct {
 	Handler         string
 	Pascal          string
 	EchoVerb        string
+	AliasVerbs      []string
 	EchoPath        string
 	IsWrite         bool
 	IsRead          bool
@@ -197,13 +200,14 @@ func toView(g group) groupView {
 	}
 	for _, e := range g.Endpoints {
 		ev := endpointView{
-			endpoint: e,
-			Handler:  pascal(g.Name) + pascal(e.Name),
-			Pascal:   pascal(g.Name) + pascal(e.Name),
-			EchoVerb: strings.ToUpper(e.Method),
-			EchoPath: echoPath(e.Path),
-			IsWrite:  e.Kind == "write",
-			IsRead:   e.Kind == "read",
+			endpoint:   e,
+			Handler:    pascal(g.Name) + pascal(e.Name),
+			Pascal:     pascal(g.Name) + pascal(e.Name),
+			EchoVerb:   strings.ToUpper(e.Method),
+			AliasVerbs: e.Aliases,
+			EchoPath:   echoPath(e.Path),
+			IsWrite:    e.Kind == "write",
+			IsRead:     e.Kind == "read",
 		}
 		if !e.Custom {
 			gv.NeedsHTTP = true // generated body uses http.Status*

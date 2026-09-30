@@ -173,7 +173,7 @@ func TestThreadsCRUD(t *testing.T) {
 
 	// --- update t1's metadata ---
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPut, "/api/v1/threads/"+t1.ThreadId.String(),
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/threads/"+t1.ThreadId.String(),
 		strings.NewReader(`{"metadata":{"team":"merged"}}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	e.ServeHTTP(rec, req)

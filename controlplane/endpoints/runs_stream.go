@@ -472,12 +472,23 @@ func isTerminalStatus(status string) bool {
 	return status == "completed" || status == "failed" || status == "cancelled"
 }
 
-// RunsJoin — POST /threads/{id}/runs/{rid}/join  (kind: wait)
+// RunsJoin — GET /threads/{id}/runs/{rid}/join  (kind: wait)
 // Blocks until the run reaches a terminal status, then returns it as JSON.
 func (s *Server) RunsJoin(c echo.Context) error {
+	tid, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
 	rid, err := uuid.Parse(c.Param("rid"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid rid")
+	}
+	var exists bool
+	if err := s.Tenant.QueryRow(c.Request().Context(), `SELECT EXISTS(SELECT 1 FROM runs WHERE id=$1 AND thread_id=$2)`, rid, tid).Scan(&exists); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if !exists {
+		return echo.NewHTTPError(http.StatusNotFound, "run not found")
 	}
 	return s.waitForRun(c, rid)
 }
