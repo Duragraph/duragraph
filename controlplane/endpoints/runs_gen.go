@@ -25,6 +25,7 @@ func (s *Server) RegisterRuns(g *echo.Group) {
 	g.POST("/threads/:id/runs/stream", s.RunsCreateAndStream)
 	g.POST("/runs/stream", s.RunsStatelessStream)
 	g.POST("/runs/wait", s.RunsStatelessWait)
+	g.POST("/threads/:id/runs/wait", s.RunsCreateAndWait)
 	g.POST("/runs/cancel", s.RunsCancelStateless)
 	g.POST("/threads/:id/runs/:rid/resume", s.RunsResume)
 }
@@ -112,6 +113,8 @@ RETURNING id, thread_id, assistant_id, status, input, output, error, metadata, k
 // RunsStatelessStream — POST /runs/stream  (kind: sse) — hand-written in runs.go
 
 // RunsStatelessWait — POST /runs/wait  (kind: wait) — hand-written in runs.go
+
+// RunsCreateAndWait — POST /threads/{id}/runs/wait  (kind: wait) — hand-written in runs.go
 
 // RunsCancelStateless — POST /runs/cancel  (kind: write) — hand-written in runs.go
 

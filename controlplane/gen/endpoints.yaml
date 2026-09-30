@@ -483,6 +483,18 @@ groups:
           - "CREATE RUN (same as POST /runs)"
           - "Subscribe NATS, wait for run.completed or run.failed"
           - "Return final run state as JSON"
+      - name: create_and_wait
+        method: POST
+        path: /threads/{id}/runs/wait
+        kind: wait
+        outbox: true
+        custom: true
+        events: [run.created]
+        nats: {subject: run.created, stream: RUNS, subscribe: "blocks until terminal"}
+        steps:
+          - "CREATE RUN (same as POST /threads/{id}/runs)"
+          - "Subscribe NATS, wait for run.completed, run.failed or run.cancelled"
+          - "Return final run state as JSON"
       - name: cancel_stateless
         method: POST
         path: /runs/cancel

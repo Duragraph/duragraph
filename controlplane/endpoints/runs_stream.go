@@ -3,12 +3,8 @@
 // events (catch-up), then stream live NATS events deduped by event_id, closing on
 // the run's terminal event or client disconnect. Thin passthrough frames.
 //
-// Task 1 implemented the shared plumbing (streamRun, writeSSEFrame,
-// isTerminalEvent, relayEnvelope) and RunsStreamPerRun in full. Task 2 added
-// RunsStreamThread, RunsCreateAndStream, RunsStatelessStream, and the shared
-// createRun helper, all built on streamRun. Task 3 (this pass) adds
-// waitForRun (block-until-terminal, subscribe-first) plus RunsJoin and
-// RunsStatelessWait, built on it.
+// Shared createRun and subscribe-first waitForRun helpers back both stateless
+// and thread-scoped create/wait endpoints.
 package endpoints
 
 import (
@@ -305,9 +301,10 @@ func (s *Server) createRun(ctx context.Context, threadID *uuid.UUID, assistantID
 	aggID := uuid.New()
 	payload := mustJSON(struct {
 		AssistantID uuid.UUID       `json:"assistant_id"`
+		ThreadID    *uuid.UUID      `json:"thread_id,omitempty"`
 		Input       json.RawMessage `json:"input,omitempty"`
 		Metadata    json.RawMessage `json:"metadata,omitempty"`
-	}{AssistantID: assistantID, Input: input, Metadata: metadata})
+	}{AssistantID: assistantID, ThreadID: threadID, Input: input, Metadata: metadata})
 	events := []Event{
 		{AggregateType: "Run", AggregateID: aggID, EventType: "run.created", Payload: payload},
 	}
@@ -402,13 +399,22 @@ func (s *Server) RunsStatelessStream(c echo.Context) error {
 //   - 404 if the run doesn't exist.
 //   - If the run is already terminal, returns immediately without waiting.
 //   - Otherwise blocks on the live feed until a terminal run.* event for rid
-//     arrives, or the request context is canceled (client disconnect/timeout),
-//     in which case it returns the run's state as of the cancellation.
+//     arrives, or the request context is canceled.
 func (s *Server) waitForRun(c echo.Context, rid uuid.UUID) error {
+	return s.waitForRunWithTimeout(c, rid, 0)
+}
+
+func (s *Server) waitForRunWithTimeout(c echo.Context, rid uuid.UUID, timeout time.Duration) error {
 	if s.Subscriber == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "wait requires NATS")
 	}
 	ctx := c.Request().Context()
+	var deadline <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		deadline = timer.C
+	}
 
 	// 1. Subscribe FIRST (before the status read) so nothing is missed in the gap.
 	runsCh, err := s.Subscriber.Subscribe(ctx, "duragraph.runs.>")
@@ -431,10 +437,12 @@ func (s *Server) waitForRun(c echo.Context, rid uuid.UUID) error {
 		for {
 			select {
 			case <-ctx.Done():
-				break waitLoop
+				return ctx.Err()
+			case <-deadline:
+				return echo.NewHTTPError(http.StatusGatewayTimeout, "run wait timeout")
 			case msg := <-runsCh:
 				if msg == nil { // channel closed (ctx canceled)
-					break waitLoop
+					return ctx.Err()
 				}
 				var env relayEnvelope
 				if json.Unmarshal(msg.Payload, &env) != nil {
@@ -449,8 +457,7 @@ func (s *Server) waitForRun(c echo.Context, rid uuid.UUID) error {
 		}
 	}
 
-	// 4. Return the run's current state (fresh SELECT — whatever it is at this
-	// point, terminal or not, e.g. if the wait ended via client disconnect).
+	// 4. Return the run's current state (fresh SELECT after terminal event).
 	rows, err := s.Tenant.Query(ctx, `SELECT id, thread_id, assistant_id, status, input, output, error, metadata, kwargs, multitask_strategy, version, lease_epoch, worker_id, priority, graph_id, created_at, started_at, completed_at, updated_at
 FROM runs WHERE id = $1`, rid)
 	if err != nil {
@@ -507,6 +514,61 @@ func (s *Server) RunsStatelessWait(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return s.waitForRun(c, rid)
+}
+
+// RunsCreateAndWait creates a run on an existing thread and blocks until it is
+// terminal. POST /threads/{id}/runs/wait.
+func (s *Server) RunsCreateAndWait(c echo.Context) error {
+	if s.Subscriber == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "wait requires NATS")
+	}
+	ctx := c.Request().Context()
+	threadID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	var req RunCreateStateful
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	var exists bool
+	if err := s.Tenant.QueryRow(ctx, `SELECT true FROM threads WHERE id=$1`, threadID).Scan(&exists); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "thread not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	assistantID, err := s.resolveAssistantRef(ctx, req.AssistantId)
+	if err != nil {
+		return assistantRefHTTPError(err)
+	}
+	checkpoint, err := normalizeCheckpoint(req.Checkpoint, threadID)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
+	kwargs, err := buildRunKwargs(req.InterruptBefore, req.InterruptAfter, req.Command, checkpoint)
+	if err != nil {
+		return interruptSpecHTTPError(err)
+	}
+	if err := s.verifyCheckpointOwned(ctx, checkpoint, threadID); err != nil {
+		return checkpointHTTPError(err)
+	}
+	// Legacy accepts a Go duration query parameter; bound the request even when
+	// the worker never finishes. A timeout does not cancel the persisted run.
+	timeout := 5 * time.Minute
+	if value := c.QueryParam("timeout"); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed <= 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid timeout")
+		}
+		timeout = parsed
+	}
+	rid, err := s.createRun(ctx, &threadID, assistantID, mustJSON(req.Input), mustJSON(req.Metadata), kwargs)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	c.Response().Header().Set("Content-Location", "/api/v1/threads/"+threadID.String()+"/runs/"+rid.String())
+	return s.waitForRunWithTimeout(c, rid, timeout)
 }
 
 // HeartbeatInterval reports the SSE keepalive period; SetHeartbeatInterval
