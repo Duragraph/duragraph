@@ -87,3 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.2.1]: https://github.com/duragraph/duragraph-python/releases/tag/v0.2.1
 [0.2.0]: https://github.com/duragraph/duragraph-python/releases/tag/v0.2.0
 [0.1.0]: https://github.com/duragraph/duragraph-python/releases/tag/v0.1.0
+# Unreleased
+
+### Changed
+
+- Worker delivery uses v2 run claims, lease-epoch-fenced per-run events and
+  per-node checkpoint/resume instead of legacy poll and worker-wide events.
+  Requires a v2 control plane; see [upgrade notes](docs/worker-v2-upgrade.md).

@@ -372,7 +372,7 @@ async def _run_dev_server(file_path: Path, port: int, control_plane: str, reload
                 control_plane_url=control_plane,
                 name=f"dev-worker-{port}",
                 capabilities=["dev", "local"],
-                poll_interval=1.0,
+                claim_interval=1.0,
                 heartbeat_interval=10.0,
             )
 

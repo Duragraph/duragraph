@@ -59,6 +59,12 @@ print(result)
 agent.serve("http://localhost:8081")
 ```
 
+**Worker protocol v2:** Upgrade the control plane before upgrading worker
+deployments. The Python worker now claims via `/runs/claim` and pushes fenced
+per-run events; the retired `/poll` route is not supported. See
+[worker upgrade notes](docs/worker-v2-upgrade.md) for configuration changes,
+checkpoint/resume behavior, and migration caveats.
+
 ## Features
 
 ### Decorator-Based Graph Definition
