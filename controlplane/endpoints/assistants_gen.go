@@ -21,6 +21,9 @@ func (s *Server) RegisterAssistants(g *echo.Group) {
 	g.PATCH("/assistants/:id", s.AssistantsUpdate)
 	g.DELETE("/assistants/:id", s.AssistantsDelete)
 	g.GET("/assistants/:id/graph", s.AssistantsGetGraph)
+	g.GET("/assistants/:id/schemas", s.AssistantsGetSchemas)
+	g.GET("/assistants/:id/subgraphs", s.AssistantsGetSubgraphs)
+	g.GET("/assistants/:id/subgraphs/:namespace", s.AssistantsGetSubgraphsByNamespace)
 	g.POST("/assistants/:id/versions", s.AssistantsGetVersions)
 	g.POST("/assistants/:id/latest", s.AssistantsSetLatest)
 }
@@ -126,6 +129,12 @@ func (s *Server) AssistantsDelete(c echo.Context) error {
 }
 
 // AssistantsGetGraph — GET /assistants/{id}/graph  (kind: read) — hand-written in assistants.go
+
+// AssistantsGetSchemas — GET /assistants/{id}/schemas  (kind: read) — hand-written in assistants.go
+
+// AssistantsGetSubgraphs — GET /assistants/{id}/subgraphs  (kind: read) — hand-written in assistants.go
+
+// AssistantsGetSubgraphsByNamespace — GET /assistants/{id}/subgraphs/{namespace}  (kind: read) — hand-written in assistants.go
 
 // AssistantsGetVersions — POST /assistants/{id}/versions  (kind: read) — hand-written in assistants.go
 
