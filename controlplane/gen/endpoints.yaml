@@ -142,6 +142,30 @@ groups:
         outbox: false
         custom: true
         steps: ["SELECT * FROM graphs WHERE assistant_id = :id AND version = (SELECT max version)"]
+      - name: get_schemas
+        method: GET
+        path: /assistants/{id}/schemas
+        kind: read
+        outbox: false
+        custom: true
+        response: GraphSchema
+        steps: ["SELECT latest graph config for assistant_id = :id; extract JSON schemas"]
+      - name: get_subgraphs
+        method: GET
+        path: /assistants/{id}/subgraphs
+        kind: read
+        outbox: false
+        custom: true
+        response: Subgraphs
+        steps: ["SELECT latest graph nodes for assistant_id = :id; extract subgraph schema metadata"]
+      - name: get_subgraphs_by_namespace
+        method: GET
+        path: /assistants/{id}/subgraphs/{namespace}
+        kind: read
+        outbox: false
+        custom: true
+        response: Subgraphs
+        steps: ["Filter assistant subgraph schemas by namespace; optionally recurse"]
       - name: get_versions
         method: POST
         path: /assistants/{id}/versions
