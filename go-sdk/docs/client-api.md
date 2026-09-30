@@ -250,7 +250,7 @@ run, err := c.WaitForRun(ctx, "thread-id", "run-id", 500*time.Millisecond)
 if err != nil {
     log.Fatal(err)
 }
-fmt.Println(run.Status) // "completed", "failed", or "canceled"
+fmt.Println(run.Status) // "success", "error", or "timeout" on the v2 control plane
 ```
 
 ### CancelRun

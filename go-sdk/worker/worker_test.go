@@ -94,6 +94,9 @@ func (f *wire) handler(t *testing.T) http.Handler {
 			events := body["events"].([]any)
 			for _, v := range events {
 				ev := v.(map[string]any)
+				if strings.HasPrefix(ev["type"].(string), "execution.node_") && ev["node_type"] != "tool" {
+					t.Errorf("node_type must match server execution_history constraint: %v", ev)
+				}
 				f.events = append(f.events, ev)
 				if ev["type"] == "run.started" {
 					f.epoch++
@@ -291,5 +294,15 @@ func TestResumeCommandFailsClosed(t *testing.T) {
 func TestStartRequiresConfiguration(t *testing.T) {
 	if err := New(testGraph()).Start(context.Background()); err == nil {
 		t.Fatal("missing control plane")
+	}
+}
+
+func TestWireNodeType(t *testing.T) {
+	for _, tc := range []struct{ local, want string }{{"function", "tool"}, {"router", "conditional"}, {"tool", "tool"}, {"human", "human"}, {"custom", "tool"}} {
+		t.Run(tc.local, func(t *testing.T) {
+			if got := wireNodeType(tc.local); got != tc.want {
+				t.Errorf("wireNodeType(%q)=%q, want %q", tc.local, got, tc.want)
+			}
+		})
 	}
 }

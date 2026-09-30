@@ -30,6 +30,36 @@ There is no `/api/v2` worker route and no compatibility `/poll` adapter.
    this epoch; a 409 fences the old executor. The graph is fetched by run ID
    and compared with the local graph before executing it. Per-node snapshots
    store `{state,next}`; redelivery resumes from the latest checkpoint.
+   Local Go `function` nodes are reported as `tool`, and routers as
+   `conditional`, because `execution_history.node_type` accepts only
+   `start|end|llm|tool|conditional|human` (the registered graph retains its
+   original node types).
+
+## Shipped-binary end-to-end smoke
+
+With Docker, Go, curl and jq available, from the repository root run:
+
+```bash
+bash go-sdk/scripts/smoke-v2.sh --transient
+```
+
+The script builds the actual `./cmd/duragraph` release entrypoint, starts
+fresh temporary Postgres and NATS containers on random published ports, and
+launches `duragraph serve --control-plane=v2` on `127.0.0.1:18981` (override
+with `SMOKE_HTTP_PORT`). It runs a **Go SDK worker**, registers a two-node
+graph, creates an assistant/thread/run through the HTTP API, claims and
+executes the run, and checks the API terminal status, checkpoint version/state,
+and the persisted `runs.output` and lease epoch in the isolated database. The
+optional `--transient` injects one 503 at the SDK's checkpoint HTTP transport
+after the second run has already been leased; the run remains `running` in the
+API while the worker lives, since HTTP claim selects only queued runs. On
+worker shutdown, deregistration requeues that run. The script removes **only
+its own** temporary containers and files on exit. Do not point the Go helper
+at a production or shared control plane.
+
+The public run API reports DB `completed` as `success` and intentionally
+omits `runs.output`; `client.WaitForRun` accepts these v2 terminal statuses,
+but callers needing persisted output currently need a separate read path.
 
 ## Important limitations / rollout gates
 
@@ -39,9 +69,10 @@ There is no `/api/v2` worker route and no compatibility `/poll` adapter.
   provide a dispatch filter on the server before push mode is safe. Do not
   enable push mode on such deployments yet. A mismatched graph is rejected,
   not executed.
-- HTTP claim leases a queued run immediately; it does not emit a JetStream
-  command and cannot reclaim an in-progress run. If a transient error occurs
-  after claim, the current worker logs it but cannot safely replay it. Use
+- HTTP claim leases a queued run immediately; it cannot reclaim an in-progress
+  run. If a transient error occurs after claim, the current worker logs it
+  but cannot safely replay it. Deregistering requeues in-progress work; until
+  then the run remains leased and stuck. Use
   push mode where correctly partitioned and provisioned, or add a server-side
   requeue/recovery mechanism before relying on claim for durable execution.
 - The Go graph is a locally compiled sequential graph. Its checkpoint format

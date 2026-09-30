@@ -475,7 +475,7 @@ func (w *Worker[S]) executeRun(ctx context.Context, task RunTask, claimed bool) 
 	}
 	if next != "" {
 		result, execErr := w.graph.RunFrom(ctx, state, next, func(node, nodeType string) error {
-			return w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_started", "lease_epoch": epoch, "node_id": node, "node_type": nodeType, "node_status": "started"}}, nil)
+			return w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_started", "lease_epoch": epoch, "node_id": node, "node_type": wireNodeType(nodeType), "node_status": "started"}}, nil)
 		}, func(node, nodeType string, current S, following string) error {
 			encoded, err := json.Marshal(walkState[S]{State: current, Next: following})
 			if err != nil {
@@ -488,7 +488,7 @@ func (w *Worker[S]) executeRun(ctx context.Context, task RunTask, claimed bool) 
 			if err := w.doJSON(ctx, http.MethodPost, checkpointPath, map[string]any{"run_id": task.RunID, "lease_epoch": epoch, "version": version, "state": json.RawMessage(encoded)}, &written); err != nil {
 				return err
 			}
-			return w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_completed", "lease_epoch": epoch, "node_id": node, "node_type": nodeType, "node_status": "completed"}}, nil)
+			return w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_completed", "lease_epoch": epoch, "node_id": node, "node_type": wireNodeType(nodeType), "node_status": "completed"}}, nil)
 		})
 		if execErr != nil {
 			if errors.Is(execErr, ErrStaleLease) || ctx.Err() != nil {
@@ -499,7 +499,7 @@ func (w *Worker[S]) executeRun(ctx context.Context, task RunTask, claimed bool) 
 			if !errors.As(execErr, &nodeErr) {
 				return execErr
 			}
-			if err := w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_failed", "lease_epoch": epoch, "node_id": nodeErr.Node, "node_type": nodeErr.NodeType, "node_status": "failed", "error": nodeErr.Err.Error()}}, nil); err != nil {
+			if err := w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_failed", "lease_epoch": epoch, "node_id": nodeErr.Node, "node_type": wireNodeType(nodeErr.NodeType), "node_status": "failed", "error": nodeErr.Err.Error()}}, nil); err != nil {
 				return err
 			}
 			if err := w.sendEvents(ctx, path, []any{map[string]any{"type": "run.failed", "lease_epoch": epoch, "error": execErr.Error()}}, nil); err != nil {
@@ -523,6 +523,21 @@ func (w *Worker[S]) executeRun(ctx context.Context, task RunTask, claimed bool) 
 	w.completed++
 	w.countMu.Unlock()
 	return nil
+}
+
+// wireNodeType maps local Go graph types to execution_history's node_type
+// constraint. A compiled Go function or custom node executes as a tool;
+// router nodes are conditional. The registered graph still carries its
+// original node type for visualization.
+func wireNodeType(local string) string {
+	switch local {
+	case "start", "end", "llm", "tool", "conditional", "human":
+		return local
+	case "router":
+		return "conditional"
+	default:
+		return "tool"
+	}
 }
 
 func (w *Worker[S]) sendEvents(ctx context.Context, path string, events []any, out any) error {
