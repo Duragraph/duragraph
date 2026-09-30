@@ -10,14 +10,13 @@ package cmd
 // weight in the repo.
 //
 // WHY THIS IS OPT-IN RATHER THAN A SWAP. The two stacks do not serve the
-// same surface. Comparing routes, the rebuild is missing sixteen that the
+// same surface. Comparing routes, the rebuild is still missing routes that the
 // legacy server answers today, including:
 //
 //	POST /api/auth/register, POST /api/auth/login   (password auth —
 //	                                                 shipped and documented)
 //	GET  /health                                    (container/k8s probes)
 //	GET  /assistants/{id}/schemas, …/subgraphs      (declared in api.d2)
-//	POST /mcp
 //	the legacy poll-based worker protocol
 //
 // Flipping the default would silently delete those. So `--control-plane`
@@ -49,7 +48,7 @@ func init() {
 	serveCmd.Flags().StringVar(&controlPlaneFlag, "control-plane", "",
 		`which control-plane implementation to run: "legacy" (default) or "v2".
 "v2" is the rebuilt control plane. It is not yet a drop-in replacement —
-password auth, /health, /mcp and the assistant schema/subgraph endpoints
+password auth, /health and the assistant schema/subgraph endpoints
 are not implemented there yet. Also settable via DURAGRAPH_CONTROL_PLANE.`)
 }
 
