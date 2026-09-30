@@ -23,6 +23,19 @@ class WorkerStatus(Enum):
     STOPPED = "stopped"
 
 
+# The SDK's decorator names are richer than execution_history.node_type's
+# CHECK (start/end/llm/tool/conditional/human). Preserve the original graph
+# definition at registration; only normalize the persisted execution event.
+_EVENT_NODE_TYPES = {
+    "function": "tool",
+    "dspy": "tool",
+    "router": "conditional",
+    "llm": "llm",
+    "tool": "tool",
+    "human": "human",
+}
+
+
 class Worker:
     """Worker that connects to DuraGraph control plane and executes graphs.
 
@@ -219,12 +232,13 @@ class Worker:
                     node_meta = graph_def.nodes.get(current_node)
                     if not node_meta:
                         raise ValueError(f"Node '{current_node}' not found")
+                    node_type = _EVENT_NODE_TYPES[node_meta.node_type]
                     await self._send_event(
                         run_id,
                         epoch,
                         "execution.node_started",
                         node_id=current_node,
-                        node_type=node_meta.node_type,
+                        node_type=node_type,
                         node_status="started",
                         input=state,
                     )
@@ -256,7 +270,7 @@ class Worker:
                         epoch,
                         "execution.node_completed",
                         node_id=current_node,
-                        node_type=node_meta.node_type,
+                        node_type=node_type,
                         node_status="completed",
                         output=result,
                     )

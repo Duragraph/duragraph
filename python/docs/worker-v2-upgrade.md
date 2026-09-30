@@ -24,6 +24,10 @@ worker.run()
   terminal names are `run.completed`, `run.failed`, `run.requires_action`.
   HTTP 409 on an event/checkpoint fences the stale worker; it must stop reporting
   that run. Event writes are not best-effort.
+- For execution-history events, the SDK reports decorator `function`/`dspy`
+  nodes as server type `tool` and `router` as `conditional`; the original
+  decorator type remains in the registered graph definition. v2 Postgres
+  rejects raw `function`/`router` in its execution-history node-type CHECK.
 - After a node, a threaded run writes a checkpoint containing `channels` and
   `next_node`. A claimed `checkpoint_id` loads this state to resume. The first
   node of an old uncheckpointed run can be re-executed after a crash; make node
@@ -33,3 +37,6 @@ worker.run()
   Remove `nats_url` / `--nats-url` from deployment configuration.
 - Shutdown drains active runs, then deregisters the worker. If draining times
   out, in-progress runs may be requeued; side effects must tolerate replay.
+
+For a repeatable run against the **shipped** opt-in v2 binary with real
+Postgres/NATS, see [the smoke instructions](worker-v2-smoke.md).

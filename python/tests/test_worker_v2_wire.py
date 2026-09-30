@@ -61,6 +61,8 @@ async def test_claim_event_checkpoint_roundtrip(graph):
             event = payload["events"][0]
             assert event["lease_epoch"] == 7
             assert event["type"] != "run.started"
+            if event["type"].startswith("execution.node_"):
+                assert event["node_type"] == "tool"
             return httpx.Response(200)
         if request.url.path.endswith("/checkpoints"):
             assert payload["run_id"] == run_id
