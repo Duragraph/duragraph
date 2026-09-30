@@ -1,11 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type {
-  AssistantsResponse,
-  ThreadsResponse,
-  Run,
-  RunStatus,
+import { isActiveRun, type AssistantsResponse, type ThreadsResponse, type V2Run, type RunStatus,
 } from "@/types/entities"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Badge } from "@/components/ui/badge"
@@ -32,6 +28,12 @@ import {
 import { cn } from "@/lib/utils"
 
 const STATUS_BADGE: Record<RunStatus, string> = {
+  pending: "border-muted-foreground/40 text-muted-foreground",
+  running: "border-yellow-500/40 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300",
+  success: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  error: "border-destructive/40 bg-destructive/10 text-destructive",
+  interrupted: "border-orange-500/40 bg-orange-500/10 text-orange-700 dark:text-orange-300",
+  timeout: "border-destructive/40 bg-destructive/10 text-destructive",
   queued: "border-muted-foreground/40 text-muted-foreground",
   in_progress:
     "border-yellow-500/40 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300",
@@ -60,11 +62,12 @@ function Dashboard() {
 
   const { data: runs } = useQuery({
     queryKey: ["runs"],
-    queryFn: () => api.get<Run[]>("/runs"),
+    queryFn: () => api.get<V2Run[]>("/runs"),
+    refetchInterval: (q) => q.state.data?.some(isActiveRun) ? 2000 : 15000,
   })
 
   const totalRuns = runs?.length ?? 0
-  const activeRuns = runs?.filter(r => r.status === "in_progress" || r.status === "queued").length ?? 0
+  const activeRuns = runs?.filter(isActiveRun).length ?? 0
   const totalAssistants = assistantsData?.total ?? 0
   const totalThreads = threadsData?.total ?? 0
 
@@ -156,7 +159,7 @@ function Dashboard() {
 
 // RecentRunsList — five most recent runs, newest first, as clickable
 // rows in a shadcn <Table>. Each row navigates to /runs/$runId.
-function RecentRunsList({ runs }: { runs: Run[] }) {
+function RecentRunsList({ runs }: { runs: V2Run[] }) {
   const navigate = useNavigate()
 
   if (runs.length === 0) {

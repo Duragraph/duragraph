@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type { Assistant, Run, RunStatus, Graph } from "@/types/entities"
+import { hasRunThread, type Assistant, type V2Run, type Graph } from "@/types/entities"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -47,7 +47,7 @@ function AssistantDetailPage() {
   // Fetch runs for this assistant
   const { data: runs } = useQuery({
     queryKey: ["runs", { assistant_id: assistantId }],
-    queryFn: () => api.get<Run[]>(`/runs?assistant_id=${assistantId}`),
+    queryFn: () => api.get<V2Run[]>(`/runs?assistant_id=${assistantId}`),
     enabled: !!assistant,
   })
 
@@ -77,7 +77,7 @@ function AssistantDetailPage() {
 
   const recentRuns = runs?.slice(0, 5) || []
   const totalRuns = runs?.length || 0
-  const successfulRuns = runs?.filter((r) => r.status === "completed").length || 0
+  const successfulRuns = runs?.filter((r) => r.status === "success").length || 0
   const successRate = totalRuns > 0 ? ((successfulRuns / totalRuns) * 100).toFixed(1) : "0"
 
   return (
@@ -232,7 +232,7 @@ function AssistantDetailPage() {
                             {new Date(run.created_at).toLocaleString()}
                           </div>
                         </div>
-                        <RunStatusBadge status={run.status as RunStatus} />
+                        <RunStatusBadge status={run.status} />
                       </Link>
                     ))}
                   </div>
@@ -370,10 +370,10 @@ function AssistantDetailPage() {
                           </Link>
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {run.thread_id.slice(0, 12)}...
+                          {hasRunThread(run) ? `${run.thread_id.slice(0, 12)}...` : "Stateless"}
                         </TableCell>
                         <TableCell>
-                          <RunStatusBadge status={run.status as RunStatus} />
+                          <RunStatusBadge status={run.status} />
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {new Date(run.created_at).toLocaleString()}

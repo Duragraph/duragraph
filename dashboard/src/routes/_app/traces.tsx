@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { api } from "@/api/client"
 import { runsPollInterval } from "@/api/runs"
-import type { Run, RunStatus, Assistant, AssistantsResponse } from "@/types/entities"
+import { hasRunThread, type V2Run, type RunStatus, type Assistant, type AssistantsResponse } from "@/types/entities"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -55,9 +55,10 @@ type ThreadRollup = {
   errorCount: number
 }
 
-function rollupThreads(runs: Run[]): ThreadRollup[] {
-  const byThread = new Map<string, Run[]>()
+function rollupThreads(runs: V2Run[]): ThreadRollup[] {
+  const byThread = new Map<string, V2Run[]>()
   for (const r of runs) {
+    if (!hasRunThread(r)) continue
     const list = byThread.get(r.thread_id) ?? []
     list.push(r)
     byThread.set(r.thread_id, list)
@@ -77,7 +78,7 @@ function rollupThreads(runs: Run[]): ThreadRollup[] {
       latestStatus: latest.status as RunStatus,
       latestAssistantId: latest.assistant_id,
       latestRunId: latest.run_id,
-      errorCount: sorted.filter((r) => r.status === "failed").length,
+      errorCount: sorted.filter((r) => r.status === "error" || r.status === "timeout").length,
     })
   }
   return rollups.sort(
@@ -111,14 +112,14 @@ function TracesPage() {
     refetch,
   } = useQuery({
     queryKey: ["runs"],
-    queryFn: () => api.get<Run[]>("/runs"),
+    queryFn: () => api.get<V2Run[]>("/runs"),
     // Adaptive polling: only refresh aggressively when something is
     // actually in flight. The previous 5 s blanket interval refetched
     // even after every run had been completed for hours, causing
     // pointless re-renders of the whole threads table. Now a fast
     // 1.5 s tick kicks in only while any run is non-terminal, and the
     // page idles at 15 s the rest of the time.
-    refetchInterval: (q) => runsPollInterval(q.state.data as Run[] | undefined),
+    refetchInterval: (q) => runsPollInterval(q.state.data),
   })
 
   const { data: assistantsData } = useQuery({
@@ -213,11 +214,12 @@ function TracesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-            <SelectItem value="in_progress">Running</SelectItem>
-            <SelectItem value="queued">Queued</SelectItem>
-            <SelectItem value="requires_action">Action Required</SelectItem>
+            <SelectItem value="success">Success</SelectItem>
+            <SelectItem value="error">Error</SelectItem>
+            <SelectItem value="timeout">Timeout</SelectItem>
+            <SelectItem value="running">Running</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="interrupted">Interrupted</SelectItem>
           </SelectContent>
         </Select>
       </div>

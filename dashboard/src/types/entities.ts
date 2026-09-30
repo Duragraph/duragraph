@@ -49,6 +49,31 @@ import type {
 //     the current Go DTO; populated client-side from SSE events.
 
 export type Run = GetRunResponse
+// Global GET /runs and GET /runs/{id} return the v2 OpenAPI Run (rows.go),
+// not the legacy GetRunResponse used by stateful thread views.
+export interface V2Run {
+  run_id: string
+  thread_id: string // zero UUID for stateless runs until the API makes this nullable
+  assistant_id: string
+  status: V2RunStatus
+  metadata: Record<string, unknown>
+  kwargs: Record<string, unknown>
+  multitask_strategy: string
+  created_at: string
+  updated_at: string
+}
+
+export type V2RunStatus = "pending" | "running" | "success" | "error" | "interrupted" | "timeout"
+export const STATELESS_THREAD_ID = "00000000-0000-0000-0000-000000000000"
+export function hasRunThread(run: Pick<V2Run, "thread_id">): boolean {
+  return !!run.thread_id && run.thread_id !== STATELESS_THREAD_ID
+}
+export function isActiveRun(run: Pick<V2Run, "status">): boolean {
+  return run.status === "pending" || run.status === "running"
+}
+export function runsPollInterval(runs: { status: string }[] | undefined): number {
+  return runs?.some((r) => r.status === "running" || r.status === "pending") ? 1500 : 15000
+}
 export type Assistant = AssistantResponse
 export type AssistantsResponse = ListAssistantsResponse
 export type Thread = ThreadResponse & {
@@ -102,6 +127,7 @@ export type ToolOutput = GeneratedToolOutput
 //   const status = response.status as RunStatus
 
 export type RunStatus =
+  | V2RunStatus
   | "queued"
   | "in_progress"
   | "completed"
