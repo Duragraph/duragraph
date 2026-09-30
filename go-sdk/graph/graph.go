@@ -399,6 +399,56 @@ func (g *Graph[S]) Run(ctx context.Context, state S) (S, error) {
 	return state, nil
 }
 
+// ExecutionError identifies a node execution failure, as distinct from a
+// checkpoint or event callback failure that should be retried by the worker.
+type ExecutionError struct {
+	Node, NodeType string
+	Err            error
+}
+
+// Error describes the failing node.
+func (e *ExecutionError) Error() string { return fmt.Sprintf("node %s: %v", e.Node, e.Err) }
+
+// Unwrap returns the original node failure.
+func (e *ExecutionError) Unwrap() error { return e.Err }
+
+// RunFrom executes the graph starting at start, calling before and after at
+// each node boundary. after receives the current state and next node so a
+// worker can checkpoint before reporting node completion. The callbacks must
+// return errors when their writes fail; execution stops without advancing.
+func (g *Graph[S]) RunFrom(ctx context.Context, state S, start string,
+	before func(node, nodeType string) error,
+	after func(node, nodeType string, state S, next string) error,
+) (S, error) {
+	for current := start; current != ""; {
+		if err := ctx.Err(); err != nil {
+			return state, err
+		}
+		node, ok := g.nodes[current]
+		if !ok {
+			return state, fmt.Errorf("graph %q: unknown node %q", g.id, current)
+		}
+		if before != nil {
+			if err := before(current, g.nodeTypes[current]); err != nil {
+				return state, err
+			}
+		}
+		result, err := node.Execute(ctx, state)
+		if err != nil {
+			return state, &ExecutionError{Node: current, NodeType: g.nodeTypes[current], Err: err}
+		}
+		state = result
+		next := g.nextNode(ctx, current, node, state)
+		if after != nil {
+			if err := after(current, g.nodeTypes[current], state, next); err != nil {
+				return state, err
+			}
+		}
+		current = next
+	}
+	return state, nil
+}
+
 // Stream executes the graph and sends events to the provided channel.
 //
 // Events include node_started, node_completed, run_started, and run_completed.

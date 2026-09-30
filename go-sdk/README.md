@@ -75,7 +75,7 @@ func main() {
 - **Knowledge Graphs** - Neo4j, Memgraph, ArangoDB
 - **Document Storage** - S3, GCS, Azure Blob
 - **Observability** - OpenTelemetry, Prometheus metrics
-- **Worker Runtime** - Connect to DuraGraph control plane
+- **Worker Runtime** - HTTP claim or JetStream push with epoch-fenced events and checkpoints
 
 ## Requirements
 
@@ -85,6 +85,7 @@ func main() {
 ## Documentation
 
 - [REST API Client Reference](docs/client-api.md)
+- [Go worker v2 migration and limitations](docs/worker-v2-migration.md)
 - [Full Documentation](https://duragraph.ai/docs)
 - [API Reference](https://duragraph.ai/docs/api-reference/overview)
 - [Examples](https://github.com/Duragraph/duragraph/tree/main/examples)
