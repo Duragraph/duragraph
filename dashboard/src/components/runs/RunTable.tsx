@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RunStatusBadge } from "./RunStatusBadge"
-import { MoreHorizontal, Eye, Play, Radio, Trash2, XCircle } from "lucide-react"
+import { MoreHorizontal, Eye, Play, Radio, Trash2 } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,8 +24,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { DeleteConfirmationDialog } from "@/components/ui/delete-confirmation-dialog"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type { Run, RunStatus } from "@/types/entities"
-import { useRunsStream } from "@/hooks/useRunStream"
+import { hasRunThread, isActiveRun, type V2Run } from "@/types/entities"
+import { runsPollInterval } from "@/api/runs"
 import { SearchFilter } from "@/components/common/SearchFilter"
 import { toast } from "sonner"
 
@@ -35,12 +35,12 @@ interface RunTableProps {
 }
 
 const STATUS_OPTIONS = [
-  { value: "queued", label: "Queued" },
-  { value: "in_progress", label: "In Progress" },
-  { value: "completed", label: "Completed" },
-  { value: "failed", label: "Failed" },
-  { value: "cancelled", label: "Cancelled" },
-  { value: "requires_action", label: "Requires Action" },
+  { value: "pending", label: "Pending" },
+  { value: "running", label: "Running" },
+  { value: "success", label: "Success" },
+  { value: "error", label: "Error" },
+  { value: "interrupted", label: "Interrupted" },
+  { value: "timeout", label: "Timeout" },
 ]
 
 export function RunTable({ showLiveIndicator = true, showFilters = true }: RunTableProps) {
@@ -49,22 +49,15 @@ export function RunTable({ showLiveIndicator = true, showFilters = true }: RunTa
 
   const { data: runs, isLoading, error } = useQuery({
     queryKey: ["runs"],
-    queryFn: () => api.get<Run[]>("/runs"),
+    queryFn: () => api.get<V2Run[]>("/runs"),
     // Refetch more frequently when there are in-progress runs
     refetchInterval: (query) => {
-      const data = query.state.data
-      const hasActiveRuns = data?.some(
-        (run) => run.status === "in_progress" || run.status === "queued"
-      )
-      return hasActiveRuns ? 3000 : false
+      return runsPollInterval(query.state.data)
     },
   })
 
   // Enable streaming/polling for real-time updates
-  const hasActiveRuns = runs?.some(
-    (run) => run.status === "in_progress" || run.status === "queued"
-  )
-  useRunsStream({ enabled: hasActiveRuns })
+  const hasActiveRuns = runs?.some(isActiveRun)
 
   // Filter runs based on search and status
   const filteredRuns = useMemo(() => {
@@ -74,7 +67,7 @@ export function RunTable({ showLiveIndicator = true, showFilters = true }: RunTa
         !search ||
         run.run_id.toLowerCase().includes(search.toLowerCase()) ||
         run.assistant_id.toLowerCase().includes(search.toLowerCase()) ||
-        run.thread_id.toLowerCase().includes(search.toLowerCase())
+        (hasRunThread(run) && run.thread_id.toLowerCase().includes(search.toLowerCase()))
       const matchesStatus =
         statusFilter === "all" || run.status === statusFilter
       return matchesSearch && matchesStatus
@@ -180,7 +173,7 @@ export function RunTable({ showLiveIndicator = true, showFilters = true }: RunTa
 }
 
 interface RunRowProps {
-  run: Run
+  run: V2Run
 }
 
 function RunRow({ run }: RunRowProps) {
@@ -199,24 +192,11 @@ function RunRow({ run }: RunRowProps) {
     },
   })
 
-  const cancelMutation = useMutation({
-    mutationFn: () => api.post(`/runs/${run.run_id}/cancel`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["runs"] })
-      toast.success("Run cancelled")
-    },
-    onError: (error: Error) => {
-      toast.error(`Failed to cancel run: ${error.message}`)
-    },
-  })
-
-  const canCancel = run.status === "in_progress" || run.status === "queued"
-
   return (
     <>
       <TableRow className="cursor-pointer hover:bg-muted/50">
         <TableCell>
-          <RunStatusBadge status={run.status as RunStatus} />
+          <RunStatusBadge status={run.status} />
         </TableCell>
         <TableCell>
           <Link
@@ -237,13 +217,7 @@ function RunRow({ run }: RunRowProps) {
           </Link>
         </TableCell>
         <TableCell>
-          <Link
-            to="/threads/$threadId"
-            params={{ threadId: run.thread_id }}
-            className="font-mono text-sm hover:underline"
-          >
-            {run.thread_id.slice(0, 8)}...
-          </Link>
+          {hasRunThread(run) ? <Link to="/threads/$threadId" params={{ threadId: run.thread_id }} className="font-mono text-sm hover:underline">{run.thread_id.slice(0, 8)}...</Link> : <span className="text-muted-foreground">Stateless</span>}
         </TableCell>
         <TableCell className="text-muted-foreground">
           {new Date(run.created_at).toLocaleString()}
@@ -262,33 +236,27 @@ function RunRow({ run }: RunRowProps) {
                   View Details
                 </Link>
               </DropdownMenuItem>
-              {canCancel && (
-                <DropdownMenuItem onClick={() => cancelMutation.mutate()}>
-                  <XCircle className="h-4 w-4 mr-2" />
-                  Cancel Run
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
+              {hasRunThread(run) && <DropdownMenuSeparator />}
+              {hasRunThread(run) && <DropdownMenuItem
                 className="text-red-600"
                 onClick={() => setDeleteDialogOpen(true)}
               >
                 <Trash2 className="h-4 w-4 mr-2" />
                 Delete
-              </DropdownMenuItem>
+              </DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
         </TableCell>
       </TableRow>
 
-      <DeleteConfirmationDialog
+      {hasRunThread(run) && <DeleteConfirmationDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         title="Delete Run"
         description="Are you sure you want to delete this run? This action cannot be undone."
         onConfirm={async () => { await deleteMutation.mutateAsync() }}
         isPending={deleteMutation.isPending}
-      />
+      />}
     </>
   )
 }

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type { Thread, Run, RunStatus, Message } from "@/types/entities"
+import type { Thread, V2Run, Message } from "@/types/entities"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -72,13 +72,14 @@ function ThreadDetailPage() {
   // Fetch runs for this thread
   const { data: runs } = useQuery({
     queryKey: ["runs", { thread_id: threadId }],
-    queryFn: () => api.get<Run[]>(`/threads/${threadId}/runs`),
+    queryFn: () => api.get<V2Run[]>(`/threads/${threadId}/runs`),
+    refetchInterval: (q) => q.state.data?.some(r => r.status === "pending" || r.status === "running") ? 2000 : false,
     enabled: !!thread,
   })
 
   // Check if there are active runs
   const hasActiveRuns = runs?.some(
-    (r) => r.status === "in_progress" || r.status === "queued"
+    (r) => r.status === "running" || r.status === "pending"
   )
 
   // Handle incoming messages from stream
@@ -152,7 +153,7 @@ function ThreadDetailPage() {
   }
 
   const totalRuns = runs?.length || 0
-  const activeRuns = runs?.filter((r) => r.status === "in_progress" || r.status === "queued").length || 0
+  const activeRuns = runs?.filter((r) => r.status === "running" || r.status === "pending").length || 0
 
   return (
     <div>
@@ -351,7 +352,7 @@ function ThreadDetailPage() {
                           {run.assistant_id.slice(0, 12)}...
                         </TableCell>
                         <TableCell>
-                          <RunStatusBadge status={run.status as RunStatus} />
+                          <RunStatusBadge status={run.status} />
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {new Date(run.created_at).toLocaleString()}

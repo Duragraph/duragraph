@@ -18,6 +18,12 @@ const statusConfig: Record<
     className: string
   }
 > = {
+  pending: { label: "Pending", icon: Clock, className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" },
+  running: { label: "Running", icon: Loader2, className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" },
+  success: { label: "Success", icon: CheckCircle, className: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" },
+  error: { label: "Error", icon: XCircle, className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" },
+  interrupted: { label: "Interrupted", icon: AlertTriangle, className: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300" },
+  timeout: { label: "Timeout", icon: Ban, className: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400" },
   queued: {
     label: "Queued",
     icon: Clock,
@@ -71,7 +77,7 @@ export function RunStatusBadge({ status, className }: RunStatusBadgeProps) {
       <Icon
         className={cn(
           "h-3.5 w-3.5",
-          status === "in_progress" && "animate-spin"
+          (status === "running" || status === "in_progress") && "animate-spin"
         )}
       />
       {config.label}
