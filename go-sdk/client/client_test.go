@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNew(t *testing.T) {
@@ -150,28 +151,30 @@ func TestCreateRun(t *testing.T) {
 }
 
 func TestWaitForRun(t *testing.T) {
-	callCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		status := "in_progress"
-		if callCount >= 3 {
-			status = "completed"
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(Run{ID: "r-1", Status: status})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	r, err := c.WaitForRun(context.Background(), "t-1", "r-1", 1)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	if r.Status != "completed" {
-		t.Errorf("Status = %q, want 'completed'", r.Status)
-	}
-	if callCount < 3 {
-		t.Errorf("callCount = %d, want >= 3", callCount)
+	for _, terminal := range []string{"success", "error", "timeout", "completed", "failed", "canceled"} {
+		t.Run(terminal, func(t *testing.T) {
+			callCount := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callCount++
+				status := "running"
+				if callCount >= 3 {
+					status = terminal
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(Run{ID: "r-1", Status: status}); err != nil {
+					t.Errorf("encode run: %v", err)
+				}
+			}))
+			defer server.Close()
+			c := New(server.URL)
+			r, err := c.WaitForRun(context.Background(), "t-1", "r-1", time.Millisecond)
+			if err != nil {
+				t.Fatalf("wait: %v", err)
+			}
+			if r.Status != terminal || callCount != 3 {
+				t.Errorf("status=%q count=%d, want %s after 3 calls", r.Status, callCount, terminal)
+			}
+		})
 	}
 }
 

@@ -1,58 +1,35 @@
-// Package worker provides the worker runtime for connecting graphs to the
-// DuraGraph control plane.
-//
-// A Worker registers with the control plane, receives task assignments via
-// HTTP polling and/or NATS JetStream, executes graphs, and reports results.
-//
-// # Basic Usage
-//
-//	g := graph.New[*ChatState]("my_agent")
-//	// ... add nodes and edges ...
-//
-//	w := worker.New(g,
-//	    worker.WithControlPlane("http://localhost:8081"),
-//	    worker.WithConcurrency(10),
-//	)
-//
-//	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-//	defer cancel()
-//
-//	if err := w.Start(ctx); err != nil {
-//	    log.Fatal(err)
-//	}
-//
-// # NATS JetStream
-//
-// Enable instant task notifications via NATS:
-//
-//	w := worker.New(g,
-//	    worker.WithControlPlane("http://localhost:8081"),
-//	    worker.WithNATS("nats://localhost:4222"),
-//	)
-//
-// When NATS is configured, the worker subscribes to
-// duragraph.tasks.assign.{graph_id} for instant notifications and reduces
-// HTTP polling to a 30-second safety net. If NATS is unavailable, the worker
-// falls back to HTTP-only polling.
+// Package worker connects a local Go graph to the control plane's worker
+// claim/events/checkpoint protocol. Without NATS it claims queued runs over
+// HTTP; with NATS it consumes worker.graph.execute commands from JetStream.
+// There is no legacy /poll or /complete compatibility path.
 package worker
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/duragraph/duragraph/go-sdk/graph"
 )
 
-// Status represents the worker's current state.
+// ErrStaleLease means a newer worker owns this run (or it is terminal).
+var ErrStaleLease = errors.New("worker: stale lease")
+
+// Status describes the worker lifecycle.
 type Status string
 
 const (
@@ -69,650 +46,555 @@ type Option func(*config)
 type config struct {
 	controlPlane    string
 	concurrency     int
-	pollInterval    time.Duration
+	claimInterval   time.Duration
 	apiKey          string
 	natsURL         string
 	shutdownTimeout time.Duration
 	name            string
+	httpClient      *http.Client
 }
 
-// WithControlPlane sets the control plane URL.
-func WithControlPlane(url string) Option {
-	return func(c *config) { c.controlPlane = url }
+// WithControlPlane sets the control-plane root URL (not an API path).
+func WithControlPlane(u string) Option {
+	return func(c *config) { c.controlPlane = strings.TrimRight(u, "/") }
 }
 
-// WithConcurrency sets the maximum number of concurrent runs.
-// Default is 1.
-func WithConcurrency(n int) Option {
-	return func(c *config) { c.concurrency = n }
-}
+// WithConcurrency sets the maximum number of in-flight runs (default 1).
+func WithConcurrency(n int) Option { return func(c *config) { c.concurrency = n } }
 
-// WithPollInterval sets how often the worker polls for new runs.
-// Default is 1 second (30 seconds when NATS is active).
-func WithPollInterval(d time.Duration) Option {
-	return func(c *config) { c.pollInterval = d }
-}
+// WithClaimInterval sets how often HTTP claim mode checks for queued runs (default 1s).
+func WithClaimInterval(d time.Duration) Option { return func(c *config) { c.claimInterval = d } }
 
-// WithAPIKey sets the API key for authenticating with the control plane.
-func WithAPIKey(key string) Option {
-	return func(c *config) { c.apiKey = key }
-}
+// WithAPIKey sends the given bearer token on worker HTTP requests.
+func WithAPIKey(key string) Option { return func(c *config) { c.apiKey = key } }
 
-// WithNATS sets the NATS server URL for JetStream task subscriptions.
-// When set, the worker subscribes to task assignment subjects for instant
-// notifications and reduces HTTP polling to a 30-second safety net.
-func WithNATS(url string) Option {
-	return func(c *config) { c.natsURL = url }
-}
+// WithNATS enables JetStream push mode instead of HTTP claim mode. The server
+// must have provisioned WORKER_COMMANDS and its graph-executor durable consumer.
+func WithNATS(u string) Option { return func(c *config) { c.natsURL = u } }
 
-// WithShutdownTimeout sets how long to wait for active runs during shutdown.
-// Default is 60 seconds.
-func WithShutdownTimeout(d time.Duration) Option {
-	return func(c *config) { c.shutdownTimeout = d }
-}
+// WithShutdownTimeout bounds how long shutdown waits for active runs.
+func WithShutdownTimeout(d time.Duration) Option { return func(c *config) { c.shutdownTimeout = d } }
 
-// WithName sets the worker name used during registration.
-// Defaults to a generated name based on the graph ID.
-func WithName(name string) Option {
-	return func(c *config) { c.name = name }
-}
+// WithName sets a human-readable label; the protocol worker_id is a UUID.
+func WithName(name string) Option { return func(c *config) { c.name = name } }
 
-// RunTask represents a task received from the control plane.
+// WithHTTPClient sets a custom client (default timeout 30s).
+func WithHTTPClient(h *http.Client) Option { return func(c *config) { c.httpClient = h } }
+
+// RunTask is a claimed run or pushed worker.graph.execute command.
 type RunTask struct {
-	RunID       string                 `json:"run_id"`
-	ThreadID    string                 `json:"thread_id"`
-	AssistantID string                 `json:"assistant_id"`
-	GraphID     string                 `json:"graph_id"`
-	Input       map[string]interface{} `json:"input"`
-	Config      map[string]interface{} `json:"config"`
+	RunID        string          `json:"run_id"`
+	ThreadID     string          `json:"thread_id"`
+	AssistantID  string          `json:"assistant_id"`
+	GraphID      string          `json:"graph_id"`
+	Input        json.RawMessage `json:"input"`
+	LeaseEpoch   int             `json:"-"`
+	CheckpointID *int64          `json:"-"`
+	// Resume carries the command on push-mode run.resumed dispatches.
+	Resume json.RawMessage `json:"resume,omitempty"`
 }
 
-// Worker executes graphs in response to runs from the control plane.
+type claimedRun struct {
+	Run struct {
+		RunID       string `json:"run_id"`
+		ThreadID    string `json:"thread_id"`
+		AssistantID string `json:"assistant_id"`
+	} `json:"run"`
+	GraphID      string          `json:"graph_id"`
+	Input        json.RawMessage `json:"input"`
+	LeaseEpoch   int             `json:"lease_epoch"`
+	CheckpointID *int64          `json:"checkpoint_id"`
+}
+
+// Worker executes one locally defined graph and reports epoch-fenced results.
 type Worker[S any] struct {
-	graph  *graph.Graph[S]
-	config config
-
-	workerID   string
-	statusMu   sync.RWMutex
-	status     Status
-	httpClient *http.Client
-
-	nc   *nats.Conn
-	js   nats.JetStreamContext
-	subs []*nats.Subscription
-
-	activeRuns sync.WaitGroup
-	runCount   struct {
-		mu        sync.Mutex
-		active    int
-		completed int
-		failed    int
-	}
-
-	taskCh chan *RunTask
+	graph                     *graph.Graph[S]
+	config                    config
+	workerID                  string
+	statusMu                  sync.RWMutex
+	status                    Status
+	client                    *http.Client
+	countMu                   sync.Mutex
+	active, completed, failed int
 }
 
-// New creates a new worker for the given graph.
+// New creates a worker. A fresh UUID is used as worker_id for each instance.
 func New[S any](g *graph.Graph[S], opts ...Option) *Worker[S] {
-	cfg := config{
-		concurrency:     1,
-		pollInterval:    time.Second,
-		shutdownTimeout: 60 * time.Second,
-	}
+	c := config{concurrency: 1, claimInterval: time.Second, shutdownTimeout: 60 * time.Second, httpClient: &http.Client{Timeout: 30 * time.Second}}
 	for _, opt := range opts {
-		opt(&cfg)
+		opt(&c)
 	}
-	if cfg.name == "" {
-		cfg.name = fmt.Sprintf("go-worker-%s", g.ID())
+	if c.name == "" && g != nil {
+		c.name = "go-worker-" + g.ID()
 	}
-
-	return &Worker[S]{
-		graph:  g,
-		config: cfg,
-		status: StatusStarting,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		taskCh: make(chan *RunTask, cfg.concurrency),
-	}
+	return &Worker[S]{graph: g, config: c, workerID: uuid.NewString(), status: StatusStarting, client: c.httpClient}
 }
 
-// Start begins the worker lifecycle: register, subscribe, poll, execute.
-// Blocks until the context is canceled, then performs graceful shutdown.
+// Start registers, renews the worker lease, and consumes runs until ctx ends.
+// In push mode a connection failure returns an error, never a silent fallback.
 func (w *Worker[S]) Start(ctx context.Context) error {
-	if w.config.controlPlane == "" {
-		return fmt.Errorf("worker: control plane URL is required (use WithControlPlane)")
+	if w.graph == nil || w.config.controlPlane == "" || w.config.concurrency < 1 || w.config.claimInterval <= 0 || w.config.shutdownTimeout <= 0 {
+		return fmt.Errorf("worker: graph, control plane URL, positive concurrency/claim interval/shutdown timeout required")
 	}
-
-	workerID, err := w.register(ctx)
-	if err != nil {
-		return fmt.Errorf("worker: registration failed: %w", err)
+	if err := w.graph.Validate(); err != nil {
+		return err
 	}
-	w.workerID = workerID
+	if err := w.register(ctx); err != nil {
+		return fmt.Errorf("worker: register: %w", err)
+	}
 	w.setStatus(StatusReady)
-	log.Printf("[worker] registered as %s", w.workerID)
-
-	if w.config.natsURL != "" {
-		if err := w.connectNATS(); err != nil {
-			log.Printf("[worker] NATS connection failed, falling back to HTTP polling: %v", err)
-		}
+	workCtx, cancel := context.WithCancel(ctx)
+	var loops sync.WaitGroup
+	loops.Add(1)
+	go func() { defer loops.Done(); w.heartbeatLoop(workCtx) }()
+	var err error
+	if w.config.natsURL == "" {
+		err = w.claimLoop(workCtx)
+	} else {
+		err = w.pushLoop(workCtx)
 	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var wg sync.WaitGroup
-
-	// Run executors
-	for range w.config.concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			w.executor(ctx)
-		}()
+	cancel()
+	loops.Wait()
+	w.setStatus(StatusDraining)
+	// In-flight requests use workCtx and stop on cancellation; deregister only
+	// once the consumer has stopped, so the server does not requeue live work.
+	shutdownCtx, stop := context.WithTimeout(context.Background(), w.config.shutdownTimeout)
+	defer stop()
+	if derr := w.doJSON(shutdownCtx, http.MethodPost, w.workerPath()+"/deregister", struct{}{}, nil); derr != nil {
+		log.Printf("[worker] deregister: %v", derr)
 	}
+	w.setStatus(StatusStopped)
+	return err
+}
 
-	// Heartbeat loop
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.heartbeatLoop(ctx)
-	}()
-
-	// Poll loop
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.pollLoop(ctx)
-	}()
-
-	// Wait for context cancellation
-	<-ctx.Done()
-	log.Printf("[worker] shutting down...")
-
-	w.shutdown()
-	close(w.taskCh)
-	wg.Wait()
-
+func (w *Worker[S]) register(ctx context.Context) error {
+	ir := w.graph.ToIR()
+	definition := map[string]any{"name": w.graph.ID(), "nodes": ir["nodes"], "edges": ir["edges"], "config": map[string]any{"entry_point": w.graph.Entrypoint()}}
+	if desc, ok := ir["description"]; ok {
+		definition["description"] = desc
+	}
+	var response struct {
+		WorkerID string `json:"worker_id"`
+	}
+	if err := w.doJSON(ctx, http.MethodPost, "/api/v1/workers/register", map[string]any{
+		"worker_id": w.workerID, "graphs": []string{w.graph.ID()}, "capacity": w.config.concurrency,
+		"graph_definitions": []any{definition},
+	}, &response); err != nil {
+		return err
+	}
+	if response.WorkerID != w.workerID {
+		return fmt.Errorf("register: unexpected worker_id %q", response.WorkerID)
+	}
 	return nil
 }
 
-// register registers this worker with the control plane.
-func (w *Worker[S]) register(ctx context.Context) (string, error) {
-	graphID := w.graph.ID()
-	nodeNames := w.graph.NodeNames()
-	edges := w.graph.Edges()
-
-	nodes := make([]map[string]interface{}, 0, len(nodeNames))
-	for _, name := range nodeNames {
-		nodes = append(nodes, map[string]interface{}{
-			"id":   name,
-			"type": "default",
-		})
-	}
-
-	edgeDefs := make([]map[string]string, 0)
-	for from, targets := range edges {
-		for _, to := range targets {
-			edgeDefs = append(edgeDefs, map[string]string{
-				"source": from,
-				"target": to,
-			})
-		}
-	}
-
-	payload := map[string]interface{}{
-		"worker_id": w.config.name,
-		"name":      w.config.name,
-		"capabilities": map[string]interface{}{
-			"graphs":              []string{graphID},
-			"max_concurrent_runs": w.config.concurrency,
-		},
-		"graph_definitions": []map[string]interface{}{
-			{
-				"graph_id":    graphID,
-				"name":        graphID,
-				"nodes":       nodes,
-				"edges":       edgeDefs,
-				"entry_point": w.graph.Entrypoint(),
-			},
-		},
-	}
-
-	var lastErr error
-	for attempt := range 5 {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(time.Duration(attempt) * 2 * time.Second):
-			}
-		}
-
-		body, err := w.doPost(ctx, "/api/v1/workers/register", payload)
-		if err != nil {
-			lastErr = err
-			log.Printf("[worker] registration attempt %d failed: %v", attempt+1, err)
-			continue
-		}
-
-		var resp struct {
-			WorkerID string `json:"worker_id"`
-		}
-		if err := json.Unmarshal(body, &resp); err != nil {
-			lastErr = err
-			continue
-		}
-		return resp.WorkerID, nil
-	}
-
-	return "", fmt.Errorf("registration failed after 5 attempts: %w", lastErr)
-}
-
-// connectNATS establishes a NATS JetStream connection and subscribes to
-// task assignment subjects for each graph.
-func (w *Worker[S]) connectNATS() error {
-	nc, err := nats.Connect(w.config.natsURL,
-		nats.RetryOnFailedConnect(true),
-		nats.MaxReconnects(-1),
-		nats.ReconnectWait(2*time.Second),
-		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			log.Printf("[worker] NATS disconnected: %v", err)
-		}),
-		nats.ReconnectHandler(func(_ *nats.Conn) {
-			log.Printf("[worker] NATS reconnected")
-		}),
-	)
-	if err != nil {
-		return fmt.Errorf("nats connect: %w", err)
-	}
-
-	js, err := nc.JetStream()
-	if err != nil {
-		nc.Close()
-		return fmt.Errorf("nats jetstream: %w", err)
-	}
-
-	w.nc = nc
-	w.js = js
-
-	subject := fmt.Sprintf("duragraph.tasks.assign.%s", w.graph.ID())
-	sub, err := js.Subscribe(subject, func(msg *nats.Msg) {
-		var task RunTask
-		if err := json.Unmarshal(msg.Data, &task); err != nil {
-			log.Printf("[worker] invalid NATS task message: %v", err)
-			if nakErr := msg.Nak(); nakErr != nil {
-				log.Printf("[worker] failed to NAK message: %v", nakErr)
-			}
-			return
-		}
-
-		if ackErr := msg.Ack(); ackErr != nil {
-			log.Printf("[worker] failed to ACK message: %v", ackErr)
-		}
-
-		w.claimViaHTTP(task.RunID)
-	}, nats.DeliverNew(), nats.AckExplicit())
-	if err != nil {
-		log.Printf("[worker] NATS subscribe to %s failed: %v", subject, err)
-		return nil
-	}
-
-	w.subs = append(w.subs, sub)
-	log.Printf("[worker] NATS subscribed to %s", subject)
-	return nil
-}
-
-// claimViaHTTP attempts to claim a task from the control plane after
-// receiving a NATS notification.
-func (w *Worker[S]) claimViaHTTP(runID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	tasks, err := w.poll(ctx, 1)
-	if err != nil {
-		log.Printf("[worker] claim after NATS notification failed: %v", err)
-		return
-	}
-
-	for _, task := range tasks {
-		select {
-		case w.taskCh <- task:
-		default:
-			log.Printf("[worker] task channel full, dropping task %s", task.RunID)
-		}
-	}
-	_ = runID
-}
-
-// heartbeatLoop sends periodic heartbeats to the control plane.
 func (w *Worker[S]) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			w.heartbeat(ctx)
-		}
-	}
-}
-
-// heartbeat sends a single heartbeat.
-func (w *Worker[S]) heartbeat(ctx context.Context) {
-	w.runCount.mu.Lock()
-	active := w.runCount.active
-	total := w.runCount.completed + w.runCount.failed
-	failed := w.runCount.failed
-	w.runCount.mu.Unlock()
-
-	currentStatus := w.getStatus()
-	status := "ready"
-	switch currentStatus {
-	case StatusBusy:
-		status = "busy"
-	case StatusDraining:
-		status = "draining"
-	case StatusReady:
-		status = "ready"
-	}
-
-	payload := map[string]interface{}{
-		"status":      status,
-		"active_runs": active,
-		"total_runs":  total,
-		"failed_runs": failed,
-	}
-
-	_, err := w.doPost(ctx, fmt.Sprintf("/api/v1/workers/%s/heartbeat", w.workerID), payload)
-	if err != nil {
-		log.Printf("[worker] heartbeat failed: %v", err)
-	}
-}
-
-// pollLoop periodically polls the control plane for tasks.
-func (w *Worker[S]) pollLoop(ctx context.Context) {
-	interval := w.config.pollInterval
-	if w.nc != nil {
-		interval = 30 * time.Second
-	}
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if s := w.getStatus(); s == StatusDraining || s == StatusStopped {
-				continue
-			}
-			tasks, err := w.poll(ctx, 1)
-			if err != nil {
-				log.Printf("[worker] poll failed: %v", err)
-				continue
-			}
-			for _, task := range tasks {
-				select {
-				case w.taskCh <- task:
-				case <-ctx.Done():
-					return
+			w.countMu.Lock()
+			active := w.active
+			w.countMu.Unlock()
+			if err := w.doJSON(ctx, http.MethodPost, w.workerPath()+"/heartbeat", map[string]any{"status": "online", "active_runs": active}, nil); err != nil {
+				if errors.Is(err, ErrStaleLease) {
+					if e := w.register(ctx); e != nil {
+						log.Printf("[worker] re-register: %v", e)
+					}
+				} else if ctx.Err() == nil {
+					log.Printf("[worker] heartbeat: %v", err)
 				}
 			}
 		}
 	}
 }
 
-// poll fetches available tasks from the control plane.
-func (w *Worker[S]) poll(ctx context.Context, maxTasks int) ([]*RunTask, error) {
-	payload := map[string]interface{}{
-		"max_tasks": maxTasks,
-		"graphs":    []string{w.graph.ID()},
-	}
-
-	body, err := w.doPost(ctx, fmt.Sprintf("/api/v1/workers/%s/poll", w.workerID), payload)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp struct {
-		Tasks []*RunTask `json:"tasks"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("poll response decode: %w", err)
-	}
-
-	return resp.Tasks, nil
-}
-
-// executor processes tasks from the task channel.
-func (w *Worker[S]) executor(ctx context.Context) {
-	for task := range w.taskCh {
+func (w *Worker[S]) claimLoop(ctx context.Context) error {
+	// Claim ONLY when a slot is available: a claim already leases its runs.
+	sem := make(chan struct{}, w.config.concurrency)
+	var runs sync.WaitGroup
+	defer runs.Wait()
+	ticker := time.NewTicker(w.config.claimInterval)
+	defer ticker.Stop()
+	for {
 		select {
 		case <-ctx.Done():
-			return
-		default:
+			return nil
+		case sem <- struct{}{}:
 		}
-
-		w.activeRuns.Add(1)
-		w.runCount.mu.Lock()
-		w.runCount.active++
-		if w.runCount.active >= w.config.concurrency {
-			w.setStatus(StatusBusy)
+		var resp struct {
+			Runs []claimedRun `json:"runs"`
 		}
-		w.runCount.mu.Unlock()
+		err := w.doJSON(ctx, http.MethodPost, w.workerPath()+"/runs/claim", map[string]int{"max_runs": 1}, &resp)
+		if err != nil {
+			<-sem
+			if ctx.Err() != nil {
+				return nil
+			}
+			if errors.Is(err, ErrStaleLease) {
+				if e := w.register(ctx); e != nil {
+					log.Printf("[worker] re-register: %v", e)
+				}
+			} else {
+				log.Printf("[worker] claim: %v", err)
+			}
+		} else if len(resp.Runs) == 0 {
+			<-sem
+		} else {
+			r := resp.Runs[0]
+			task := RunTask{RunID: r.Run.RunID, ThreadID: r.Run.ThreadID, AssistantID: r.Run.AssistantID, GraphID: r.GraphID, Input: r.Input, LeaseEpoch: r.LeaseEpoch, CheckpointID: r.CheckpointID}
+			runs.Add(1)
+			go func() {
+				defer runs.Done()
+				defer func() { <-sem }()
+				if e := w.executeRun(ctx, task, true); e != nil && ctx.Err() == nil {
+					log.Printf("[worker] run %s: %v", task.RunID, e)
+				}
+			}()
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
 
-		w.executeRun(ctx, task)
+func (w *Worker[S]) pushLoop(ctx context.Context) error {
+	nc, err := nats.Connect(w.config.natsURL)
+	if err != nil {
+		return fmt.Errorf("worker: nats connect: %w", err)
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return fmt.Errorf("worker: jetstream: %w", err)
+	}
+	consumer, err := js.Consumer(ctx, "WORKER_COMMANDS", "graph-executor")
+	if err != nil {
+		return fmt.Errorf("worker: bind graph-executor: %w", err)
+	}
+	sem := make(chan struct{}, w.config.concurrency)
+	var runs sync.WaitGroup
+	defer runs.Wait()
+	for ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+			return nil
+		case sem <- struct{}{}:
+		}
+		messages, err := consumer.Fetch(1, jetstream.FetchMaxWait(time.Second))
+		if err != nil {
+			<-sem
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("worker: fetch: %w", err)
+		}
+		seen := false
+		for msg := range messages.Messages() {
+			seen = true
+			runs.Add(1)
+			go func(msg jetstream.Msg) {
+				defer runs.Done()
+				defer func() { <-sem }()
+				var task RunTask
+				if err := json.Unmarshal(msg.Data(), &task); err != nil || task.RunID == "" {
+					if e := msg.Ack(); e != nil {
+						log.Printf("[worker] ack malformed command: %v", e)
+					}
+					return
+				}
+				if err := msg.InProgress(); err != nil {
+					log.Printf("[worker] in progress: %v", err)
+				}
+				stop := make(chan struct{})
+				go func() {
+					ticker := time.NewTicker(time.Minute)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-stop:
+							return
+						case <-ctx.Done():
+							return
+						case <-ticker.C:
+							if e := msg.InProgress(); e != nil {
+								log.Printf("[worker] in progress: %v", e)
+							}
+						}
+					}
+				}()
+				err := w.executeRun(ctx, task, false)
+				close(stop)
+				if ctx.Err() != nil {
+					return
+				} // do not ack: redeliver after shutdown
+				if err == nil || errors.Is(err, ErrStaleLease) {
+					if e := msg.Ack(); e != nil {
+						log.Printf("[worker] ack: %v", e)
+					}
+				} else {
+					log.Printf("[worker] run %s: %v", task.RunID, err)
+					if e := msg.Nak(); e != nil {
+						log.Printf("[worker] nak: %v", e)
+					}
+				}
+			}(msg)
+		}
+		if err := messages.Error(); err != nil {
+			<-sem
+			return fmt.Errorf("worker: fetch messages: %w", err)
+		}
+		if !seen {
+			<-sem
+		}
+	}
+	return nil
+}
 
-		w.activeRuns.Done()
-		w.runCount.mu.Lock()
-		w.runCount.active--
-		if w.runCount.active < w.config.concurrency && w.getStatus() == StatusBusy {
+type checkpoint struct {
+	CheckpointID int64           `json:"checkpoint_id"`
+	Version      int             `json:"version"`
+	State        json.RawMessage `json:"state"`
+}
+type walkState[S any] struct {
+	State S      `json:"state"`
+	Next  string `json:"next"`
+}
+
+func (w *Worker[S]) executeRun(ctx context.Context, task RunTask, claimed bool) error {
+	if task.GraphID != "" && task.GraphID != w.graph.ID() {
+		return fmt.Errorf("graph mismatch: command %q, local %q", task.GraphID, w.graph.ID())
+	}
+	if _, err := uuid.Parse(task.RunID); err != nil {
+		return fmt.Errorf("invalid run_id: %w", err)
+	}
+	if _, err := uuid.Parse(task.ThreadID); err != nil {
+		return fmt.Errorf("invalid thread_id: %w", err)
+	}
+	w.countMu.Lock()
+	w.active++
+	w.countMu.Unlock()
+	w.setStatus(StatusBusy)
+	defer func() {
+		w.countMu.Lock()
+		w.active--
+		if w.active == 0 {
 			w.setStatus(StatusReady)
 		}
-		w.runCount.mu.Unlock()
-	}
-}
-
-// executeRun executes a single run using streaming to emit per-node events.
-func (w *Worker[S]) executeRun(ctx context.Context, task *RunTask) {
-	log.Printf("[worker] executing run %s (graph=%s)", task.RunID, task.GraphID)
-
-	inputJSON, err := json.Marshal(task.Input)
-	if err != nil {
-		w.failRun(ctx, task.RunID, fmt.Sprintf("input marshal: %v", err))
-		return
-	}
-
-	var state S
-	if err := json.Unmarshal(inputJSON, &state); err != nil {
-		w.failRun(ctx, task.RunID, fmt.Sprintf("input decode: %v", err))
-		return
-	}
-
-	events := make(chan graph.Event, 32)
-
-	type streamResult struct {
-		state S
-		err   error
-	}
-	done := make(chan streamResult, 1)
-
-	go func() {
-		r, e := w.graph.Stream(ctx, state, events)
-		done <- streamResult{state: r, err: e}
+		w.countMu.Unlock()
 	}()
-
-	for ev := range events {
-		w.sendEvent(ctx, task.RunID, ev.Type, ev.Data)
+	path := w.workerPath() + "/runs/" + task.RunID + "/events"
+	epoch := task.LeaseEpoch
+	if !claimed {
+		var started struct {
+			LeaseEpoch int `json:"lease_epoch"`
+		}
+		if err := w.sendEvents(ctx, path, []any{map[string]any{"type": "run.started"}}, &started); err != nil {
+			return err
+		}
+		epoch = started.LeaseEpoch
 	}
-
-	sr := <-done
-
-	if sr.err != nil {
-		w.failRun(ctx, task.RunID, sr.err.Error())
-		return
+	if epoch <= 0 {
+		return fmt.Errorf("worker: missing lease_epoch for %s", task.RunID)
 	}
-
-	outputJSON, err := json.Marshal(sr.state)
-	if err != nil {
-		w.failRun(ctx, task.RunID, fmt.Sprintf("output marshal: %v", err))
-		return
+	// The control plane returns the persisted graph body for this run. Reject
+	// mismatches rather than silently executing a different local graph.
+	var definition struct {
+		Nodes []struct {
+			ID string `json:"id"`
+		} `json:"nodes"`
+		Edges []struct {
+			Source string `json:"source"`
+			Target string `json:"target"`
+		} `json:"edges"`
 	}
-
-	var output map[string]interface{}
-	if err := json.Unmarshal(outputJSON, &output); err != nil {
-		w.failRun(ctx, task.RunID, fmt.Sprintf("output decode: %v", err))
-		return
+	if err := w.doJSON(ctx, http.MethodGet, "/api/v1/workers/runs/"+task.RunID+"/graph", nil, &definition); err != nil {
+		return err
 	}
-
-	w.completeRun(ctx, task.RunID, output)
-}
-
-// completeRun reports a successful run to the control plane.
-func (w *Worker[S]) completeRun(ctx context.Context, runID string, output map[string]interface{}) {
-	payload := map[string]interface{}{
-		"status": "completed",
-		"output": output,
+	local := w.graph.NodeNames()
+	remote := make([]string, 0, len(definition.Nodes))
+	for _, n := range definition.Nodes {
+		remote = append(remote, n.ID)
 	}
-	_, err := w.doPost(ctx, fmt.Sprintf("/api/v1/workers/%s/runs/%s/complete", w.workerID, runID), payload)
-	if err != nil {
-		log.Printf("[worker] failed to report completion for run %s: %v", runID, err)
+	sort.Strings(local)
+	sort.Strings(remote)
+	if strings.Join(local, "\x00") != strings.Join(remote, "\x00") {
+		return fmt.Errorf("worker: registered graph differs from local nodes")
 	}
-
-	w.runCount.mu.Lock()
-	w.runCount.completed++
-	w.runCount.mu.Unlock()
-
-	log.Printf("[worker] run %s completed", runID)
-}
-
-// failRun reports a failed run to the control plane.
-func (w *Worker[S]) failRun(ctx context.Context, runID string, errMsg string) {
-	payload := map[string]interface{}{
-		"status": "failed",
-		"error":  errMsg,
-	}
-	_, err := w.doPost(ctx, fmt.Sprintf("/api/v1/workers/%s/runs/%s/complete", w.workerID, runID), payload)
-	if err != nil {
-		log.Printf("[worker] failed to report failure for run %s: %v", runID, err)
-	}
-
-	w.sendEvent(ctx, runID, "run_failed", map[string]interface{}{"error": errMsg})
-
-	w.runCount.mu.Lock()
-	w.runCount.failed++
-	w.runCount.mu.Unlock()
-
-	log.Printf("[worker] run %s failed: %s", runID, errMsg)
-}
-
-// sendEvent sends a run event to the control plane.
-func (w *Worker[S]) sendEvent(ctx context.Context, runID, eventType string, data interface{}) {
-	payload := map[string]interface{}{
-		"event_type": eventType,
-		"run_id":     runID,
-		"data":       data,
-		"timestamp":  time.Now().UTC().Format(time.RFC3339),
-	}
-
-	_, err := w.doPost(ctx, fmt.Sprintf("/api/v1/workers/%s/events", w.workerID), payload)
-	if err != nil {
-		log.Printf("[worker] failed to send event %s for run %s: %v", eventType, runID, err)
-	}
-}
-
-// setStatus sets the worker status with proper synchronization.
-func (w *Worker[S]) setStatus(s Status) {
-	w.statusMu.Lock()
-	w.status = s
-	w.statusMu.Unlock()
-}
-
-// getStatus returns the current worker status with proper synchronization.
-func (w *Worker[S]) getStatus() Status {
-	w.statusMu.RLock()
-	defer w.statusMu.RUnlock()
-	return w.status
-}
-
-// shutdown performs graceful shutdown.
-func (w *Worker[S]) shutdown() {
-	w.setStatus(StatusDraining)
-
-	// Send a draining heartbeat
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	w.heartbeat(ctx)
-	cancel()
-
-	// Wait for active runs with timeout
-	done := make(chan struct{})
-	go func() {
-		w.activeRuns.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		log.Printf("[worker] all runs completed")
-	case <-time.After(w.config.shutdownTimeout):
-		log.Printf("[worker] shutdown timeout, some runs may be abandoned")
-	}
-
-	// Clean up NATS
-	for _, sub := range w.subs {
-		if err := sub.Unsubscribe(); err != nil {
-			log.Printf("[worker] NATS unsubscribe error: %v", err)
+	localEdges := make([]string, 0)
+	for from, targets := range w.graph.Edges() {
+		for _, to := range targets {
+			localEdges = append(localEdges, from+"\x00"+to)
 		}
 	}
-	if w.nc != nil {
-		w.nc.Close()
+	remoteEdges := make([]string, 0)
+	for _, e := range definition.Edges {
+		remoteEdges = append(remoteEdges, e.Source+"\x00"+e.Target)
 	}
-
-	// Deregister
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, _ = w.doPost(ctx, fmt.Sprintf("/api/v1/workers/%s/deregister", w.workerID),
-		map[string]interface{}{"reason": "shutdown"})
-
-	w.setStatus(StatusStopped)
-	log.Printf("[worker] stopped")
+	sort.Strings(localEdges)
+	sort.Strings(remoteEdges)
+	if strings.Join(localEdges, "\x01") != strings.Join(remoteEdges, "\x01") {
+		return fmt.Errorf("worker: registered graph differs from local edges")
+	}
+	var state S
+	next := w.graph.Entrypoint()
+	version := 0
+	var cp checkpoint
+	checkpointPath := "/api/v1/threads/" + task.ThreadID + "/checkpoints"
+	err := w.doJSON(ctx, http.MethodGet, checkpointPath+"/latest?run_id="+url.QueryEscape(task.RunID), nil, &cp)
+	if err != nil && !isStatus(err, http.StatusNotFound) {
+		return err
+	}
+	if err == nil {
+		var saved walkState[S]
+		if e := json.Unmarshal(cp.State, &saved); e != nil {
+			return fmt.Errorf("worker: checkpoint format incompatible: %w", e)
+		}
+		state, next, version = saved.State, saved.Next, cp.Version
+	} else if task.CheckpointID != nil {
+		if e := w.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/%d", checkpointPath, *task.CheckpointID), nil, &cp); e != nil {
+			return e
+		}
+		var saved walkState[S]
+		if e := json.Unmarshal(cp.State, &saved); e != nil {
+			return fmt.Errorf("worker: checkpoint format incompatible: %w", e)
+		}
+		state, next, version = saved.State, saved.Next, cp.Version
+	} else if len(task.Input) > 0 {
+		if err := json.Unmarshal(task.Input, &state); err != nil {
+			return fmt.Errorf("worker: decode input: %w", err)
+		}
+	}
+	if len(task.Resume) > 0 {
+		return fmt.Errorf("worker: run.resumed command requires an interpreter with HITL support")
+	}
+	if next != "" {
+		result, execErr := w.graph.RunFrom(ctx, state, next, func(node, nodeType string) error {
+			return w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_started", "lease_epoch": epoch, "node_id": node, "node_type": wireNodeType(nodeType), "node_status": "started"}}, nil)
+		}, func(node, nodeType string, current S, following string) error {
+			encoded, err := json.Marshal(walkState[S]{State: current, Next: following})
+			if err != nil {
+				return err
+			}
+			version++
+			var written struct {
+				CheckpointID int64 `json:"checkpoint_id"`
+			}
+			if err := w.doJSON(ctx, http.MethodPost, checkpointPath, map[string]any{"run_id": task.RunID, "lease_epoch": epoch, "version": version, "state": json.RawMessage(encoded)}, &written); err != nil {
+				return err
+			}
+			return w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_completed", "lease_epoch": epoch, "node_id": node, "node_type": wireNodeType(nodeType), "node_status": "completed"}}, nil)
+		})
+		if execErr != nil {
+			if errors.Is(execErr, ErrStaleLease) || ctx.Err() != nil {
+				return execErr
+			}
+			// Transport failures must be redelivered, not recorded as poison runs.
+			var nodeErr *graph.ExecutionError
+			if !errors.As(execErr, &nodeErr) {
+				return execErr
+			}
+			if err := w.sendEvents(ctx, path, []any{map[string]any{"type": "execution.node_failed", "lease_epoch": epoch, "node_id": nodeErr.Node, "node_type": wireNodeType(nodeErr.NodeType), "node_status": "failed", "error": nodeErr.Err.Error()}}, nil); err != nil {
+				return err
+			}
+			if err := w.sendEvents(ctx, path, []any{map[string]any{"type": "run.failed", "lease_epoch": epoch, "error": execErr.Error()}}, nil); err != nil {
+				return err
+			}
+			w.countMu.Lock()
+			w.failed++
+			w.countMu.Unlock()
+			return nil
+		}
+		state = result
+	}
+	output, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := w.sendEvents(ctx, path, []any{map[string]any{"type": "run.completed", "lease_epoch": epoch, "output": json.RawMessage(output)}}, nil); err != nil {
+		return err
+	}
+	w.countMu.Lock()
+	w.completed++
+	w.countMu.Unlock()
+	return nil
 }
 
-// doPost sends a JSON POST request to the control plane.
-func (w *Worker[S]) doPost(ctx context.Context, path string, payload interface{}) ([]byte, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal: %w", err)
+// wireNodeType maps local Go graph types to execution_history's node_type
+// constraint. A compiled Go function or custom node executes as a tool;
+// router nodes are conditional. The registered graph still carries its
+// original node type for visualization.
+func wireNodeType(local string) string {
+	switch local {
+	case "start", "end", "llm", "tool", "conditional", "human":
+		return local
+	case "router":
+		return "conditional"
+	default:
+		return "tool"
 	}
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		w.config.controlPlane+path, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("request: %w", err)
+func (w *Worker[S]) sendEvents(ctx context.Context, path string, events []any, out any) error {
+	return w.doJSON(ctx, http.MethodPost, path, map[string]any{"events": events}, out)
+}
+func (w *Worker[S]) workerPath() string { return "/api/v1/workers/" + w.workerID }
+func (w *Worker[S]) setStatus(s Status) { w.statusMu.Lock(); w.status = s; w.statusMu.Unlock() }
+
+type apiError struct {
+	code int
+	body string
+}
+
+func (e *apiError) Error() string       { return fmt.Sprintf("worker: HTTP %d: %s", e.code, e.body) }
+func isStatus(err error, code int) bool { var e *apiError; return errors.As(err, &e) && e.code == code }
+
+func (w *Worker[S]) doJSON(ctx context.Context, method, path string, payload, out any) error {
+	var reader io.Reader
+	if payload != nil {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("worker: marshal request: %w", err)
+		}
+		reader = bytes.NewReader(data)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req, err := http.NewRequestWithContext(ctx, method, w.config.controlPlane+path, reader)
+	if err != nil {
+		return fmt.Errorf("worker: request: %w", err)
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if w.config.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+w.config.apiKey)
 	}
-
-	resp, err := w.httpClient.Do(req)
+	resp, err := w.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("http: %w", err)
+		return fmt.Errorf("worker: %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
+		return fmt.Errorf("worker: read response: %w", err)
 	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))
+	if resp.StatusCode == http.StatusConflict {
+		return ErrStaleLease
 	}
-
-	return respBody, nil
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &apiError{resp.StatusCode, string(body)}
+	}
+	if out != nil {
+		if len(body) == 0 {
+			return fmt.Errorf("worker: empty response for %s", path)
+		}
+		if err := json.Unmarshal(body, out); err != nil {
+			return fmt.Errorf("worker: decode response: %w", err)
+		}
+	}
+	return nil
 }

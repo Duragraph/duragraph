@@ -396,7 +396,7 @@ func (c *Client) WaitForRun(ctx context.Context, threadID, runID string, pollInt
 			return nil, err
 		}
 		switch r.Status {
-		case "completed", "failed", "canceled":
+		case "success", "error", "timeout", "completed", "failed", "canceled":
 			return r, nil
 		}
 		select {
