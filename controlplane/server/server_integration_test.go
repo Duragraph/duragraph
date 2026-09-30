@@ -172,6 +172,45 @@ func resetTables(t *testing.T) {
 	}
 }
 
+func TestServerPlatformRequiresJWTSecret(t *testing.T) {
+	t.Setenv("DURAGRAPH_JWT_SECRET", "")
+	ctx := context.Background()
+	// Reject before opening pools or attempting migrations, not merely when a
+	// request reaches /api/admin. A platform-free tenant server remains usable.
+	_, err := dgserver.New(ctx, dgserver.Config{
+		TenantDSN: tenantDSN, PlatformDSN: "invalid platform dsn", Migrate: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "JWTSecret") {
+		t.Fatalf("platform with no secret: want JWTSecret error, got %v", err)
+	}
+
+	withoutPlatform, err := dgserver.New(ctx, dgserver.Config{TenantDSN: tenantDSN})
+	if err != nil {
+		t.Fatalf("tenant-only server should start without secret: %v", err)
+	}
+	withoutPlatform.Close()
+
+	for _, tc := range []struct {
+		name   string
+		secret []byte
+		env    string
+	}{
+		{"config secret", []byte("admin-test-secret"), ""},
+		{"environment secret", nil, "admin-test-secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DURAGRAPH_JWT_SECRET", tc.env)
+			srv, err := dgserver.New(ctx, dgserver.Config{
+				TenantDSN: tenantDSN, PlatformDSN: tenantDSN, JWTSecret: tc.secret,
+			})
+			if err != nil {
+				t.Fatalf("platform with secret should start: %v", err)
+			}
+			srv.Close()
+		})
+	}
+}
+
 // waitForListen polls the addr until it accepts a TCP connection or
 // the deadline passes. Gives the server a moment to bind before HTTP
 // requests go out.

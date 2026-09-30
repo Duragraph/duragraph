@@ -52,15 +52,12 @@ type Config struct {
 
 	// PlatformDSN is the Postgres DSN for the shared platform database
 	// (users, tenants). Optional — without it the auth/admin/platform
-	// groups return 500, but the rest still works for a single-tenant
-	// bootstrap.
+	// groups cannot access platform data, but the rest still works for a
+	// single-tenant bootstrap. Requires JWTSecret when set.
 	PlatformDSN string
 
-	// JWTSecret is the HMAC key for platform session tokens. Empty leaves
-	// the platform surface (/api/auth, /api/platform, /api/admin) unable
-	// to mint or verify sessions: auth answers 503 and /me answers 401,
-	// rather than signing with an empty key that any other unconfigured
-	// deployment could forge. Read from DURAGRAPH_JWT_SECRET when unset.
+	// JWTSecret is the HMAC key for platform session tokens. Required when
+	// PlatformDSN is set. Read from DURAGRAPH_JWT_SECRET when unset.
 	JWTSecret []byte
 
 	// BaseURL is the canonical external origin (scheme + host), used for
@@ -158,6 +155,15 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	cfg.defaults()
 	if cfg.TenantDSN == "" {
 		return nil, errors.New("server: TenantDSN is required")
+	}
+	// Validate before opening pools or starting migrations. Platform routes
+	// must never be served with no key to authenticate administrators.
+	jwtSecret := cfg.JWTSecret
+	if len(jwtSecret) == 0 {
+		jwtSecret = []byte(os.Getenv("DURAGRAPH_JWT_SECRET"))
+	}
+	if cfg.PlatformDSN != "" && len(jwtSecret) == 0 {
+		return nil, errors.New("server: PlatformDSN requires JWTSecret (set DURAGRAPH_JWT_SECRET)")
 	}
 
 	s := &Server{
@@ -271,12 +277,8 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	e.Server.IdleTimeout = 60 * time.Second
 	s.echo = e
 
-	// Environment fallbacks for the platform session settings. Config wins when
-	// set explicitly (tests, embedding); the env vars are the deployment path.
-	jwtSecret := cfg.JWTSecret
-	if len(jwtSecret) == 0 {
-		jwtSecret = []byte(os.Getenv("DURAGRAPH_JWT_SECRET"))
-	}
+	// Remaining environment fallbacks for platform session settings. Config
+	// wins when set explicitly (tests, embedding); env is the deployment path.
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		baseURL = os.Getenv("DURAGRAPH_BASE_URL")
@@ -289,13 +291,6 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	if !cookieSecure {
 		cookieSecure = os.Getenv("DURAGRAPH_COOKIE_SECURE") == "true"
 	}
-	if len(jwtSecret) == 0 {
-		// Loud, because the failure mode is otherwise silent: every login
-		// answers 503 and it looks like the provider is down.
-		slog.Warn("platform session secret is not set; /api/auth, /api/platform and /api/admin " +
-			"cannot establish sessions (set DURAGRAPH_JWT_SECRET)")
-	}
-
 	ep := &endpoints.Server{
 		Tenant:     s.tenant,
 		Platform:   s.plat,
