@@ -4,9 +4,8 @@ import "testing"
 
 // TestSelectedControlPlane covers the switch that decides which control
 // plane `serve` runs. The default must stay legacy: the rebuilt stack does
-// not yet serve password auth, /health, /mcp or the assistant
-// schema/subgraph endpoints, so defaulting to it would silently drop
-// routes that deployments depend on.
+// not yet serve /mcp or the assistant schema/subgraph endpoints, so
+// defaulting to it would silently drop routes that deployments depend on.
 func TestSelectedControlPlane(t *testing.T) {
 	tests := []struct {
 		name    string

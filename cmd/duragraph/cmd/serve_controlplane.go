@@ -10,21 +10,18 @@ package cmd
 // weight in the repo.
 //
 // WHY THIS IS OPT-IN RATHER THAN A SWAP. The two stacks do not serve the
-// same surface. Comparing routes, the rebuild is missing sixteen that the
+// same surface. Comparing routes, the rebuild still lacks routes that the
 // legacy server answers today, including:
 //
-//	POST /api/auth/register, POST /api/auth/login   (password auth —
-//	                                                 shipped and documented)
-//	GET  /health                                    (container/k8s probes)
 //	GET  /assistants/{id}/schemas, …/subgraphs      (declared in api.d2)
 //	POST /mcp
-//	the legacy poll-based worker protocol
 //
-// Flipping the default would silently delete those. So `--control-plane`
-// selects, the default stays legacy, and the gap is closed before the
-// default moves. Making it reachable is worth doing now regardless: an
-// opt-in path can be deployed, exercised, and fixed, whereas unreachable
-// code cannot.
+// Published workers also still need migration to v2 claim/push; legacy
+// polling is retired and will not be restored in v2. Flipping the default
+// would silently delete the routes above. So `--control-plane` selects,
+// the default stays legacy until these gaps are addressed. Making v2
+// reachable is worth doing now regardless: an opt-in path can be deployed,
+// exercised, and fixed, whereas unreachable code cannot.
 
 import (
 	"context"
@@ -49,7 +46,7 @@ func init() {
 	serveCmd.Flags().StringVar(&controlPlaneFlag, "control-plane", "",
 		`which control-plane implementation to run: "legacy" (default) or "v2".
 "v2" is the rebuilt control plane. It is not yet a drop-in replacement —
-password auth, /health, /mcp and the assistant schema/subgraph endpoints
+/mcp and the assistant schema/subgraph endpoints
 are not implemented there yet. Also settable via DURAGRAPH_CONTROL_PLANE.`)
 }
 

@@ -1,8 +1,8 @@
 // Hand-written system endpoints (health/info/metrics). Not generated and not
-// under /api/v1 — RegisterSystem mounts on the ROOT Echo instance because the
-// spec paths are root-level (/ok, /info, /metrics) and the dashboard auth gate
-// expects /info at root. Source of truth: spec/models/d2/endpoint-queries.d2
-// (system_ep).
+// under /api/v1 — RegisterSystem mounts on the ROOT Echo instance. /health
+// preserves the legacy probe; /ok, /info, /metrics are root-level spec paths,
+// and the dashboard auth gate expects /info at root. Source of truth for the
+// spec paths: spec/models/d2/endpoint-queries.d2 (system_ep).
 package endpoints
 
 import (
@@ -22,11 +22,21 @@ var (
 // processStart anchors /info uptime; captured at process start.
 var processStart = time.Now()
 
-// RegisterSystem mounts /ok, /info, /metrics on the root Echo instance.
+// RegisterSystem mounts /health, /ok, /info, /metrics on the root Echo instance.
 func (s *Server) RegisterSystem(e *echo.Echo) {
+	e.GET("/health", s.SystemHealth)
 	e.GET("/ok", s.SystemOK)
 	e.GET("/info", s.SystemInfo)
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
+}
+
+// SystemHealth is the legacy liveness probe. Keep its response independent
+// of the database: /ok is the separate DB-backed readiness probe.
+func (s *Server) SystemHealth(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{
+		"status":  "healthy",
+		"version": "2.0.0-ddd",
+	})
 }
 
 // SystemOK is the readiness probe: DB reachable -> 200, else 503.
