@@ -326,7 +326,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	ep.RegisterPlatform(root)
 	ep.RegisterAdmin(root)
 
-	ep.RegisterSystem(e) // root-level: /ok, /info, /metrics
+	ep.RegisterSystem(e) // root-level: /health, /ok, /info, /metrics
 
 	// The embedded React dashboard. Without it the rebuilt control plane
 	// serves the API and nothing at "/" — the entire UI missing, which a
